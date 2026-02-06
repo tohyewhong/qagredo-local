@@ -1,0 +1,129 @@
+# Two-container setup for a single offline server:
+# - vLLM serves an OpenAI-compatible API on http://localhost:8100/v1
+# - QAGRedo runs the pipeline and calls vLLM via http://vllm:8100/v1
+#
+# Host folder layout (on the machine running docker compose):
+#   ${QAGREDO_HOST_DIR}/
+#     config/        (your single config.yaml)
+#     data/          (input JSON/JSONL)
+#     output/        (generated results)
+#     models_llm/    (LLM weights folders for vLLM; e.g. Meta-Llama-3.1-8B-Instruct/)
+#     models_embed/  (embedding models for sentence-transformers; e.g. all-MiniLM-L6-v2/)
+#     hf_cache/      (HF cache; mounted to /opt/hf_cache in qagredo)
+#
+# Usage:
+#   export QAGREDO_HOST_DIR=~/qagredo_host
+#   export VLLM_MODEL=/models/Meta-Llama-3.1-8B-Instruct   # or /models/Qwen2.5-7B-Instruct
+#   docker compose -f docker-compose.offline.yml up -d vllm
+#   docker compose -f docker-compose.offline.yml run --rm qagredo
+
+name: qagredo_offline
+
+services:
+  vllm:
+    # Pin vLLM image to a tag compatible with your NVIDIA driver.
+    # Your host driver is 535.x (CUDA 12.2). vLLM images built on CUDA 12.4+ can
+    # crash at runtime with "cudaGetDeviceCount ... Error 804".
+    #
+    # Override if needed:
+    #   export VLLM_IMAGE=vllm/vllm-openai:<tag>
+    image: ${VLLM_IMAGE:-vllm/vllm-openai:v0.5.3.post1}
+    container_name: qagredo-vllm
+    ports:
+      - "8100:8100"
+    shm_size: "8gb"
+    environment:
+      # Optional cache path (not required if you always use local model paths under /models)
+      HF_HOME: /root/.cache/huggingface
+      TRANSFORMERS_CACHE: /root/.cache/huggingface/hub
+      HUGGINGFACE_HUB_CACHE: /root/.cache/huggingface/hub
+    volumes:
+      - ${QAGREDO_HOST_DIR:-./qagredo_host}/models_llm:/models:ro
+      - ${QAGREDO_HOST_DIR:-./qagredo_host}/hf_cache:/root/.cache/huggingface:rw
+    # vllm/vllm-openai images already set the entrypoint to the API server,
+    # so we only pass the server arguments here (not "python -m ...").
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8100"
+      - --model
+      - ${VLLM_MODEL:-/models/Meta-Llama-3.1-8B-Instruct}
+      # Make the OpenAI "model" name stable and human-friendly.
+      # QAGRedo sends config.llm.model (e.g. "meta-llama/Meta-Llama-3.1-8B-Instruct").
+      # Without this, vLLM may expose the model ID as a local path and QAGRedo will get 404.
+      - --served-model-name
+      - ${VLLM_SERVED_MODEL_NAME:-meta-llama/Meta-Llama-3.1-8B-Instruct}
+      - --tensor-parallel-size
+      - ${VLLM_TP_SIZE:-2}
+      - --dtype
+      - half
+      - --max-model-len
+      - ${VLLM_MAX_MODEL_LEN:-2048}
+      - --gpu-memory-utilization
+      - ${VLLM_GPU_UTIL:-0.85}
+      - --api-key
+      - ${VLLM_API_KEY:-llama-local}
+      - --trust-remote-code
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 2
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "curl -sf http://localhost:8100/health >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+      start_period: 10s
+
+  qagredo:
+    # Build on an internet machine, then `docker save` and transfer for offline use.
+    # You can also skip build here and just `docker load` the prebuilt image.
+    image: qagredo-v1:latest
+    # Runs as the image default user (jupyter `jovyan` in Dockerfile).
+    # Ensure your host folders under ${QAGREDO_HOST_DIR} are readable/writable as needed.
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        UID: "1001"
+        GID: "1001"
+        USERNAME: "qagredo"
+    container_name: qagredo-runner
+    depends_on:
+      vllm:
+        condition: service_healthy
+    environment:
+      OFFLINE_MODE: "1"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      PYDANTIC_DISABLE_PLUGIN_LOADING: "1"
+      # Prefer a direct local embedding model path (more reliable than HF cache layout)
+      SENTENCE_TRANSFORMERS_MODEL_PATH: "/opt/models_embed/all-MiniLM-L6-v2"
+      # Ensure the runner calls the vLLM container over the docker network
+      VLLM_BASE_URL: "http://vllm:8100/v1"
+      # Ensure the runner's API key matches the vLLM server
+      VLLM_API_KEY: ${VLLM_API_KEY:-llama-local}
+    volumes:
+      - ${QAGREDO_HOST_DIR:-./qagredo_host}/config:/workspace/config:rw
+      - ${QAGREDO_HOST_DIR:-./qagredo_host}/data:/workspace/data:rw
+      - ${QAGREDO_HOST_DIR:-./qagredo_host}/output:/workspace/output:rw
+      - ${QAGREDO_HOST_DIR:-./qagredo_host}/hf_cache:/opt/hf_cache:rw
+      - ${QAGREDO_HOST_DIR:-./qagredo_host}/models_embed:/opt/models_embed:ro
+    command:
+      - bash
+      - -lc
+      - |
+        echo "[INFO] Waiting for vLLM to be ready at http://vllm:8100/health ..."
+        for i in $(seq 1 120); do
+          if curl -sf http://vllm:8100/health >/dev/null; then
+            echo "[OK] vLLM is ready"
+            break
+          fi
+          sleep 2
+        done
+        python /workspace/run_qa_pipeline.py
+

@@ -1,0 +1,51 @@
+# I realise that this package is already default as jovyan so for ease just keep it 
+FROM jupyter/base-notebook:python-3.10
+
+# change to install stuff
+USER root
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    git \
+    curl \
+    ca-certificates \
+    sudo \
+    libffi-dev \
+    libssl-dev \
+    tmux \
+    vim \
+    && rm -rf /var/lib/apt/lists/*
+
+# copy the files (not optimised but did ot want to break anything)
+WORKDIR /app/
+
+COPY certbundle /app/certbundle
+COPY requirements.txt .
+COPY run_qa_pipeline.py .
+COPY utils .
+COPY scripts .
+COPY config .
+COPY README.md .
+
+# install the certificates
+RUN mkdir -p /usr/local/share/ca-certificates && \
+    cp /app/certbundle/certbundle.crt /usr/local/share/ca-certificates/certbundle.crt && \
+    update-ca-certificates && \
+    pip config set global.cert /usr/local/share/ca-certificates/certbundle.crt
+
+# set ownership
+RUN chown -R jovyan:users /app
+USER jovyan
+
+# install the requirements
+RUN pip install --no-cache-dir -r requirements.txt
+
+EXPOSE 8888
+
+# start jupyter lab or change to whatever you want
+CMD ["jupyter", "lab", \
+     "--ip=0.0.0.0", \
+     "--port=8888", \
+     "--no-browser", \
+     "--ServerApp.token=", \
+     "--ServerApp.password="]

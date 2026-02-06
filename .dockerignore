@@ -1,0 +1,35 @@
+# Python cache & virtual env
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Cursor / editor
+.cursor/
+
+# Git
+.git/
+.gitignore
+
+# Logs & outputs
+logs/
+output/
+examples/
+docs_archive/
+
+# Tests (not needed in image)
+scripts/test_runners/
+scripts/tests/
+tests/
+
+# Local data (if not required at runtime)
+# Note: models/ directory IS included for offline builds (sentence-transformers + LLM models)
+
+# Environment files
+.env
+.env.*
+
+# Large/offline-only artifacts (keep build context small)
+*.tar
+*.tar.gz
+*.zip

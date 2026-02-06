@@ -1,0 +1,76 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment variables
+.env
+.env.local
+
+# Keys / certs
+*.key
+*.pem
+certbundle/*.crt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+*.log
+
+# Local model assets (keep out of git)
+models/
+qagredo_host/
+
+# Output files (generated results)
+output/
+
+# Log files directory
+logs/
+*.txt
+!requirements.txt
+!README.md
+
+# Build artifacts and standalone packages
+*.zip
+*.tar.gz
+*.tar
+*.tar.zst
+*.sha256
+python_packages/
+qagredo_standalone_*/
+*_standalone_*.zip
+Miniforge3.sh
+
+# Temporary test data files
+data/samplepress.*
+
+qagredo/
