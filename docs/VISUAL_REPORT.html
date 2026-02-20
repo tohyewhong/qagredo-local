@@ -1,0 +1,1893 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QAGRedo — Visual Algorithm &amp; Workflow Report</title>
+<style>
+  :root {
+    --blue: #2563eb; --blue-light: #dbeafe; --blue-dark: #1e40af;
+    --green: #16a34a; --green-light: #dcfce7;
+    --orange: #ea580c; --orange-light: #ffedd5;
+    --red: #dc2626; --red-light: #fee2e2;
+    --purple: #7c3aed; --purple-light: #ede9fe;
+    --teal: #0d9488; --teal-light: #ccfbf1;
+    --yellow: #ca8a04; --yellow-light: #fef3c7;
+    --gray: #6b7280; --gray-light: #f3f4f6; --gray-dark: #374151;
+    --bg: #ffffff; --text: #1f2937;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; color: var(--text); background: var(--bg); line-height: 1.6; }
+  .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+  h1 { font-size: 2.2rem; color: var(--blue-dark); border-bottom: 3px solid var(--blue); padding-bottom: 0.5rem; margin-bottom: 1.5rem; }
+  h2 { font-size: 1.6rem; color: var(--blue-dark); margin-top: 3rem; margin-bottom: 1rem; padding-bottom: 0.3rem; border-bottom: 2px solid var(--blue-light); }
+  h3 { font-size: 1.2rem; color: var(--gray-dark); margin-top: 1.5rem; margin-bottom: 0.8rem; }
+  h4 { font-size: 1.05rem; color: var(--gray-dark); margin-top: 1rem; margin-bottom: 0.5rem; }
+  p { margin-bottom: 1rem; }
+  ul, ol { margin-bottom: 1rem; padding-left: 1.8rem; }
+  li { margin-bottom: 0.3rem; }
+  .subtitle { font-size: 1.1rem; color: var(--gray); margin-bottom: 2rem; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0 1.5rem; font-size: 0.95rem; }
+  th, td { padding: 0.6rem 1rem; text-align: left; border: 1px solid #e5e7eb; }
+  th { background: var(--blue); color: white; font-weight: 600; }
+  tr:nth-child(even) { background: var(--gray-light); }
+  .callout { padding: 1rem 1.2rem; border-radius: 8px; margin: 1rem 0 1.5rem; border-left: 4px solid; }
+  .callout-blue { background: var(--blue-light); border-color: var(--blue); }
+  .callout-green { background: var(--green-light); border-color: var(--green); }
+  .callout-orange { background: var(--orange-light); border-color: var(--orange); }
+  .callout-red { background: var(--red-light); border-color: var(--red); }
+  .callout-purple { background: var(--purple-light); border-color: var(--purple); }
+  .callout-teal { background: var(--teal-light); border-color: var(--teal); }
+  .callout b { display: block; margin-bottom: 0.3rem; }
+  code { background: #f1f5f9; padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.9em; font-family: 'Cascadia Code', 'Fira Code', monospace; }
+  pre { background: #1e293b; color: #e2e8f0; padding: 1rem 1.2rem; border-radius: 8px; overflow-x: auto; margin: 1rem 0; font-size: 0.85rem; line-height: 1.5; }
+  pre code { background: none; padding: 0; color: inherit; }
+  .badge { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.8rem; font-weight: 600; color: white; }
+  .badge-blue { background: var(--blue); }
+  .badge-green { background: var(--green); }
+  .badge-orange { background: var(--orange); }
+  .badge-red { background: var(--red); }
+  .badge-purple { background: var(--purple); }
+  .badge-teal { background: var(--teal); }
+  .diagram { margin: 1.5rem 0; overflow-x: auto; }
+  .diagram svg { display: block; margin: 0 auto; }
+  .diagram-caption { text-align: center; font-size: 0.9rem; color: var(--gray); margin-top: 0.5rem; font-style: italic; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 1rem 0; }
+  @media (max-width: 768px) { .two-col { grid-template-columns: 1fr; } }
+  .col-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 1.2rem; background: white; }
+  .col-card h4 { margin-bottom: 0.5rem; color: var(--blue-dark); }
+  .check { color: var(--green); font-weight: 700; }
+  .cross { color: var(--red); font-weight: 700; }
+  .grade-bar { display: flex; align-items: center; margin: 0.4rem 0; }
+  .grade-label { width: 30px; font-weight: 700; font-size: 1.1rem; }
+  .grade-fill { height: 28px; border-radius: 4px; display: flex; align-items: center; padding-left: 0.5rem; color: white; font-size: 0.85rem; font-weight: 600; }
+  .grade-range { margin-left: 0.5rem; font-size: 0.85rem; color: var(--gray); }
+  .seq-diagram { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 1rem; margin: 1rem 0; overflow-x: auto; }
+  @media print {
+    .container { max-width: 100%; padding: 1rem; }
+    h2 { page-break-before: always; }
+    .seq-diagram, .diagram, table, .two-col { page-break-inside: avoid; }
+  }
+  .toc { background: var(--gray-light); padding: 1.5rem 2rem; border-radius: 10px; margin: 1.5rem 0; }
+  .toc h3 { margin-top: 0; }
+  .toc ol { padding-left: 1.5rem; }
+  .toc li { margin: 0.3rem 0; }
+  .toc a { color: var(--blue); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .file-ref { font-family: monospace; font-size: 0.85em; color: var(--teal); background: var(--teal-light); padding: 0.1rem 0.4rem; border-radius: 3px; }
+  .part-header { font-size: 1.1rem; font-weight: 700; color: var(--purple); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 2.5rem; margin-bottom: 0.3rem; padding: 0.3rem 0.6rem; background: var(--purple-light); border-radius: 6px; display: inline-block; }
+  .tree-file { font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 0.88rem; }
+  .tree-folder { font-weight: 700; color: var(--blue-dark); }
+  .tree-desc { color: var(--gray); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>QAGRedo &mdash; Visual Algorithm &amp; Workflow Report</h1>
+<p class="subtitle">Question-Answer Generation with Grounding Verification &mdash; Detailed design, algorithms, project structure, code sequences, and rationale</p>
+
+<!-- ======================= TABLE OF CONTENTS ======================= -->
+<div class="toc">
+  <h3>Contents</h3>
+  <p style="font-size:0.9rem; color:#6b7280; margin-bottom:0.8rem;">Organised into five logical parts: Overview &rarr; Architecture &rarr; Algorithms &rarr; Output &amp; Config &rarr; Appendix</p>
+  <ol>
+    <!-- Part A -->
+    <li style="margin-top:0.8rem;"><strong style="color:#7c3aed;">PART A &mdash; OVERVIEW</strong></li>
+    <li><a href="#purpose">1. Purpose &amp; Executive Summary</a></li>
+    <li><a href="#pipeline-overview">2. Pipeline Overview (4 stages)</a></li>
+    <li><a href="#project-structure">3. Project Structure &amp; File Map</a></li>
+    <!-- Part B -->
+    <li style="margin-top:0.8rem;"><strong style="color:#7c3aed;">PART B &mdash; SYSTEM ARCHITECTURE</strong></li>
+    <li><a href="#architecture">4. Docker Architecture (Three Containers)</a></li>
+    <li><a href="#seq-host">5. Sequence: Host Execution Flow (<code>bash run.sh</code>)</a></li>
+    <li><a href="#permissions">6. Permission Model (Three Layers)</a></li>
+    <li><a href="#seq-entrypoint">7. Sequence: Container Entrypoint</a></li>
+    <!-- Part C -->
+    <li style="margin-top:0.8rem;"><strong style="color:#7c3aed;">PART C &mdash; PIPELINE ALGORITHMS</strong></li>
+    <li><a href="#seq-pipeline">8. Sequence: Pipeline Code Execution</a></li>
+    <li><a href="#question-gen">9. Question Generation &mdash; Deep Dive</a></li>
+    <li><a href="#seq-question">10. Sequence: Question Generation Code</a></li>
+    <li><a href="#answer-gen">11. Answer Generation &mdash; Deep Dive</a></li>
+    <li><a href="#seq-answer">12. Sequence: Answer Generation Code</a></li>
+    <li><a href="#hallucination">13. Hallucination Checking &amp; Grading</a></li>
+    <li><a href="#seq-grading">14. Sequence: Hybrid Grading Code</a></li>
+    <li><a href="#hybrid">15. Hybrid Method &mdash; Why It Works</a></li>
+    <!-- Part D -->
+    <li style="margin-top:0.8rem;"><strong style="color:#7c3aed;">PART D &mdash; OUTPUT &amp; CONFIGURATION</strong></li>
+    <li><a href="#output">16. Output Management</a></li>
+    <li><a href="#config">17. Configuration Reference</a></li>
+    <li><a href="#models">18. Models Used</a></li>
+    <!-- Part E -->
+    <li style="margin-top:0.8rem;"><strong style="color:#7c3aed;">PART E &mdash; APPENDIX</strong></li>
+    <li><a href="#decisions">19. Design Decisions Summary</a></li>
+    <li><a href="#agentic">20. Agentic Classification</a></li>
+  </ol>
+</div>
+
+<!-- ================================================================ -->
+<!-- ====  PART A: OVERVIEW  ======================================= -->
+<!-- ================================================================ -->
+<div class="part-header">Part A &mdash; Overview</div>
+
+<h2 id="purpose">1. Purpose &amp; Executive Summary</h2>
+
+<p><strong>QAGRedo</strong> (Question-Answer Generation with Grounding Verification) is a fully-offline, air-gapped system that:</p>
+<ol>
+  <li><strong>Reads</strong> structured documents (JSONL format).</li>
+  <li><strong>Generates</strong> complex, multi-step questions about each document using an LLM.</li>
+  <li><strong>Generates</strong> grounded answers with supporting evidence from the document.</li>
+  <li><strong>Grades</strong> each answer for hallucination using a hybrid semantic + LLM-as-judge approach.</li>
+  <li><strong>Outputs</strong> timestamped, auditable JSON results with detailed grading reasons.</li>
+</ol>
+
+<div class="callout callout-blue">
+  <b>Key differentiators</b>
+  <ul>
+    <li><strong>Dual-LLM architecture</strong> &mdash; Llama generates Q&amp;A; Qwen is the independent LLM-as-judge. Avoids self-evaluation bias (same model generating and judging).</li>
+    <li><strong>10 question types</strong> spanning Bloom&rsquo;s Taxonomy (analysis through counterfactual) &mdash; not just simple fact lookup.</li>
+    <li><strong>Hybrid hallucination grading</strong> &mdash; fast MiniLM semantic check first, independent LLM-as-judge (Qwen) fallback only when needed.</li>
+    <li><strong>Structured answers</strong> with supporting evidence quotes for full audit trail.</li>
+    <li><strong>Fully offline</strong> &mdash; runs entirely inside Docker on an air-gapped server with no internet.</li>
+    <li><strong>Three-layer permission model</strong> &mdash; all output files are owned by the host user (no sudo needed).</li>
+  </ul>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="pipeline-overview">2. Pipeline Overview</h2>
+<p>QAGRedo processes documents through <strong>four stages</strong>. Each stage is designed to maximise factual grounding while minimising hallucination.</p>
+
+<div class="diagram">
+<svg viewBox="0 0 920 660" width="920" height="660" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker>
+    <marker id="arrowG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#16a34a"/></marker>
+    <marker id="arrowR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#dc2626"/></marker>
+    <marker id="arrowB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb"/></marker>
+  </defs>
+  <rect x="340" y="8" width="240" height="46" rx="8" fill="#f1f5f9" stroke="#94a3b8" stroke-width="2"/>
+  <text x="460" y="38" text-anchor="middle" font-size="14" font-weight="600" fill="#374151">Input Documents (JSONL)</text>
+  <line x1="460" y1="54" x2="460" y2="90" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Stage 1 -->
+  <rect x="220" y="90" width="480" height="115" rx="12" fill="#dbeafe" stroke="#2563eb" stroke-width="2.5"/>
+  <text x="240" y="115" font-size="14" font-weight="700" fill="#1e40af">Stage 1: Question Generation</text>
+  <text x="240" y="135" font-size="11.5" fill="#374151">&#x2022; 10 question types (Bloom&apos;s Taxonomy: analysis &rarr; counterfactual)</text>
+  <text x="240" y="152" font-size="11.5" fill="#374151">&#x2022; Few-shot examples (8 good + 4 bad patterns in prompt)</text>
+  <text x="240" y="169" font-size="11.5" fill="#374151">&#x2022; Deduplication via MiniLM cosine similarity (threshold 0.85)</text>
+  <text x="240" y="186" font-size="11.5" fill="#374151">&#x2022; Validation: semantic grounding check + up to 2 retries</text>
+  <rect x="618" y="96" width="72" height="22" rx="10" fill="#2563eb"/>
+  <text x="654" y="111" text-anchor="middle" font-size="10" fill="white" font-weight="600">LLM</text>
+  <text x="620" y="135" font-size="10" fill="#6b7280">temp = 0.7</text>
+  <text x="620" y="150" font-size="10" fill="#6b7280">(diversity)</text>
+  <line x1="460" y1="205" x2="460" y2="245" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="470" y="230" font-size="10.5" fill="#6b7280">validated, deduplicated questions</text>
+
+  <!-- Stage 2 -->
+  <rect x="220" y="245" width="480" height="115" rx="12" fill="#dcfce7" stroke="#16a34a" stroke-width="2.5"/>
+  <text x="240" y="270" font-size="14" font-weight="700" fill="#166534">Stage 2: Answer Generation</text>
+  <text x="240" y="290" font-size="11.5" fill="#374151">&#x2022; Structured format: Answer + Supporting Evidence</text>
+  <text x="240" y="307" font-size="11.5" fill="#374151">&#x2022; &quot;List items before counting&quot; (improves aggregation by ~30%)</text>
+  <text x="240" y="324" font-size="11.5" fill="#374151">&#x2022; Validation: hybrid grounding check + up to 3 retries</text>
+  <text x="240" y="341" font-size="11.5" fill="#374151">&#x2022; Evidence saved alongside answers for audit trail</text>
+  <rect x="618" y="251" width="72" height="22" rx="10" fill="#16a34a"/>
+  <text x="654" y="266" text-anchor="middle" font-size="10" fill="white" font-weight="600">LLM</text>
+  <text x="620" y="290" font-size="10" fill="#6b7280">temp = 0.3</text>
+  <text x="620" y="305" font-size="10" fill="#6b7280">(factual)</text>
+  <line x1="460" y1="360" x2="460" y2="400" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="470" y="385" font-size="10.5" fill="#6b7280">answers + supporting evidence</text>
+
+  <!-- Stage 3 -->
+  <rect x="220" y="400" width="480" height="115" rx="12" fill="#ede9fe" stroke="#7c3aed" stroke-width="2.5"/>
+  <text x="240" y="425" font-size="14" font-weight="700" fill="#5b21b6">Stage 3: Hallucination Grading</text>
+  <text x="240" y="445" font-size="11.5" fill="#374151">&#x2022; Pass 1: Semantic similarity with sliding window (MiniLM, CPU)</text>
+  <text x="240" y="462" font-size="11.5" fill="#374151">&#x2022; Pass 2: Independent LLM-as-judge (Qwen, port 8101) for ungrounded sentences</text>
+  <text x="240" y="479" font-size="11.5" fill="#374151">&#x2022; Grade A/B/C/D/F based on confidence (avg across Q&amp;A pairs)</text>
+  <text x="240" y="496" font-size="11.5" fill="#374151">&#x2022; Detailed reasons saved: issues, ungrounded sentences, LLM verdict</text>
+  <rect x="618" y="406" width="72" height="22" rx="10" fill="#7c3aed"/>
+  <text x="654" y="421" text-anchor="middle" font-size="10" fill="white" font-weight="600">MiniLM</text>
+  <text x="620" y="450" font-size="10" fill="#6b7280">CPU (fast)</text>
+  <rect x="618" y="462" width="72" height="22" rx="10" fill="#7c3aed"/>
+  <text x="654" y="477" text-anchor="middle" font-size="10" fill="white" font-weight="600">Qwen</text>
+  <text x="620" y="498" font-size="10" fill="#6b7280">GPU (judge, 8101)</text>
+  <line x1="460" y1="515" x2="460" y2="555" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="470" y="540" font-size="10.5" fill="#6b7280">graded results + reasons</text>
+
+  <!-- Stage 4 -->
+  <rect x="250" y="555" width="420" height="90" rx="12" fill="#ffedd5" stroke="#ea580c" stroke-width="2.5"/>
+  <text x="270" y="580" font-size="14" font-weight="700" fill="#9a3412">Stage 4: Output</text>
+  <text x="270" y="600" font-size="11.5" fill="#374151">&#x2022; Per-run timestamped folder: YYYY-MM-DD_HHMMSS</text>
+  <text x="270" y="617" font-size="11.5" fill="#374151">&#x2022; Per-document JSON with Q&amp;A, evidence, grade</text>
+  <text x="270" y="634" font-size="11.5" fill="#374151">&#x2022; Run summary with ungrounded highlights</text>
+</svg>
+<p class="diagram-caption">Figure 1 &mdash; QAGRedo end-to-end pipeline: four stages from input documents to graded output</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="project-structure">3. Project Structure &amp; File Map</h2>
+<p>The project follows a clear separation: <strong>pipeline logic</strong> lives in <code>utils/</code>, <strong>orchestration &amp; deployment</strong> in <code>scripts/</code>, and <strong>configuration</strong> in <code>config/</code>. Everything is designed to run from one bind-mounted <code>qagredo_host/</code> directory on the offline server.</p>
+
+<div class="diagram">
+<svg viewBox="0 0 960 920" width="960" height="920" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <!-- Background -->
+  <rect x="5" y="5" width="950" height="910" rx="12" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="25" y="35" font-size="16" font-weight="700" fill="#1e40af">qagredo/</text>
+  <text x="170" y="35" font-size="12" fill="#6b7280">(project root &mdash; becomes qagredo_host/ on offline server)</text>
+
+  <!-- ===== Top-level files ===== -->
+  <rect x="20" y="50" width="920" height="175" rx="8" fill="white" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="35" y="72" font-size="13" font-weight="700" fill="#1e40af">Top-Level Files</text>
+
+  <text x="40" y="94" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#ea580c">run_qa_pipeline.py</tspan> &mdash; Main entry point. Orchestrates the entire 4-stage pipeline for each document.</text>
+  <text x="40" y="112" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#ea580c">Dockerfile</tspan> &mdash; Builds the qagredo-v1 image: Python 3.10, <tspan font-weight="600">gosu</tspan> (run-as-user tool so output files are owned by host user, not root), <tspan font-weight="600">sentence-transformers</tspan> (MiniLM embedding library for semantic similarity), <tspan font-weight="600">entrypoint</tspan> (docker-entrypoint.sh: maps UID/GID, chown dirs, drops to non-root).</text>
+  <text x="40" y="130" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#ea580c">Dockerfile.airgap</tspan> &mdash; Offline variant of the Dockerfile. Uses pre-downloaded wheels from wheelhouse/.</text>
+  <text x="40" y="148" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#ea580c">docker-compose.offline.yml</tspan> &mdash; Defines three containers (vllm, vllm-judge, qagredo) with volume mounts, GPU assigned via deploy.resources.device_ids (<tspan font-weight="600">not</tspan> CUDA_VISIBLE_DEVICES &mdash; Docker maps the reserved GPU as device 0 inside the container, so setting CUDA_VISIBLE_DEVICES would cause GPU errors), networking.</text>
+  <text x="40" y="166" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#ea580c">requirements.txt</tspan> &mdash; Python dependencies (sentence-transformers, requests, pyyaml, numpy, etc.).</text>
+  <text x="40" y="184" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#ea580c">README.md</tspan> / <tspan font-weight="700" fill="#ea580c">OFFLINE_GUIDE.md</tspan> &mdash; User-facing documentation for setup, usage, and troubleshooting.</text>
+  <text x="40" y="202" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#ea580c">.env</tspan> &mdash; Environment variables (HOST_UID, HOST_GID, HF_HOME, vLLM URL). Auto-generated by setup_offline.sh (do not edit manually).</text>
+
+  <!-- ===== utils/ ===== -->
+  <rect x="20" y="240" width="920" height="235" rx="8" fill="white" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="35" y="262" font-size="13" font-weight="700" fill="#166534">utils/</text>
+  <text x="95" y="262" font-size="11" fill="#6b7280">&mdash; Core pipeline algorithms (Python modules)</text>
+
+  <text x="40" y="284" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#16a34a">question_generator.py</tspan> &mdash; Stage 1. Builds prompts with 10 question types, calls LLM, parses &amp; validates questions.</text>
+  <text x="40" y="302" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#16a34a">answer_generator.py</tspan> &mdash; Stage 2. Creates structured answer prompts (Answer + Evidence), calls LLM, validates with retries.</text>
+  <text x="40" y="320" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#16a34a">hallucination_checker.py</tspan> &mdash; Stage 3. Sentence splitting, MiniLM sliding-window similarity, LLM-as-judge (Qwen on 8101), hybrid method.</text>
+  <text x="40" y="338" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#16a34a">duplicate_detector.py</tspan> &mdash; Deduplication. Computes MiniLM cosine similarity between questions (threshold 0.85).</text>
+  <text x="40" y="356" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#16a34a">output_manager.py</tspan> &mdash; Stage 4. Timestamped folder creation (YYYY-MM-DD_HHMMSS), JSON writing, result loading.</text>
+  <text x="40" y="374" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#16a34a">config_manager.py</tspan> &mdash; Loads config.yaml, applies profiles, merges environment variable overrides, validates.</text>
+  <text x="40" y="392" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#16a34a">data_loader.py</tspan> &mdash; Reads JSONL input files, extracts document content, handles encoding and errors.</text>
+  <text x="40" y="410" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#16a34a">result_analyzer.py</tspan> &mdash; Post-processing: aggregates grades across documents, computes run-level statistics.</text>
+  <text x="40" y="428" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#16a34a">parse.py</tspan> &mdash; Shared text parsing utilities used by question and answer generators.</text>
+  <text x="40" y="452" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#16a34a">__init__.py</tspan> &mdash; Package initialiser (makes utils/ importable).</text>
+
+  <!-- ===== scripts/ ===== -->
+  <rect x="20" y="490" width="920" height="232" rx="8" fill="white" stroke="#ea580c" stroke-width="1.5"/>
+  <text x="35" y="512" font-size="13" font-weight="700" fill="#9a3412">scripts/</text>
+  <text x="110" y="512" font-size="11" fill="#6b7280">&mdash; Shell scripts for Docker orchestration, deployment, and helper tools</text>
+
+  <text x="40" y="534" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#9a3412">docker-entrypoint.sh</tspan> &mdash; Container entrypoint. Maps UID/GID, chown dirs, gosu to non-root user, EXIT trap.</text>
+  <text x="40" y="548" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#9a3412">make_qagredo_bundle.sh</tspan> &mdash; Creates the transferable qagredo_bundle.tar.gz for offline deployment.</text>
+
+  <text x="40" y="572" font-size="11.5" fill="#374151" font-weight="600" font-style="italic">scripts/offline/ &mdash; Offline server deployment scripts</text>
+  <text x="55" y="590" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#9a3412">run.sh</tspan> &mdash; Main run script. Starts both vLLM services (Llama + Qwen judge), polls health, runs QAGRedo container, post-run chown.</text>
+  <text x="55" y="608" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#9a3412">setup_offline.sh</tspan> &mdash; First-time offline setup. Extracts bundle, loads Docker images, fixes permissions.</text>
+  <text x="55" y="626" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#9a3412">jupyter.sh</tspan> &mdash; Launches Jupyter Lab inside the QAGRedo container for interactive exploration.</text>
+
+  <text x="40" y="672" font-size="11.5" fill="#374151" font-weight="600" font-style="italic">scripts/utils/ &mdash; Analysis and reporting helpers</text>
+  <text x="55" y="690" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#9a3412">summarize_run.sh</tspan> &mdash; Generates run_summary.json with per-QA details, ungrounded highlights.</text>
+  <text x="55" y="708" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#9a3412">grade_qa_results.py</tspan> / <tspan font-weight="700" fill="#9a3412">analyze_run_quality.py</tspan> &mdash; Standalone grading and quality analysis tools.</text>
+
+  <!-- ===== config/ + data/ + output/ ===== -->
+  <rect x="20" y="730" width="450" height="85" rx="8" fill="white" stroke="#ca8a04" stroke-width="1.5"/>
+  <text x="35" y="752" font-size="13" font-weight="700" fill="#854d0e">config/ &mdash; data/ &mdash; output/</text>
+  <text x="40" y="772" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#854d0e">config/config.yaml</tspan> &mdash; All pipeline settings (LLM, question types, thresholds).</text>
+  <text x="40" y="790" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#854d0e">data/</tspan> &mdash; Input JSONL documents to process.</text>
+  <text x="40" y="808" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#854d0e">output/</tspan> &mdash; Timestamped run folders with per-doc JSON results.</text>
+
+  <!-- ===== Model dirs ===== -->
+  <rect x="490" y="730" width="450" height="105" rx="8" fill="white" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="505" y="752" font-size="13" font-weight="700" fill="#5b21b6">Model Directories</text>
+  <text x="510" y="772" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#5b21b6">models_llm/</tspan> &mdash; Llama-3.1-8B-Instruct (~16GB). Mounted to vLLM (port 8100).</text>
+  <text x="510" y="790" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#5b21b6">models_judge/</tspan> &mdash; Qwen2.5-7B-Instruct (~14GB). Mounted to vLLM-judge (port 8101).</text>
+  <text x="510" y="808" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#5b21b6">models_embed/</tspan> &mdash; MiniLM-L6-v2 (~80MB). Used for semantic similarity.</text>
+  <text x="510" y="826" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#5b21b6">hf_cache/</tspan> &amp; <tspan font-weight="700" fill="#5b21b6">hf_cache_judge/</tspan> &mdash; HuggingFace caches for vLLM and vLLM-judge.</text>
+
+  <!-- ===== docs/ ===== -->
+  <rect x="20" y="845" width="920" height="75" rx="8" fill="white" stroke="#0d9488" stroke-width="1.5"/>
+  <text x="35" y="867" font-size="13" font-weight="700" fill="#134e4a">docs/</text>
+  <text x="85" y="867" font-size="11" fill="#6b7280">&mdash; Documentation and visual reports</text>
+  <text x="40" y="887" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#134e4a">ALGORITHM_REPORT.md</tspan> &mdash; Detailed algorithmic explanation (text-based).</text>
+  <text x="40" y="905" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#134e4a">VISUAL_REPORT.html</tspan> &mdash; This report. Visual diagrams and sequence charts.</text>
+  <text x="595" y="887" font-size="11.5" fill="#374151"><tspan font-weight="700" fill="#134e4a">OFFLINE_SETUP_GUIDE.md</tspan> &mdash; 5-file offline deployment guide.</text>
+</svg>
+<p class="diagram-caption">Figure 2 &mdash; Complete project structure with file purposes</p>
+</div>
+
+<h3>3.1 File-to-Pipeline-Stage Mapping</h3>
+<p>Every file serves a specific role. This table maps each file to the pipeline stage or system layer it belongs to.</p>
+
+<table>
+  <tr><th>File</th><th>Layer</th><th>Purpose</th><th>Called By</th></tr>
+  <tr>
+    <td><code>run_qa_pipeline.py</code></td>
+    <td><span class="badge badge-blue">Orchestrator</span></td>
+    <td>Main entry point. Loads config, iterates documents, calls Stage 1&rarr;2&rarr;3&rarr;4 in order.</td>
+    <td>docker-entrypoint.sh via <code>gosu</code></td>
+  </tr>
+  <tr>
+    <td><code>utils/config_manager.py</code></td>
+    <td><span class="badge badge-blue">Orchestrator</span></td>
+    <td>Reads config.yaml, applies profiles (basic/moderate/advanced), merges env vars.</td>
+    <td>run_qa_pipeline.py</td>
+  </tr>
+  <tr>
+    <td><code>utils/data_loader.py</code></td>
+    <td><span class="badge badge-blue">Orchestrator</span></td>
+    <td>Reads and parses JSONL input documents from data/ directory.</td>
+    <td>run_qa_pipeline.py</td>
+  </tr>
+  <tr>
+    <td><code>utils/question_generator.py</code></td>
+    <td><span class="badge badge-green">Stage 1</span></td>
+    <td>Generates complex multi-type questions. Calls LLM, parses, deduplicates, validates.</td>
+    <td>run_qa_pipeline.py &rarr; generate_questions()</td>
+  </tr>
+  <tr>
+    <td><code>utils/duplicate_detector.py</code></td>
+    <td><span class="badge badge-green">Stage 1</span></td>
+    <td>MiniLM cosine similarity between questions. Filters duplicates above 0.85 threshold.</td>
+    <td>question_generator.py &rarr; filter_duplicates_from_new_questions()</td>
+  </tr>
+  <tr>
+    <td><code>utils/answer_generator.py</code></td>
+    <td><span class="badge badge-teal">Stage 2</span></td>
+    <td>Generates structured answers (Answer + Evidence). Validates with hybrid check + 3 retries.</td>
+    <td>run_qa_pipeline.py &rarr; generate_answers_from_results()</td>
+  </tr>
+  <tr>
+    <td><code>utils/hallucination_checker.py</code></td>
+    <td><span class="badge badge-purple">Stage 3</span></td>
+    <td>Sentence splitting, MiniLM sliding window, LLM-as-judge (calls Qwen on port 8101), hybrid method, grading A&ndash;F.</td>
+    <td>question_generator (validate), answer_generator (validate), run_qa_pipeline (grade)</td>
+  </tr>
+  <tr>
+    <td><code>utils/output_manager.py</code></td>
+    <td><span class="badge badge-orange">Stage 4</span></td>
+    <td>Creates timestamped output folders (YYYY-MM-DD_HHMMSS), writes JSON results.</td>
+    <td>run_qa_pipeline.py &rarr; save_results()</td>
+  </tr>
+  <tr>
+    <td><code>utils/result_analyzer.py</code></td>
+    <td><span class="badge badge-orange">Stage 4</span></td>
+    <td>Post-run aggregation: overall grade, confidence stats, run-level summary.</td>
+    <td>run_qa_pipeline.py (post-loop)</td>
+  </tr>
+  <tr>
+    <td><code>utils/parse.py</code></td>
+    <td><span class="badge badge-blue">Shared</span></td>
+    <td>Text parsing utilities shared across generators.</td>
+    <td>question_generator, answer_generator</td>
+  </tr>
+  <tr>
+    <td><code>scripts/docker-entrypoint.sh</code></td>
+    <td><span class="badge badge-red">Docker</span></td>
+    <td>Container entrypoint: UID/GID mapping, chown, gosu, EXIT trap.</td>
+    <td>Docker ENTRYPOINT (Dockerfile)</td>
+  </tr>
+  <tr>
+    <td><code>scripts/offline/run.sh</code></td>
+    <td><span class="badge badge-red">Docker</span></td>
+    <td>Host-side: start both vLLM services (Llama + Qwen judge), health poll, run QAGRedo, post-run chown safety net.</td>
+    <td>User types <code>bash run.sh</code></td>
+  </tr>
+  <tr>
+    <td><code>scripts/offline/setup_offline.sh</code></td>
+    <td><span class="badge badge-red">Docker</span></td>
+    <td>First-time setup: extract bundle, load images, create dirs, fix permissions.</td>
+    <td>User types <code>bash setup_offline.sh</code></td>
+  </tr>
+  <tr>
+    <td><code>scripts/offline/jupyter.sh</code></td>
+    <td><span class="badge badge-red">Docker</span></td>
+    <td>Launches Jupyter Lab inside QAGRedo container for interactive work.</td>
+    <td>User types <code>bash jupyter.sh</code></td>
+  </tr>
+  <tr>
+    <td><code>scripts/utils/summarize_run.sh</code></td>
+    <td><span class="badge badge-orange">Analysis</span></td>
+    <td>Generates run_summary.json with detailed per-QA info and ungrounded highlights.</td>
+    <td>User or run.sh post-pipeline</td>
+  </tr>
+  <tr>
+    <td><code>scripts/conversion/convert_to_qagredo_jsonl.py</code></td>
+    <td><span class="badge badge-blue">Utility</span></td>
+    <td>Converts various input formats to QAGRedo JSONL format (--input, --output args).</td>
+    <td>User (manual pre-processing)</td>
+  </tr>
+  <tr>
+    <td><code>config/config.yaml</code></td>
+    <td><span class="badge badge-orange">Config</span></td>
+    <td>All pipeline settings: LLM connection, question types, complexity, thresholds, retries.</td>
+    <td>config_manager.py</td>
+  </tr>
+  <tr>
+    <td><code>docker-compose.offline.yml</code></td>
+    <td><span class="badge badge-red">Docker</span></td>
+    <td>Defines vllm, vllm-judge, and QAGRedo services, network, GPU via deploy.resources.device_ids (not CUDA_VISIBLE_DEVICES &mdash; Docker maps reserved GPU as device 0, so CUDA_VISIBLE_DEVICES causes errors), all volume mounts (:rw).</td>
+    <td>run.sh via <code>docker compose</code></td>
+  </tr>
+</table>
+
+<h3>3.2 How Files Call Each Other</h3>
+<div class="diagram">
+<svg viewBox="0 0 920 340" width="920" height="340" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <!-- run_qa_pipeline.py (center) -->
+  <rect x="340" y="10" width="240" height="40" rx="8" fill="#1e293b"/>
+  <text x="460" y="36" text-anchor="middle" font-size="13" font-weight="700" fill="white">run_qa_pipeline.py</text>
+
+  <!-- config_manager -->
+  <rect x="30" y="5" width="165" height="36" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="112" y="28" text-anchor="middle" font-size="10.5" fill="#1e40af" font-weight="600">config_manager.py</text>
+  <line x1="195" y1="25" x2="340" y2="30" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrowB)"/>
+  <text x="268" y="18" text-anchor="middle" font-size="9" fill="#2563eb">config</text>
+
+  <!-- data_loader -->
+  <rect x="30" y="55" width="165" height="36" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="112" y="78" text-anchor="middle" font-size="10.5" fill="#1e40af" font-weight="600">data_loader.py</text>
+  <line x1="195" y1="73" x2="340" y2="40" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrowB)"/>
+  <text x="268" y="58" text-anchor="middle" font-size="9" fill="#2563eb">data</text>
+
+  <!-- Arrows down from pipeline -->
+  <!-- question_generator -->
+  <line x1="370" y1="50" x2="200" y2="140" stroke="#16a34a" stroke-width="2" marker-end="url(#arrowG)"/>
+  <rect x="50" y="130" width="200" height="40" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="150" y="155" text-anchor="middle" font-size="11" fill="#166534" font-weight="600">question_generator.py</text>
+  <text x="50" y="188" font-size="10" fill="#6b7280">Stage 1 &mdash; generate_questions()</text>
+
+  <!-- duplicate_detector (from question_generator) -->
+  <rect x="15" y="210" width="180" height="32" rx="6" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+  <text x="105" y="231" text-anchor="middle" font-size="10" fill="#134e4a" font-weight="600">duplicate_detector.py</text>
+  <line x1="105" y1="170" x2="105" y2="210" stroke="#0d9488" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="118" y="200" font-size="9" fill="#0d9488">dedup</text>
+
+  <!-- answer_generator -->
+  <line x1="460" y1="50" x2="460" y2="130" stroke="#16a34a" stroke-width="2" marker-end="url(#arrowG)"/>
+  <rect x="340" y="130" width="200" height="40" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="440" y="155" text-anchor="middle" font-size="11" fill="#166534" font-weight="600">answer_generator.py</text>
+  <text x="340" y="188" font-size="10" fill="#6b7280">Stage 2 &mdash; generate_answers()</text>
+
+  <!-- hallucination_checker -->
+  <line x1="550" y1="50" x2="700" y2="130" stroke="#7c3aed" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="620" y="130" width="220" height="40" rx="6" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+  <text x="730" y="155" text-anchor="middle" font-size="11" fill="#5b21b6" font-weight="600">hallucination_checker.py</text>
+  <text x="620" y="188" font-size="10" fill="#6b7280">Stage 3 &mdash; grade_qa_results()</text>
+
+  <!-- hallucination_checker also called by q-gen and a-gen -->
+  <line x1="250" y1="150" x2="620" y2="150" stroke="#7c3aed" stroke-width="1" stroke-dasharray="5,3"/>
+  <text x="435" y="142" text-anchor="middle" font-size="9" fill="#7c3aed">validates questions &amp; answers via check_hallucination()</text>
+
+  <!-- output_manager -->
+  <line x1="460" y1="50" x2="750" y2="220" stroke="#ea580c" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="640" y="220" width="200" height="40" rx="6" fill="#ffedd5" stroke="#ea580c" stroke-width="1.5"/>
+  <text x="740" y="245" text-anchor="middle" font-size="11" fill="#9a3412" font-weight="600">output_manager.py</text>
+  <text x="640" y="278" font-size="10" fill="#6b7280">Stage 4 &mdash; save_results()</text>
+
+  <!-- vLLM boxes -->
+  <rect x="250" y="270" width="180" height="55" rx="8" fill="#f1f5f9" stroke="#ea580c" stroke-width="2"/>
+  <text x="340" y="294" text-anchor="middle" font-size="11" font-weight="700" fill="#ea580c">vLLM (Llama :8100)</text>
+  <text x="340" y="314" text-anchor="middle" font-size="9" fill="#6b7280">Q&amp;A generation</text>
+
+  <rect x="490" y="270" width="180" height="55" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+  <text x="580" y="294" text-anchor="middle" font-size="11" font-weight="700" fill="#7c3aed">vLLM Judge (Qwen :8101)</text>
+  <text x="580" y="314" text-anchor="middle" font-size="9" fill="#6b7280">Hallucination grading</text>
+
+  <!-- LLM calls -->
+  <line x1="150" y1="170" x2="300" y2="280" stroke="#ea580c" stroke-width="1" stroke-dasharray="4,3"/>
+  <line x1="440" y1="170" x2="340" y2="270" stroke="#ea580c" stroke-width="1" stroke-dasharray="4,3"/>
+  <line x1="730" y1="170" x2="580" y2="280" stroke="#7c3aed" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="200" y="240" font-size="9" fill="#ea580c">_call_llm()</text>
+  <text x="380" y="238" font-size="9" fill="#ea580c">_call_llm()</text>
+  <text x="640" y="240" font-size="9" fill="#7c3aed">_call_llm_judge()</text>
+</svg>
+<p class="diagram-caption">Figure 3 &mdash; Inter-file call graph: how files call each other across pipeline stages</p>
+</div>
+
+<!-- ================================================================ -->
+<!-- ====  PART B: SYSTEM ARCHITECTURE  ============================ -->
+<!-- ================================================================ -->
+<div class="part-header">Part B &mdash; System Architecture</div>
+
+<!-- ============================================================ -->
+<h2 id="architecture">4. Docker Architecture (Three Containers)</h2>
+<p>QAGRedo runs as <strong>three Docker containers</strong> on a single server. The <strong>vllm</strong> container (Llama on GPU 0, port 8100) generates questions and answers; the <strong>vllm-judge</strong> container (Qwen on GPU 1, port 8101) serves as the independent LLM-as-judge; the <strong>qagredo</strong> container runs the CPU pipeline and calls both vLLM services over the Docker network.</p>
+
+<div class="diagram">
+<svg viewBox="0 0 920 520" width="920" height="520" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <rect x="15" y="5" width="890" height="510" rx="14" fill="#f8fafc" stroke="#94a3b8" stroke-width="2" stroke-dasharray="8,4"/>
+  <text x="35" y="32" font-size="15" font-weight="700" fill="#374151">Offline Server (Host Machine)</text>
+  <text x="35" y="50" font-size="11" fill="#6b7280">Docker Engine + Docker Compose &nbsp;|&nbsp; NVIDIA GPUs &nbsp;|&nbsp; No internet required</text>
+
+  <rect x="40" y="68" width="840" height="295" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+  <text x="60" y="90" font-size="13" font-weight="600" fill="#1e40af">Docker Network: qagredo_offline (internal DNS)</text>
+
+  <!-- vLLM (Llama) -->
+  <rect x="60" y="105" width="250" height="170" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="80" y="130" font-size="14" font-weight="700" fill="#1e40af">vLLM Container (Llama)</text>
+  <text x="80" y="148" font-size="11" fill="#374151">Container: <tspan font-weight="600">qagredo-vllm</tspan></text>
+  <rect x="80" y="158" width="50" height="20" rx="4" fill="#2563eb"/>
+  <text x="105" y="173" text-anchor="middle" font-size="9" fill="white" font-weight="600">GPU 0</text>
+  <text x="140" y="173" font-size="11" fill="#374151">Llama-3.1-8B (Q&amp;A gen)</text>
+  <text x="80" y="195" font-size="10.5" fill="#374151">Port: <tspan font-weight="700">8100</tspan></text>
+  <text x="80" y="212" font-size="10.5" fill="#374151">Mounts: models_llm (:ro), hf_cache (:rw)</text>
+  <text x="80" y="246" font-size="10" fill="#6b7280">Question &amp; answer generation</text>
+  <text x="80" y="262" font-size="10" fill="#6b7280">OpenAI-compatible REST API</text>
+
+  <!-- vLLM Judge (Qwen) -->
+  <rect x="335" y="105" width="250" height="170" rx="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+  <text x="355" y="130" font-size="14" font-weight="700" fill="#5b21b6">vLLM Judge (Qwen)</text>
+  <text x="355" y="148" font-size="11" fill="#374151">Container: <tspan font-weight="600">qagredo-vllm-judge</tspan></text>
+  <rect x="355" y="158" width="50" height="20" rx="4" fill="#7c3aed"/>
+  <text x="380" y="173" text-anchor="middle" font-size="9" fill="white" font-weight="600">GPU 1</text>
+  <text x="415" y="173" font-size="11" fill="#374151">Qwen2.5-7B (judge only)</text>
+  <text x="355" y="195" font-size="10.5" fill="#374151">Port: <tspan font-weight="700">8101</tspan></text>
+  <text x="355" y="212" font-size="10.5" fill="#374151">Mounts: models_judge (:ro), hf_cache_judge (:rw)</text>
+  <text x="355" y="246" font-size="10" fill="#6b7280">Independent LLM-as-judge</text>
+  <text x="355" y="262" font-size="10" fill="#6b7280">Avoids self-evaluation bias</text>
+
+  <!-- QAGRedo -->
+  <rect x="610" y="105" width="250" height="170" rx="10" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="630" y="130" font-size="14" font-weight="700" fill="#166534">QAGRedo Container</text>
+  <text x="630" y="148" font-size="11" fill="#374151">Container: <tspan font-weight="600">qagredo-runner</tspan></text>
+  <rect x="630" y="158" width="50" height="20" rx="4" fill="#16a34a"/>
+  <text x="655" y="173" text-anchor="middle" font-size="9" fill="white" font-weight="600">CPU</text>
+  <text x="690" y="173" font-size="11" fill="#374151">Python pipeline + MiniLM</text>
+  <text x="630" y="195" font-size="10.5" fill="#374151">Calls vllm:8100 (Llama) for Q&amp;A</text>
+  <text x="630" y="212" font-size="10.5" fill="#374151">Calls vllm-judge:8101 (Qwen) for grading</text>
+  <text x="630" y="229" font-size="10.5" fill="#374151">Port: 8899 (Jupyter, optional)</text>
+  <text x="630" y="246" font-size="10.5" fill="#374151">Mounts: code, config, data, output (:rw)</text>
+  <text x="630" y="262" font-size="10" fill="#6b7280">depends_on: vllm, vllm-judge (healthy)</text>
+
+  <!-- Arrows -->
+  <line x1="310" y1="190" x2="335" y2="190" stroke="#7c3aed" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="318" y="182" font-size="8" fill="#7c3aed">HTTP</text>
+  <line x1="585" y1="190" x2="610" y2="190" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrowB)"/>
+  <text x="590" y="182" font-size="9" fill="#2563eb" font-weight="600">HTTP REST</text>
+
+  <!-- Host dir -->
+  <rect x="40" y="380" width="840" height="120" rx="10" fill="#fefce8" stroke="#ca8a04" stroke-width="2"/>
+  <text x="60" y="404" font-size="13" font-weight="700" fill="#854d0e">qagredo_host/ (single bind-mounted directory &mdash; everything lives here)</text>
+  <text x="60" y="428" font-size="11" fill="#374151">
+    <tspan font-weight="600">config/</tspan> (config.yaml) &nbsp;&nbsp;
+    <tspan font-weight="600">data/</tspan> (input JSONL) &nbsp;&nbsp;
+    <tspan font-weight="600">output/</tspan> (timestamped results) &nbsp;&nbsp;
+    <tspan font-weight="600">utils/</tspan> (Python source)
+  </text>
+  <text x="60" y="448" font-size="11" fill="#374151">
+    <tspan font-weight="600">scripts/</tspan> (helpers) &nbsp;&nbsp;
+    <tspan font-weight="600">models_llm/</tspan> (Llama) &nbsp;&nbsp;
+    <tspan font-weight="600">models_judge/</tspan> (Qwen) &nbsp;&nbsp;
+    <tspan font-weight="600">models_embed/</tspan> (MiniLM) &nbsp;&nbsp;
+    <tspan font-weight="600">hf_cache/</tspan> &nbsp; <tspan font-weight="600">hf_cache_judge/</tspan>
+  </text>
+  <text x="60" y="470" font-size="11" fill="#374151"><tspan font-weight="600">run.sh</tspan> &nbsp; <tspan font-weight="600">setup_offline.sh</tspan> &nbsp; <tspan font-weight="600">jupyter.sh</tspan> &nbsp; <tspan font-weight="600">docker-compose.offline.yml</tspan> &nbsp; <tspan font-weight="600">run_qa_pipeline.py</tspan></text>
+  <text x="60" y="490" font-size="11" fill="#6b7280">All mounts are :rw &middot; Edit any file here and re-run &mdash; Docker picks up changes instantly &middot; Persists when Docker is down</text>
+
+  <line x1="185" y1="278" x2="185" y2="380" stroke="#ca8a04" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrow)"/>
+  <line x1="460" y1="278" x2="460" y2="380" stroke="#ca8a04" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrow)"/>
+  <line x1="735" y1="278" x2="735" y2="380" stroke="#ca8a04" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrow)"/>
+</svg>
+<p class="diagram-caption">Figure 4 &mdash; Three-container Docker architecture with bind-mounted host directory</p>
+</div>
+
+<div class="callout callout-blue">
+  <b>Why three containers?</b>
+  <strong>Separation of concerns</strong>: vLLM (Llama) and vLLM-judge (Qwen) are GPU-intensive and stay running; QAGRedo is CPU-bound and runs per invocation. Using a <strong>separate judge model (Qwen)</strong> avoids self-evaluation bias: the same model that generates Q&amp;A does not judge its own output.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="seq-host">5. Sequence: Host Execution Flow (<code>bash run.sh</code>)</h2>
+<p>This diagram shows every step from typing <code>bash run.sh</code> on the host to pipeline completion and file cleanup.</p>
+
+<div class="seq-diagram">
+<svg viewBox="0 0 1050 900" width="1050" height="900" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif" font-size="11">
+  <!-- Lifelines -->
+  <text x="80" y="18" text-anchor="middle" font-size="12" font-weight="700" fill="#374151">User (Host)</text>
+  <rect x="45" y="24" width="70" height="28" rx="5" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="80" y="43" text-anchor="middle" font-size="10" fill="#374151">Terminal</text>
+  <line x1="80" y1="52" x2="80" y2="880" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <text x="290" y="18" text-anchor="middle" font-size="12" font-weight="700" fill="#1e40af">run.sh</text>
+  <rect x="253" y="24" width="74" height="28" rx="5" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="290" y="43" text-anchor="middle" font-size="10" fill="#1e40af">Script</text>
+  <line x1="290" y1="52" x2="290" y2="880" stroke="#2563eb" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <text x="510" y="18" text-anchor="middle" font-size="12" font-weight="700" fill="#ea580c">Docker Compose</text>
+  <rect x="462" y="24" width="96" height="28" rx="5" fill="#ffedd5" stroke="#ea580c" stroke-width="1.5"/>
+  <text x="510" y="43" text-anchor="middle" font-size="10" fill="#ea580c">Engine</text>
+  <line x1="510" y1="52" x2="510" y2="880" stroke="#ea580c" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <text x="720" y="18" text-anchor="middle" font-size="12" font-weight="700" fill="#2563eb">vLLM Container</text>
+  <rect x="672" y="24" width="96" height="28" rx="5" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="720" y="43" text-anchor="middle" font-size="10" fill="#2563eb">GPU</text>
+  <line x1="720" y1="52" x2="720" y2="880" stroke="#2563eb" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <text x="930" y="18" text-anchor="middle" font-size="12" font-weight="700" fill="#16a34a">QAGRedo Container</text>
+  <rect x="874" y="24" width="112" height="28" rx="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="930" y="43" text-anchor="middle" font-size="10" fill="#16a34a">Pipeline</text>
+  <line x1="930" y1="52" x2="930" y2="880" stroke="#16a34a" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <!-- Step 1 -->
+  <line x1="80" y1="80" x2="290" y2="80" stroke="#374151" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="185" y="74" text-anchor="middle" font-size="10" fill="#374151">bash run.sh</text>
+
+  <!-- Step 2 -->
+  <rect x="230" y="95" width="120" height="22" rx="4" fill="#dbeafe"/>
+  <text x="290" y="110" text-anchor="middle" font-size="9.5" fill="#1e40af">source .env</text>
+  <text x="360" y="110" font-size="9" fill="#6b7280">(HOST_UID, HOST_GID)</text>
+
+  <!-- Step 3 -->
+  <rect x="230" y="125" width="120" height="22" rx="4" fill="#dbeafe"/>
+  <text x="290" y="140" text-anchor="middle" font-size="9.5" fill="#1e40af">preflight checks</text>
+  <text x="360" y="140" font-size="9" fill="#6b7280">(docker, config.yaml, dirs)</text>
+
+  <!-- Step 4: Start vLLM services -->
+  <line x1="290" y1="165" x2="510" y2="165" stroke="#ea580c" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="400" y="159" text-anchor="middle" font-size="10" fill="#ea580c">docker compose up -d vllm vllm-judge</text>
+
+  <line x1="510" y1="182" x2="720" y2="182" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrowB)"/>
+  <text x="615" y="176" text-anchor="middle" font-size="10" fill="#2563eb">start vllm (Llama, GPU 0) + vllm-judge (Qwen, GPU 1)</text>
+
+  <rect x="650" y="195" width="140" height="35" rx="4" fill="#dbeafe"/>
+  <text x="720" y="210" text-anchor="middle" font-size="9.5" fill="#1e40af">Load model weights</text>
+  <text x="720" y="222" text-anchor="middle" font-size="9" fill="#6b7280">~60-120s startup each</text>
+
+  <!-- Step 5: Health poll -->
+  <rect x="220" y="245" width="140" height="50" rx="4" fill="#fef3c7" stroke="#ca8a04" stroke-width="1"/>
+  <text x="290" y="262" text-anchor="middle" font-size="9.5" fill="#92400e">Poll health checks</text>
+  <text x="290" y="276" text-anchor="middle" font-size="9" fill="#92400e">every 5s, max 300s</text>
+  <text x="290" y="288" text-anchor="middle" font-size="9" fill="#6b7280">curl :8100/health, :8101/health</text>
+
+  <line x1="290" y1="268" x2="720" y2="268" stroke="#ca8a04" stroke-width="1" stroke-dasharray="5,3"/>
+  <text x="505" y="264" text-anchor="middle" font-size="9" fill="#ca8a04">GET /health &rarr; 200 OK (both)</text>
+
+  <!-- Step 6: Run QAGRedo -->
+  <line x1="290" y1="315" x2="510" y2="315" stroke="#ea580c" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="400" y="309" text-anchor="middle" font-size="10" fill="#ea580c">docker compose run --rm qagredo</text>
+
+  <line x1="510" y1="332" x2="930" y2="332" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arrowG)"/>
+  <text x="720" y="326" text-anchor="middle" font-size="10" fill="#16a34a">start container</text>
+
+  <!-- Entrypoint -->
+  <rect x="860" y="345" width="140" height="35" rx="4" fill="#dcfce7"/>
+  <text x="930" y="358" text-anchor="middle" font-size="9.5" fill="#166534">docker-entrypoint.sh</text>
+  <text x="930" y="372" text-anchor="middle" font-size="9" fill="#6b7280">chown dirs, gosu user</text>
+
+  <!-- Wait for vLLM inside container -->
+  <line x1="930" y1="395" x2="720" y2="395" stroke="#2563eb" stroke-width="1" stroke-dasharray="5,3"/>
+  <text x="825" y="389" text-anchor="middle" font-size="9" fill="#2563eb">wait for vllm:8100, vllm-judge:8101</text>
+
+  <!-- Run pipeline -->
+  <rect x="856" y="412" width="148" height="28" rx="4" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="930" y="430" text-anchor="middle" font-size="10" fill="#166534">python run_qa_pipeline.py</text>
+
+  <!-- Pipeline bracket -->
+  <rect x="848" y="450" width="164" height="190" rx="6" fill="white" stroke="#16a34a" stroke-width="1.5" stroke-dasharray="4,2"/>
+  <text x="862" y="470" font-size="9.5" fill="#166534" font-weight="600">For each document:</text>
+  <text x="870" y="488" font-size="9" fill="#374151">1. generate_questions()</text>
+  <text x="870" y="503" font-size="9" fill="#374151">2. generate_answers()</text>
+  <text x="870" y="518" font-size="9" fill="#374151">3. grade_qa_results()</text>
+  <text x="870" y="533" font-size="9" fill="#374151">4. save_results()</text>
+  <text x="862" y="556" font-size="9" fill="#6b7280" font-style="italic">Calls vLLM (8100) for Q&amp;A gen,</text>
+  <text x="862" y="570" font-size="9" fill="#6b7280" font-style="italic">vLLM-judge (8101) for grading:</text>
+  <line x1="860" y1="580" x2="720" y2="580" stroke="#2563eb" stroke-width="1" stroke-dasharray="3,3"/>
+  <text x="790" y="574" text-anchor="middle" font-size="8" fill="#2563eb">POST /v1/chat/completions</text>
+  <line x1="720" y1="595" x2="860" y2="595" stroke="#2563eb" stroke-width="1" stroke-dasharray="3,3"/>
+  <text x="790" y="612" text-anchor="middle" font-size="8" fill="#2563eb">JSON response</text>
+  <text x="862" y="632" font-size="9" fill="#16a34a" font-weight="600">Pipeline complete</text>
+
+  <!-- EXIT trap -->
+  <rect x="856" y="650" width="148" height="28" rx="4" fill="#fef3c7"/>
+  <text x="930" y="668" text-anchor="middle" font-size="9.5" fill="#92400e">EXIT trap: chown dirs</text>
+
+  <!-- Container exits -->
+  <line x1="930" y1="695" x2="510" y2="695" stroke="#16a34a" stroke-width="1" stroke-dasharray="5,3"/>
+  <text x="720" y="689" text-anchor="middle" font-size="9" fill="#16a34a">container exits (removed: --rm)</text>
+
+  <line x1="510" y1="710" x2="290" y2="710" stroke="#ea580c" stroke-width="1"/>
+  <text x="400" y="706" text-anchor="middle" font-size="9" fill="#ea580c">exit code returned</text>
+
+  <!-- Post-run chown -->
+  <rect x="215" y="730" width="150" height="50" rx="4" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="290" y="748" text-anchor="middle" font-size="9.5" fill="#5b21b6">Post-run safety net</text>
+  <text x="290" y="762" text-anchor="middle" font-size="8.5" fill="#5b21b6">docker run --privileged</text>
+  <text x="290" y="774" text-anchor="middle" font-size="8.5" fill="#5b21b6">--userns=host chown</text>
+
+  <!-- Done -->
+  <line x1="290" y1="800" x2="80" y2="800" stroke="#374151" stroke-width="1.5"/>
+  <text x="185" y="794" text-anchor="middle" font-size="10" fill="#16a34a" font-weight="600">Done! Output in output/</text>
+
+  <rect x="22" y="820" width="500" height="50" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="1"/>
+  <text x="40" y="840" font-size="10" fill="#166534" font-weight="600">All files in output/ are owned by the host user (not root)</text>
+  <text x="40" y="856" font-size="9.5" fill="#6b7280">Three layers of chown ensure this: entrypoint startup, EXIT trap, and post-run safety net</text>
+</svg>
+</div>
+<p class="diagram-caption">Figure 5 &mdash; Complete host execution sequence from <code>bash run.sh</code> to completion</p>
+
+<!-- ============================================================ -->
+<h2 id="permissions">6. Permission Model (Three Layers)</h2>
+<p>Docker containers create files as root by default, which locks the host user out. QAGRedo uses a <strong>three-layer defence</strong> to ensure the host user always owns all output files.</p>
+
+<div class="diagram">
+<svg viewBox="0 0 920 380" width="920" height="380" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <text x="25" y="25" font-size="13" font-weight="700" fill="#374151">Three-Layer Defence &mdash; ensures host user owns all files</text>
+  <line x1="80" y1="45" x2="80" y2="340" stroke="#94a3b8" stroke-width="3"/>
+  <circle cx="80" cy="75" r="14" fill="#2563eb"/>
+  <text x="80" y="80" text-anchor="middle" font-size="11" fill="white" font-weight="700">1</text>
+  <rect x="110" y="50" width="780" height="62" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="130" y="72" font-size="13" font-weight="700" fill="#1e40af">Layer 1: Entrypoint Startup (docker-entrypoint.sh)</text>
+  <text x="130" y="90" font-size="11" fill="#374151">Runs as root inside container. Adjusts <tspan font-weight="600">qagredo</tspan> user UID/GID to match host user.</text>
+  <text x="130" y="105" font-size="11" fill="#374151">Runs <tspan font-weight="600">chown -R $HOST_UID:$HOST_GID</tspan> on /workspace/output, /workspace/config, /workspace/data, /opt/hf_cache</text>
+
+  <circle cx="80" cy="170" r="14" fill="#16a34a"/>
+  <text x="80" y="175" text-anchor="middle" font-size="11" fill="white" font-weight="700">2</text>
+  <rect x="110" y="145" width="780" height="62" rx="8" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="130" y="167" font-size="13" font-weight="700" fill="#166534">Layer 2: Entrypoint EXIT Trap</text>
+  <text x="130" y="185" font-size="11" fill="#374151">Bash <tspan font-weight="600">trap fix_ownership EXIT</tspan> &mdash; runs chown when container exits (catches files created during run).</text>
+  <text x="130" y="200" font-size="11" fill="#374151">Design: <tspan font-weight="600">gosu</tspan> runs WITHOUT exec, so bash waits and the EXIT trap fires after child exits.</text>
+
+  <circle cx="80" cy="265" r="14" fill="#7c3aed"/>
+  <text x="80" y="270" text-anchor="middle" font-size="11" fill="white" font-weight="700">3</text>
+  <rect x="110" y="240" width="780" height="72" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+  <text x="130" y="262" font-size="13" font-weight="700" fill="#5b21b6">Layer 3: Post-Run Safety Net (run.sh, host side)</text>
+  <text x="130" y="280" font-size="11" fill="#374151">After container exits, run.sh runs: <tspan font-weight="600">docker run --privileged --userns=host -u 0 ... chown -R</tspan></text>
+  <text x="130" y="298" font-size="11" fill="#374151"><tspan font-weight="600">--privileged --userns=host</tspan> bypasses Docker user namespace remapping (maps container root to real host root).</text>
+  <text x="130" y="310" font-size="10" fill="#6b7280">Without these flags: chown fails with "Operation not permitted" on servers with user namespace remapping enabled.</text>
+
+  <circle cx="80" cy="345" r="10" fill="#16a34a"/>
+  <text x="110" y="350" font-size="13" font-weight="700" fill="#16a34a">Result: All files in output/, hf_cache/, config/, data/ are owned by the host user &#x2713;</text>
+  <text x="110" y="368" font-size="11" fill="#6b7280">No sudo required. No manual chmod. Works on servers with Docker user namespace remapping.</text>
+</svg>
+<p class="diagram-caption">Figure 6 &mdash; Three-layer permission model</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="seq-entrypoint">7. Sequence: Container Entrypoint</h2>
+<p>Shows the exact steps inside <span class="file-ref">scripts/docker-entrypoint.sh</span> when the QAGRedo container starts.</p>
+
+<div class="seq-diagram">
+<svg viewBox="0 0 800 520" width="800" height="520" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif" font-size="11">
+  <text x="100" y="15" text-anchor="middle" font-size="11" font-weight="700" fill="#374151">docker-entrypoint.sh</text>
+  <text x="100" y="28" font-size="9" fill="#6b7280">(runs as root)</text>
+  <line x1="100" y1="35" x2="100" y2="500" stroke="#374151" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <text x="400" y="15" text-anchor="middle" font-size="11" font-weight="700" fill="#16a34a">gosu qagredo</text>
+  <text x="400" y="28" font-size="9" fill="#6b7280">(child process)</text>
+  <line x1="400" y1="35" x2="400" y2="500" stroke="#16a34a" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <text x="650" y="15" text-anchor="middle" font-size="11" font-weight="700" fill="#ea580c">Pipeline</text>
+  <line x1="650" y1="28" x2="650" y2="500" stroke="#ea580c" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <!-- Steps -->
+  <rect x="40" y="50" width="120" height="22" rx="4" fill="#f1f5f9"/>
+  <text x="100" y="66" text-anchor="middle" font-size="9.5" fill="#374151">Read HOST_UID/GID</text>
+  <text x="170" y="66" font-size="9" fill="#6b7280">from env (default: 1000)</text>
+
+  <rect x="40" y="80" width="120" height="22" rx="4" fill="#dbeafe"/>
+  <text x="100" y="96" text-anchor="middle" font-size="9.5" fill="#1e40af">groupmod qagredo</text>
+  <text x="170" y="96" font-size="9" fill="#6b7280">set GID = HOST_GID</text>
+
+  <rect x="40" y="110" width="120" height="22" rx="4" fill="#dbeafe"/>
+  <text x="100" y="126" text-anchor="middle" font-size="9.5" fill="#1e40af">usermod qagredo</text>
+  <text x="170" y="126" font-size="9" fill="#6b7280">set UID = HOST_UID</text>
+
+  <rect x="40" y="145" width="120" height="22" rx="4" fill="#dcfce7"/>
+  <text x="100" y="161" text-anchor="middle" font-size="9.5" fill="#166534">fix_ownership()</text>
+  <text x="170" y="161" font-size="9" fill="#6b7280">chown output, config, data, hf_cache</text>
+
+  <rect x="40" y="180" width="120" height="22" rx="4" fill="#fef3c7"/>
+  <text x="100" y="196" text-anchor="middle" font-size="9.5" fill="#92400e">trap EXIT</text>
+  <text x="170" y="196" font-size="9" fill="#6b7280">trap fix_ownership EXIT</text>
+
+  <rect x="40" y="210" width="120" height="22" rx="4" fill="#fef3c7"/>
+  <text x="100" y="226" text-anchor="middle" font-size="9.5" fill="#92400e">trap TERM/INT</text>
+  <text x="170" y="226" font-size="9" fill="#6b7280">forward signals to child</text>
+
+  <line x1="100" y1="252" x2="400" y2="252" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arrowG)"/>
+  <text x="250" y="246" text-anchor="middle" font-size="10" fill="#16a34a" font-weight="600">gosu qagredo "$@" &amp;</text>
+  <text x="250" y="268" text-anchor="middle" font-size="9" fill="#6b7280">NOT exec &mdash; bash stays as parent to run EXIT trap</text>
+
+  <line x1="400" y1="285" x2="650" y2="285" stroke="#ea580c" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="525" y="279" text-anchor="middle" font-size="10" fill="#ea580c">python run_qa_pipeline.py</text>
+
+  <rect x="590" y="298" width="120" height="100" rx="4" fill="#ffedd5"/>
+  <text x="600" y="315" font-size="9" fill="#9a3412" font-weight="600">Pipeline runs...</text>
+  <text x="600" y="332" font-size="9" fill="#374151">generate_questions()</text>
+  <text x="600" y="348" font-size="9" fill="#374151">generate_answers()</text>
+  <text x="600" y="364" font-size="9" fill="#374151">grade_qa_results()</text>
+  <text x="600" y="380" font-size="9" fill="#374151">save_results()</text>
+  <text x="600" y="392" font-size="9" fill="#6b7280">(may take minutes)</text>
+
+  <line x1="650" y1="408" x2="400" y2="408" stroke="#ea580c" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="525" y="403" text-anchor="middle" font-size="9" fill="#6b7280">exit</text>
+
+  <rect x="40" y="258" width="120" height="160" rx="4" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="100" y="345" text-anchor="middle" font-size="10" fill="#6b7280">wait $CHILD_PID</text>
+  <text x="100" y="360" text-anchor="middle" font-size="9" fill="#6b7280">(bash waits)</text>
+
+  <line x1="400" y1="425" x2="100" y2="425" stroke="#16a34a" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="250" y="421" text-anchor="middle" font-size="9" fill="#6b7280">child exits (exit code)</text>
+
+  <rect x="40" y="440" width="120" height="28" rx="4" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="100" y="458" text-anchor="middle" font-size="10" fill="#166534" font-weight="600">EXIT trap fires!</text>
+
+  <rect x="40" y="475" width="120" height="20" rx="4" fill="#dcfce7"/>
+  <text x="100" y="490" text-anchor="middle" font-size="9.5" fill="#166534">fix_ownership()</text>
+  <text x="170" y="490" font-size="9" fill="#6b7280">chown all writable dirs to HOST_UID:HOST_GID</text>
+</svg>
+</div>
+<p class="diagram-caption">Figure 7 &mdash; Container entrypoint: UID mapping, gosu without exec, and EXIT trap for cleanup</p>
+
+
+<!-- ================================================================ -->
+<!-- ====  PART C: PIPELINE ALGORITHMS  ============================ -->
+<!-- ================================================================ -->
+<div class="part-header">Part C &mdash; Pipeline Algorithms</div>
+
+<!-- ============================================================ -->
+<h2 id="seq-pipeline">8. Sequence: Pipeline Code Execution</h2>
+<p>This diagram shows how <code>run_qa_pipeline.py</code> calls into each module for <strong>one document</strong>.</p>
+
+<div class="seq-diagram">
+<svg viewBox="0 0 1100 820" width="1100" height="820" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif" font-size="11">
+  <!-- Lifeline headers -->
+  <text x="80" y="15" text-anchor="middle" font-size="11" font-weight="700" fill="#374151">main()</text>
+  <rect x="28" y="20" width="104" height="24" rx="5" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="80" y="37" text-anchor="middle" font-size="9" fill="#374151">run_qa_pipeline.py</text>
+  <line x1="80" y1="44" x2="80" y2="800" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <text x="270" y="15" text-anchor="middle" font-size="11" font-weight="700" fill="#1e40af">config_manager</text>
+  <rect x="214" y="20" width="112" height="24" rx="5" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="270" y="37" text-anchor="middle" font-size="9" fill="#1e40af">utils/</text>
+  <line x1="270" y1="44" x2="270" y2="800" stroke="#2563eb" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <text x="450" y="15" text-anchor="middle" font-size="11" font-weight="700" fill="#2563eb">question_generator</text>
+  <rect x="386" y="20" width="128" height="24" rx="5" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="450" y="37" text-anchor="middle" font-size="9" fill="#2563eb">utils/</text>
+  <line x1="450" y1="44" x2="450" y2="800" stroke="#2563eb" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <text x="640" y="15" text-anchor="middle" font-size="11" font-weight="700" fill="#16a34a">answer_generator</text>
+  <rect x="578" y="20" width="124" height="24" rx="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="640" y="37" text-anchor="middle" font-size="9" fill="#16a34a">utils/</text>
+  <line x1="640" y1="44" x2="640" y2="800" stroke="#16a34a" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <text x="830" y="15" text-anchor="middle" font-size="11" font-weight="700" fill="#7c3aed">hallucination_checker</text>
+  <rect x="758" y="20" width="144" height="24" rx="5" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="830" y="37" text-anchor="middle" font-size="9" fill="#7c3aed">utils/</text>
+  <line x1="830" y1="44" x2="830" y2="800" stroke="#7c3aed" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <text x="1020" y="15" text-anchor="middle" font-size="11" font-weight="700" fill="#ea580c">output_manager</text>
+  <rect x="960" y="20" width="120" height="24" rx="5" fill="#ffedd5" stroke="#ea580c" stroke-width="1.5"/>
+  <text x="1020" y="37" text-anchor="middle" font-size="9" fill="#ea580c">utils/</text>
+  <line x1="1020" y1="44" x2="1020" y2="800" stroke="#ea580c" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <!-- Step 1: Config -->
+  <line x1="80" y1="70" x2="270" y2="70" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrowB)"/>
+  <text x="175" y="64" text-anchor="middle" font-size="9.5" fill="#2563eb">build_effective_config(path)</text>
+  <rect x="220" y="78" width="100" height="38" rx="3" fill="#dbeafe"/>
+  <text x="270" y="92" text-anchor="middle" font-size="8.5" fill="#1e40af">load_config()</text>
+  <text x="270" y="104" text-anchor="middle" font-size="8.5" fill="#1e40af">apply_profiles()</text>
+  <text x="270" y="113" text-anchor="middle" font-size="8.5" fill="#1e40af">apply_env_overrides()</text>
+  <line x1="270" y1="120" x2="80" y2="120" stroke="#2563eb" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="175" y="115" text-anchor="middle" font-size="9" fill="#6b7280">config dict</text>
+
+  <!-- Step 2: Init timestamp -->
+  <line x1="80" y1="142" x2="1020" y2="142" stroke="#ea580c" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="550" y="136" text-anchor="middle" font-size="9.5" fill="#ea580c">init_run_timestamp() &rarr; locks "2026-02-13_143025"</text>
+
+  <!-- Step 3: set_llm_config -->
+  <line x1="80" y1="165" x2="830" y2="165" stroke="#7c3aed" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="455" y="159" text-anchor="middle" font-size="9.5" fill="#7c3aed">set_llm_config(config) &mdash; stores LLM config for judge calls</text>
+
+  <!-- Step 4: load data -->
+  <rect x="30" y="182" width="100" height="22" rx="3" fill="#f1f5f9"/>
+  <text x="80" y="197" text-anchor="middle" font-size="9.5" fill="#374151">load_data_file()</text>
+
+  <!-- Document loop -->
+  <rect x="18" y="220" width="1070" height="565" rx="8" fill="white" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="30" y="238" font-size="11" font-weight="700" fill="#374151">LOOP: For each document</text>
+
+  <!-- Step 5: generate_questions -->
+  <line x1="80" y1="260" x2="450" y2="260" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrowB)"/>
+  <text x="265" y="254" text-anchor="middle" font-size="10" fill="#2563eb" font-weight="600">generate_questions([document], config)</text>
+
+  <rect x="390" y="272" width="120" height="128" rx="4" fill="#dbeafe" stroke="#2563eb" stroke-width="1"/>
+  <text x="400" y="288" font-size="8.5" fill="#1e40af" font-weight="600">Internal flow:</text>
+  <text x="400" y="302" font-size="8.5" fill="#374151">1. _extract_text()</text>
+  <text x="400" y="316" font-size="8.5" fill="#374151">2. _create_prompt()</text>
+  <text x="400" y="330" font-size="8.5" fill="#374151">3. _call_llm() &rarr; vLLM (8100)</text>
+  <text x="400" y="344" font-size="8.5" fill="#374151">4. _parse_questions()</text>
+  <text x="400" y="358" font-size="8.5" fill="#374151">5. filter_duplicates()</text>
+  <text x="400" y="372" font-size="8.5" fill="#374151">6. _validate_question()</text>
+  <text x="400" y="392" font-size="8" fill="#6b7280">&nbsp;&nbsp;&rarr; check_hallucination()</text>
+
+  <line x1="450" y1="385" x2="830" y2="385" stroke="#7c3aed" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="640" y="380" text-anchor="middle" font-size="8.5" fill="#7c3aed">check_hallucination(method="semantic")</text>
+
+  <line x1="450" y1="408" x2="80" y2="408" stroke="#2563eb" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="265" y="404" text-anchor="middle" font-size="9" fill="#6b7280">question_results (validated questions)</text>
+
+  <!-- Step 6: generate_answers -->
+  <line x1="80" y1="435" x2="640" y2="435" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arrowG)"/>
+  <text x="360" y="429" text-anchor="middle" font-size="10" fill="#16a34a" font-weight="600">generate_answers_from_results([question_result], config)</text>
+
+  <rect x="580" y="447" width="120" height="118" rx="4" fill="#dcfce7" stroke="#16a34a" stroke-width="1"/>
+  <text x="590" y="463" font-size="8.5" fill="#166534" font-weight="600">Internal flow:</text>
+  <text x="590" y="477" font-size="8.5" fill="#374151">1. _extract_text()</text>
+  <text x="590" y="491" font-size="8.5" fill="#374151">2. _create_answer_prompt()</text>
+  <text x="590" y="505" font-size="8.5" fill="#374151">3. _call_llm() &rarr; vLLM (8100)</text>
+  <text x="590" y="519" font-size="8.5" fill="#374151">4. _parse_structured()</text>
+  <text x="590" y="533" font-size="8.5" fill="#374151">5. _validate_answer()</text>
+  <text x="590" y="555" font-size="8" fill="#6b7280">&nbsp;&nbsp;&rarr; check_hallucination()</text>
+  <text x="590" y="562" font-size="8" fill="#6b7280">&nbsp;&nbsp;&nbsp;&nbsp;x3 retries if ungrounded</text>
+
+  <line x1="640" y1="548" x2="830" y2="548" stroke="#7c3aed" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="735" y="543" text-anchor="middle" font-size="8.5" fill="#7c3aed">check_hallucination(method="hybrid")</text>
+
+  <line x1="640" y1="575" x2="80" y2="575" stroke="#16a34a" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="360" y="571" text-anchor="middle" font-size="9" fill="#6b7280">qa_results (answers + evidence)</text>
+
+  <!-- Step 7: grade -->
+  <line x1="80" y1="600" x2="830" y2="600" stroke="#7c3aed" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="455" y="594" text-anchor="middle" font-size="10" fill="#7c3aed" font-weight="600">grade_qa_results([qa_result], method="hybrid")</text>
+
+  <rect x="768" y="612" width="124" height="82" rx="4" fill="#ede9fe" stroke="#7c3aed" stroke-width="1"/>
+  <text x="778" y="628" font-size="8.5" fill="#5b21b6" font-weight="600">For each Q&amp;A pair:</text>
+  <text x="778" y="642" font-size="8.5" fill="#374151">1. check_hallucination()</text>
+  <text x="778" y="656" font-size="8.5" fill="#374151">&nbsp;&nbsp;&rarr; _call_llm_judge() to vLLM-judge:8101</text>
+  <text x="778" y="670" font-size="8.5" fill="#374151">2. compute confidence</text>
+  <text x="778" y="684" font-size="8.5" fill="#374151">3. map to grade A-F</text>
+
+  <line x1="830" y1="700" x2="80" y2="700" stroke="#7c3aed" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="455" y="684" text-anchor="middle" font-size="9" fill="#6b7280">graded_results (grades, confidence, reasons)</text>
+
+  <!-- Step 8: save -->
+  <line x1="80" y1="727" x2="1020" y2="727" stroke="#ea580c" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="550" y="721" text-anchor="middle" font-size="10" fill="#ea580c" font-weight="600">save_results(combined, provider, model)</text>
+
+  <rect x="960" y="737" width="120" height="45" rx="4" fill="#ffedd5" stroke="#ea580c" stroke-width="1"/>
+  <text x="970" y="754" font-size="8.5" fill="#9a3412">get_timestamped_</text>
+  <text x="970" y="767" font-size="8.5" fill="#9a3412">output_path()</text>
+  <text x="970" y="777" font-size="8.5" fill="#374151">Write JSON file</text>
+</svg>
+</div>
+<p class="diagram-caption">Figure 8 &mdash; Pipeline code execution: how <code>run_qa_pipeline.py</code> calls each module for one document</p>
+
+<!-- ============================================================ -->
+<h2 id="question-gen">9. Question Generation &mdash; Deep Dive</h2>
+
+<h3>9.1 Ten Question Types (Bloom's Taxonomy)</h3>
+
+<div class="diagram">
+<svg viewBox="0 0 920 400" width="920" height="400" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <text x="15" y="25" font-size="11" fill="#6b7280" font-weight="600">Cognitive</text>
+  <text x="15" y="38" font-size="11" fill="#6b7280" font-weight="600">Level</text>
+
+  <text x="15" y="75" font-size="10.5" fill="#7c3aed" font-weight="700">CREATE</text>
+  <rect x="110" y="55" width="260" height="40" rx="6" fill="#7c3aed" opacity="0.9"/>
+  <text x="240" y="80" text-anchor="middle" font-size="12" fill="white" font-weight="700">Synthesis &amp; Counterfactual</text>
+  <text x="390" y="68" font-size="10" fill="#374151"><tspan font-weight="600">Synthesis</tspan>: combine 3+ facts into analysis</text>
+  <text x="390" y="84" font-size="10" fill="#374151"><tspan font-weight="600">Counterfactual</tspan>: reason about hypothetical changes</text>
+
+  <text x="15" y="125" font-size="10.5" fill="#2563eb" font-weight="700">EVALUATE</text>
+  <rect x="110" y="105" width="340" height="40" rx="6" fill="#2563eb" opacity="0.9"/>
+  <text x="280" y="130" text-anchor="middle" font-size="12" fill="white" font-weight="700">Evaluation, Inference, Multi-hop</text>
+  <text x="470" y="118" font-size="10" fill="#374151"><tspan font-weight="600">Evaluation</tspan>: assess evidence strength</text>
+  <text x="470" y="134" font-size="10" fill="#374151"><tspan font-weight="600">Inference</tspan>: draw conclusions from facts</text>
+  <text x="470" y="150" font-size="10" fill="#374151"><tspan font-weight="600">Multi-hop</tspan>: connect separate facts</text>
+
+  <text x="15" y="185" font-size="10.5" fill="#0d9488" font-weight="700">ANALYSE</text>
+  <rect x="110" y="165" width="420" height="40" rx="6" fill="#0d9488" opacity="0.9"/>
+  <text x="320" y="190" text-anchor="middle" font-size="12" fill="white" font-weight="700">Analysis, Comparison, Causal</text>
+  <text x="550" y="178" font-size="10" fill="#374151"><tspan font-weight="600">Analysis</tspan>: break down into parts</text>
+  <text x="550" y="194" font-size="10" fill="#374151"><tspan font-weight="600">Comparison</tspan>: compare/contrast entities</text>
+  <text x="550" y="210" font-size="10" fill="#374151"><tspan font-weight="600">Causal</tspan>: cause-and-effect</text>
+
+  <text x="15" y="245" font-size="10.5" fill="#16a34a" font-weight="700">APPLY</text>
+  <rect x="110" y="225" width="500" height="40" rx="6" fill="#16a34a" opacity="0.9"/>
+  <text x="360" y="250" text-anchor="middle" font-size="12" fill="white" font-weight="700">Aggregation (counting, summing)</text>
+  <text x="630" y="245" font-size="10" fill="#374151">Count mentions across document</text>
+
+  <text x="15" y="295" font-size="10.5" fill="#ca8a04" font-weight="700">UNDERSTAND</text>
+  <rect x="110" y="280" width="580" height="40" rx="6" fill="#ca8a04" opacity="0.9"/>
+  <text x="400" y="305" text-anchor="middle" font-size="12" fill="white" font-weight="700">Temporal (timeline, sequence)</text>
+  <text x="710" y="300" font-size="10" fill="#374151">Sequence of events</text>
+
+  <text x="110" y="350" font-size="11" fill="#6b7280" font-style="italic">The "advanced" preset (default) uses all 10 types.</text>
+  <text x="110" y="368" font-size="11" fill="#6b7280" font-style="italic">Every question must reason across at least 2 different parts of the document.</text>
+  <text x="110" y="386" font-size="11" fill="#6b7280" font-style="italic">Questions that can be answered by copying a single sentence are explicitly forbidden.</text>
+</svg>
+<p class="diagram-caption">Figure 9 &mdash; 10 question types mapped to Bloom's Taxonomy cognitive levels</p>
+</div>
+
+<h3>9.2 Prompt Construction Details</h3>
+<div class="callout callout-blue">
+  <b>What goes into the question generation prompt</b>
+  <ol>
+    <li><strong>Role instruction</strong>: "You are an expert analyst creating COMPLEX questions"</li>
+    <li><strong>Type definitions</strong>: Each of the 10 types with instructions and example patterns</li>
+    <li><strong>8 good few-shot examples</strong> from a fictitious document showing correct format and complexity</li>
+    <li><strong>4 bad examples</strong> showing what to avoid (trivial lookups, speculation)</li>
+    <li><strong>9 complexity rules</strong>:
+      <ul>
+        <li>Must reason across &ge;2 parts of the document</li>
+        <li>NEVER ask a question answerable by copying a single sentence</li>
+        <li>Prefer "how", "why", "what does X imply about Y"</li>
+        <li>Aggregation: must require counting across the document</li>
+        <li>Synthesis: must integrate 3+ facts</li>
+        <li>Counterfactual: must reason about what would change</li>
+      </ul>
+    </li>
+    <li><strong>Distribution note</strong>: Distribute questions across types evenly</li>
+    <li><strong>Format</strong>: One per line, with type tag in parentheses</li>
+  </ol>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="seq-question">10. Sequence: Question Generation Code</h2>
+<p>Shows the internal function calls within <span class="file-ref">utils/question_generator.py</span></p>
+
+<div class="seq-diagram">
+<svg viewBox="0 0 1000 640" width="1000" height="640" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif" font-size="11">
+  <text x="100" y="15" text-anchor="middle" font-size="11" font-weight="700" fill="#2563eb">generate_questions()</text>
+  <line x1="100" y1="28" x2="100" y2="620" stroke="#2563eb" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <text x="300" y="15" text-anchor="middle" font-size="11" font-weight="700" fill="#374151">Internal functions</text>
+  <line x1="300" y1="28" x2="300" y2="620" stroke="#374151" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <text x="520" y="15" text-anchor="middle" font-size="11" font-weight="700" fill="#0d9488">duplicate_detector</text>
+  <line x1="520" y1="28" x2="520" y2="620" stroke="#0d9488" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <text x="730" y="15" text-anchor="middle" font-size="11" font-weight="700" fill="#7c3aed">hallucination_checker</text>
+  <line x1="730" y1="28" x2="730" y2="620" stroke="#7c3aed" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <text x="920" y="15" text-anchor="middle" font-size="11" font-weight="700" fill="#ea580c">vLLM API</text>
+  <line x1="920" y1="28" x2="920" y2="620" stroke="#ea580c" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <!-- extract text -->
+  <line x1="100" y1="50" x2="300" y2="50" stroke="#374151" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="200" y="44" text-anchor="middle" font-size="9.5" fill="#374151">_extract_text_content(doc)</text>
+  <line x1="300" y1="62" x2="100" y2="62" stroke="#374151" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="200" y="58" text-anchor="middle" font-size="9" fill="#6b7280">text content</text>
+
+  <!-- Generation loop -->
+  <rect x="38" y="80" width="900" height="270" rx="6" fill="white" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="50" y="96" font-size="10" font-weight="700" fill="#2563eb">LOOP: while questions &lt; needed AND attempts &lt; 5</text>
+
+  <line x1="100" y1="112" x2="300" y2="112" stroke="#374151" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="200" y="106" text-anchor="middle" font-size="9.5" fill="#374151">_create_question_prompt(text, N, complexity, types)</text>
+  <rect x="250" y="120" width="100" height="42" rx="3" fill="#f1f5f9"/>
+  <text x="260" y="134" font-size="8.5" fill="#374151">Build prompt with:</text>
+  <text x="260" y="146" font-size="8.5" fill="#374151">- type instructions</text>
+  <text x="260" y="158" font-size="8.5" fill="#374151">- few-shot examples</text>
+
+  <line x1="100" y1="175" x2="300" y2="175" stroke="#374151" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="200" y="169" text-anchor="middle" font-size="9.5" fill="#374151">_call_llm(prompt, config)</text>
+  <line x1="300" y1="190" x2="920" y2="190" stroke="#ea580c" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="610" y="184" text-anchor="middle" font-size="9" fill="#ea580c">POST /v1/chat/completions (temp=0.7)</text>
+  <line x1="920" y1="205" x2="300" y2="205" stroke="#ea580c" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="610" y="200" text-anchor="middle" font-size="9" fill="#6b7280">LLM response (raw text)</text>
+
+  <line x1="100" y1="225" x2="300" y2="225" stroke="#374151" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="200" y="219" text-anchor="middle" font-size="9.5" fill="#374151">_parse_questions(response, N)</text>
+  <text x="200" y="238" text-anchor="middle" font-size="8.5" fill="#6b7280">strip type tags, split lines</text>
+
+  <line x1="100" y1="258" x2="520" y2="258" stroke="#0d9488" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="310" y="252" text-anchor="middle" font-size="9.5" fill="#0d9488">filter_duplicates_from_new_questions(existing, new, 0.85)</text>
+  <rect x="470" y="268" width="100" height="38" rx="3" fill="#ccfbf1"/>
+  <text x="480" y="282" font-size="8.5" fill="#134e4a">MiniLM cosine</text>
+  <text x="480" y="294" font-size="8.5" fill="#134e4a">similarity check</text>
+  <text x="480" y="300" font-size="8.5" fill="#6b7280">threshold: 0.85</text>
+  <line x1="520" y1="312" x2="100" y2="312" stroke="#0d9488" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="310" y="326" text-anchor="middle" font-size="9" fill="#6b7280">unique questions only</text>
+
+  <!-- Validation loop -->
+  <rect x="38" y="365" width="900" height="240" rx="6" fill="white" stroke="#7c3aed" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="50" y="381" font-size="10" font-weight="700" fill="#7c3aed">LOOP: For each question &mdash; validate &amp; regenerate</text>
+
+  <line x1="100" y1="400" x2="300" y2="400" stroke="#374151" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="200" y="394" text-anchor="middle" font-size="9.5" fill="#374151">_validate_and_regenerate_question(q, doc, config)</text>
+
+  <line x1="300" y1="418" x2="730" y2="418" stroke="#7c3aed" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="515" y="412" text-anchor="middle" font-size="9.5" fill="#7c3aed">check_hallucination(q, doc, method="semantic")</text>
+
+  <rect x="680" y="428" width="100" height="32" rx="3" fill="#ede9fe"/>
+  <text x="690" y="442" font-size="8.5" fill="#5b21b6">MiniLM cosine</text>
+  <text x="690" y="454" font-size="8.5" fill="#5b21b6">similarity check</text>
+
+  <line x1="730" y1="468" x2="300" y2="468" stroke="#7c3aed" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="515" y="463" text-anchor="middle" font-size="9" fill="#6b7280">{is_grounded, confidence}</text>
+
+  <text x="310" y="490" font-size="9.5" fill="#374151" font-weight="600">if NOT grounded (conf &lt; 0.7):</text>
+
+  <line x1="300" y1="505" x2="920" y2="505" stroke="#ea580c" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="610" y="499" text-anchor="middle" font-size="9" fill="#ea580c">_call_llm(regen_prompt) &mdash; "generate NEW question"</text>
+  <line x1="920" y1="520" x2="300" y2="520" stroke="#ea580c" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="610" y="515" text-anchor="middle" font-size="9" fill="#6b7280">new question</text>
+
+  <line x1="300" y1="538" x2="730" y2="538" stroke="#7c3aed" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="515" y="533" text-anchor="middle" font-size="8.5" fill="#7c3aed">re-check hallucination</text>
+
+  <text x="310" y="570" font-size="9" fill="#dc2626">Repeat up to 2 times (max_regeneration_attempts)</text>
+
+  <line x1="300" y1="590" x2="100" y2="590" stroke="#374151" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="200" y="585" text-anchor="middle" font-size="9" fill="#6b7280">(final_question, validation_info)</text>
+</svg>
+</div>
+<p class="diagram-caption">Figure 10 &mdash; Question generation code sequence: prompt &rarr; LLM &rarr; parse &rarr; dedup &rarr; validate</p>
+
+<!-- ============================================================ -->
+<h2 id="answer-gen">11. Answer Generation &mdash; Deep Dive</h2>
+
+<h3>11.1 Structured Answer Prompt</h3>
+<div class="two-col">
+  <div class="col-card">
+    <h4>What the LLM receives</h4>
+    <pre><code>Document: {document_content}
+Question: {question}
+
+Instructions:
+1. Answer using ONLY the document above.
+2. If counting or aggregating, list the
+   items first, then state the total.
+3. Provide "Supporting evidence" quoting
+   key phrases from the document.
+4. If insufficient info, say so.
+
+Format:
+Answer: [your answer]
+Supporting evidence: [quotes]</code></pre>
+  </div>
+  <div class="col-card">
+    <h4>Why each design choice</h4>
+    <table style="font-size:0.82rem">
+      <tr><td style="font-weight:600">"ONLY the document"</td><td>Prevents LLM from using training data &mdash; forces document grounding</td></tr>
+      <tr><td style="font-weight:600">"List items first, then count"</td><td>LLMs miscount when aggregating directly. Listing first forces step-by-step reasoning, improving accuracy by ~30%</td></tr>
+      <tr><td style="font-weight:600">Supporting evidence</td><td>Forces LLM to cite specific text &mdash; creates audit trail. Reviewers verify without re-reading the document</td></tr>
+      <tr><td style="font-weight:600">"Insufficient information"</td><td>Honest "I don&rsquo;t know" beats hallucination</td></tr>
+      <tr><td style="font-weight:600">Temperature 0.3</td><td>Answers must be factual. 0.3 suppresses creative drift while avoiding degenerate repetition (which 0.0 can cause)</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="seq-answer">12. Sequence: Answer Generation Code</h2>
+<p>Shows the internal function calls within <span class="file-ref">utils/answer_generator.py</span></p>
+
+<div class="seq-diagram">
+<svg viewBox="0 0 1000 560" width="1000" height="560" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif" font-size="11">
+  <text x="100" y="15" text-anchor="middle" font-size="11" font-weight="700" fill="#16a34a">generate_answers_from_results()</text>
+  <line x1="100" y1="28" x2="100" y2="540" stroke="#16a34a" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <text x="330" y="15" text-anchor="middle" font-size="11" font-weight="700" fill="#374151">Internal functions</text>
+  <line x1="330" y1="28" x2="330" y2="540" stroke="#374151" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <text x="600" y="15" text-anchor="middle" font-size="11" font-weight="700" fill="#7c3aed">hallucination_checker</text>
+  <line x1="600" y1="28" x2="600" y2="540" stroke="#7c3aed" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <text x="870" y="15" text-anchor="middle" font-size="11" font-weight="700" fill="#ea580c">vLLM API</text>
+  <line x1="870" y1="28" x2="870" y2="540" stroke="#ea580c" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <!-- For each question -->
+  <rect x="38" y="45" width="930" height="485" rx="6" fill="white" stroke="#16a34a" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="50" y="62" font-size="10" font-weight="700" fill="#16a34a">LOOP: For each question</text>
+
+  <line x1="100" y1="82" x2="330" y2="82" stroke="#374151" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="215" y="76" text-anchor="middle" font-size="9.5" fill="#374151">_create_answer_prompt(question, doc_text)</text>
+  <text x="215" y="95" text-anchor="middle" font-size="8.5" fill="#6b7280">structured format: Answer + Evidence</text>
+
+  <line x1="100" y1="112" x2="330" y2="112" stroke="#374151" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="215" y="106" text-anchor="middle" font-size="9.5" fill="#374151">_call_llm(prompt, config)</text>
+  <line x1="330" y1="128" x2="870" y2="128" stroke="#ea580c" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="600" y="122" text-anchor="middle" font-size="9" fill="#ea580c">POST /v1/chat/completions (temp=0.3)</text>
+  <line x1="870" y1="143" x2="330" y2="143" stroke="#ea580c" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <line x1="100" y1="162" x2="330" y2="162" stroke="#374151" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="215" y="156" text-anchor="middle" font-size="9.5" fill="#374151">_parse_structured_answer(raw)</text>
+  <rect x="280" y="170" width="100" height="32" rx="3" fill="#f1f5f9"/>
+  <text x="290" y="184" font-size="8.5" fill="#374151">Split "Answer:"</text>
+  <text x="290" y="196" font-size="8.5" fill="#374151">from "Evidence:"</text>
+
+  <!-- Validation loop -->
+  <rect x="48" y="215" width="910" height="300" rx="6" fill="white" stroke="#dc2626" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="60" y="232" font-size="10" font-weight="700" fill="#dc2626">VALIDATE + RETRY (up to 3 times if ungrounded)</text>
+
+  <line x1="100" y1="250" x2="330" y2="250" stroke="#374151" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="215" y="244" text-anchor="middle" font-size="9.5" fill="#374151">_validate_and_regenerate_answer(ans, q, doc, config, 0.7, 3)</text>
+
+  <line x1="330" y1="268" x2="600" y2="268" stroke="#7c3aed" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="465" y="262" text-anchor="middle" font-size="9.5" fill="#7c3aed">check_hallucination(ans, doc, q, method="hybrid")</text>
+
+  <rect x="550" y="278" width="100" height="52" rx="3" fill="#ede9fe"/>
+  <text x="560" y="292" font-size="8.5" fill="#5b21b6">Pass 1: MiniLM</text>
+  <text x="560" y="304" font-size="8.5" fill="#5b21b6">sliding window</text>
+  <text x="560" y="318" font-size="8.5" fill="#5b21b6">Pass 2: LLM judge</text>
+  <text x="560" y="326" font-size="8.5" fill="#6b7280">(if ungrounded)</text>
+
+  <line x1="600" y1="338" x2="330" y2="338" stroke="#7c3aed" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="465" y="333" text-anchor="middle" font-size="9" fill="#6b7280">{is_grounded, confidence, issues, llm_verdict}</text>
+
+  <text x="340" y="360" font-size="9.5" fill="#dc2626" font-weight="600">if NOT grounded (conf &lt; 0.7) AND attempts &lt; 3:</text>
+
+  <line x1="330" y1="378" x2="870" y2="378" stroke="#ea580c" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="600" y="372" text-anchor="middle" font-size="9" fill="#ea580c">_call_llm("Previous answer may hallucinate. Generate NEW answer")</text>
+  <line x1="870" y1="393" x2="330" y2="393" stroke="#ea580c" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <line x1="330" y1="410" x2="600" y2="410" stroke="#7c3aed" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="465" y="406" text-anchor="middle" font-size="8.5" fill="#7c3aed">re-check hallucination</text>
+
+  <text x="340" y="435" font-size="9" fill="#6b7280">Repeat up to 3 times. After all retries: keep best attempt.</text>
+  <text x="340" y="452" font-size="9" fill="#6b7280">Ungrounded answers are <tspan font-weight="600" fill="#dc2626">kept</tspan> (not discarded) and marked with reasons.</text>
+
+  <line x1="330" y1="490" x2="100" y2="490" stroke="#374151" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="215" y="485" text-anchor="middle" font-size="9" fill="#6b7280">(answer, evidence, validation_info)</text>
+
+  <rect x="650" y="470" width="280" height="40" rx="6" fill="#fee2e2" stroke="#dc2626" stroke-width="1"/>
+  <text x="660" y="487" font-size="9.5" fill="#991b1b" font-weight="600">Worst case per question: 4 LLM calls</text>
+  <text x="660" y="501" font-size="9" fill="#6b7280">1 original + 3 retries, each checked by hybrid</text>
+</svg>
+</div>
+<p class="diagram-caption">Figure 11 &mdash; Answer generation code sequence: prompt &rarr; LLM &rarr; parse &rarr; validate &rarr; retry (x3)</p>
+
+<!-- ============================================================ -->
+<h2 id="hallucination">13. Hallucination Checking &amp; Grading</h2>
+
+<h3>13.1 Sentence Splitting Pipeline</h3>
+<div class="diagram">
+<svg viewBox="0 0 920 200" width="920" height="200" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <rect x="15" y="5" width="890" height="190" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="1"/>
+  <text x="35" y="30" font-size="13" font-weight="700" fill="#374151">_split_into_sentences() Pipeline</text>
+  <rect x="30" y="45" width="125" height="50" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="92" y="65" text-anchor="middle" font-size="9.5" font-weight="600" fill="#1e40af">Protect abbrevs</text>
+  <text x="92" y="80" text-anchor="middle" font-size="9" fill="#374151">Dr. Mr. Mrs. Ms.</text>
+  <text x="165" y="72" font-size="14" fill="#94a3b8">&#x2192;</text>
+  <rect x="180" y="45" width="120" height="50" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="240" y="65" text-anchor="middle" font-size="9.5" font-weight="600" fill="#166534">Protect lists</text>
+  <text x="240" y="80" text-anchor="middle" font-size="9" fill="#374151">1. 2. 3. items</text>
+  <text x="310" y="72" font-size="14" fill="#94a3b8">&#x2192;</text>
+  <rect x="325" y="45" width="120" height="50" rx="6" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="385" y="65" text-anchor="middle" font-size="9.5" font-weight="600" fill="#5b21b6">Protect decimals</text>
+  <text x="385" y="80" text-anchor="middle" font-size="9" fill="#374151">3.5, $1.2M</text>
+  <text x="455" y="72" font-size="14" fill="#94a3b8">&#x2192;</text>
+  <rect x="470" y="45" width="120" height="50" rx="6" fill="#ffedd5" stroke="#ea580c" stroke-width="1.5"/>
+  <text x="530" y="65" text-anchor="middle" font-size="9.5" font-weight="600" fill="#9a3412">Split on [.!?]</text>
+  <text x="530" y="80" text-anchor="middle" font-size="9" fill="#374151">+ newlines</text>
+  <text x="600" y="72" font-size="14" fill="#94a3b8">&#x2192;</text>
+  <rect x="615" y="45" width="130" height="50" rx="6" fill="#fef3c7" stroke="#ca8a04" stroke-width="1.5"/>
+  <text x="680" y="65" text-anchor="middle" font-size="9.5" font-weight="600" fill="#92400e">Restore + Filter</text>
+  <text x="680" y="80" text-anchor="middle" font-size="9" fill="#374151">Drop frags &lt; 3 chars</text>
+  <text x="755" y="72" font-size="14" fill="#94a3b8">&#x2192;</text>
+  <rect x="770" y="48" width="120" height="44" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="830" y="68" text-anchor="middle" font-size="10" font-weight="700" fill="#166534">Clean sentences</text>
+  <text x="830" y="82" text-anchor="middle" font-size="9" fill="#6b7280">ready for grading</text>
+  <text x="35" y="125" font-size="10.5" fill="#dc2626" font-weight="600">Without this:</text>
+  <text x="155" y="125" font-size="10.5" fill="#6b7280">"Dr. Smith found 3.5M items" splits into "Dr", "Smith found 3", "5M items" &mdash; all flagged ungrounded!</text>
+  <text x="35" y="145" font-size="10.5" fill="#16a34a" font-weight="600">With this:</text>
+  <text x="130" y="145" font-size="10.5" fill="#6b7280">"Dr. Smith found 3.5M items" stays as one sentence &#x2713;</text>
+  <text x="35" y="165" font-size="10.5" fill="#16a34a" font-weight="600">Numbered lists:</text>
+  <text x="180" y="165" font-size="10.5" fill="#6b7280">"1. First 2. Second" no longer creates standalone "1" and "2" fragments &#x2713;</text>
+  <text x="35" y="185" font-size="10.5" fill="#16a34a" font-weight="600">Short filter:</text>
+  <text x="155" y="185" font-size="10.5" fill="#6b7280">Fragments &lt; 3 characters are dropped &mdash; prevents "1", "2" from being flagged as ungrounded</text>
+</svg>
+<p class="diagram-caption">Figure 12 &mdash; Sentence splitting handles abbreviations, decimals, numbered lists, and ellipsis</p>
+</div>
+
+<h3>13.2 Sliding Window Semantic Similarity</h3>
+<div class="diagram">
+<svg viewBox="0 0 920 290" width="920" height="290" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <rect x="20" y="5" width="400" height="36" rx="6" fill="#fee2e2" stroke="#dc2626" stroke-width="2"/>
+  <text x="220" y="28" text-anchor="middle" font-size="11.5" font-weight="600" fill="#991b1b">Answer sentence: "Both A and B were arrested"</text>
+  <text x="20" y="68" font-size="12" font-weight="700" fill="#374151">Document sentences:</text>
+  <rect x="20" y="78" width="190" height="28" rx="4" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="115" y="97" text-anchor="middle" font-size="10.5" fill="#1e40af">S1: "A was arrested."</text>
+  <rect x="225" y="78" width="230" height="28" rx="4" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="340" y="97" text-anchor="middle" font-size="10.5" fill="#1e40af">S2: "B was also arrested."</text>
+  <rect x="470" y="78" width="190" height="28" rx="4" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="565" y="97" text-anchor="middle" font-size="10.5" fill="#1e40af">S3: "C was released."</text>
+
+  <text x="20" y="138" font-size="11.5" font-weight="600" fill="#374151">Window 1 (single sentences):</text>
+  <rect x="20" y="148" width="190" height="24" rx="4" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1"/>
+  <text x="115" y="165" text-anchor="middle" font-size="10" fill="#374151">S1 &rarr; similarity: 0.42</text>
+  <rect x="225" y="148" width="230" height="24" rx="4" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1"/>
+  <text x="340" y="165" text-anchor="middle" font-size="10" fill="#374151">S2 &rarr; similarity: 0.45</text>
+  <text x="700" y="165" font-size="11" fill="#dc2626" font-weight="600">&#x2717; All below 0.5 threshold</text>
+
+  <text x="20" y="198" font-size="11.5" font-weight="600" fill="#374151">Window 2 (adjacent pairs):</text>
+  <rect x="20" y="208" width="435" height="24" rx="4" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="237" y="225" text-anchor="middle" font-size="10" fill="#166534">S1 + S2 &rarr; "A was arrested. B was also arrested." &rarr; sim: <tspan font-weight="700">0.78</tspan></text>
+  <text x="700" y="225" font-size="11" fill="#16a34a" font-weight="700">&#x2713; Above 0.5! GROUNDED</text>
+
+  <text x="20" y="258" font-size="11.5" font-weight="600" fill="#374151">Window 3 (triples):</text>
+  <rect x="20" y="268" width="640" height="18" rx="4" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1"/>
+  <text x="340" y="281" text-anchor="middle" font-size="9.5" fill="#374151">S1 + S2 + S3 &rarr; even wider context captured</text>
+</svg>
+<p class="diagram-caption">Figure 13 &mdash; Sliding window captures cross-sentence information single-sentence comparison misses</p>
+</div>
+
+<h3>13.3 Method Comparison</h3>
+<table>
+  <tr><th>Method</th><th>How</th><th>Speed</th><th>Counting</th><th>Inference</th><th>Paraphrase</th><th>GPU</th></tr>
+  <tr><td><code>semantic</code></td><td>MiniLM cosine + sliding window</td><td><span class="badge badge-green">Fast</span></td><td><span class="cross">&#x2717;</span></td><td><span class="cross">&#x2717;</span></td><td><span class="check">&#x2713;</span></td><td>No</td></tr>
+  <tr><td><code>keyword</code></td><td>Key-phrase substring match</td><td><span class="badge badge-green">Fast</span></td><td><span class="cross">&#x2717;</span></td><td><span class="cross">&#x2717;</span></td><td><span class="cross">&#x2717;</span></td><td>No</td></tr>
+  <tr><td><code>llm</code></td><td>LLM-as-judge (temp=0.0)</td><td><span class="badge badge-orange">Slow</span></td><td><span class="check">&#x2713;</span></td><td><span class="check">&#x2713;</span></td><td><span class="check">&#x2713;</span></td><td><span class="badge badge-red">Yes</span></td></tr>
+  <tr style="background:#ede9fe"><td><strong><code>hybrid</code></strong></td><td><strong>Semantic first, LLM fallback</strong></td><td><span class="badge badge-blue">Balanced</span></td><td><span class="check">&#x2713;</span></td><td><span class="check">&#x2713;</span></td><td><span class="check">&#x2713;</span></td><td>Partial</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="seq-grading">14. Sequence: Hybrid Grading Code</h2>
+<p>Shows the internal function calls within <span class="file-ref">utils/hallucination_checker.py</span> for the <strong>hybrid</strong> method.</p>
+
+<div class="seq-diagram">
+<svg viewBox="0 0 950 520" width="950" height="520" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif" font-size="11">
+  <text x="80" y="15" text-anchor="middle" font-size="11" font-weight="700" fill="#7c3aed">check_hallucination()</text>
+  <line x1="80" y1="28" x2="80" y2="500" stroke="#7c3aed" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <text x="280" y="15" text-anchor="middle" font-size="11" font-weight="700" fill="#0d9488">_check_hybrid()</text>
+  <line x1="280" y1="28" x2="280" y2="500" stroke="#0d9488" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <text x="500" y="15" text-anchor="middle" font-size="11" font-weight="700" fill="#2563eb">_check_semantic_based()</text>
+  <line x1="500" y1="28" x2="500" y2="500" stroke="#2563eb" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <text x="730" y="15" text-anchor="middle" font-size="11" font-weight="700" fill="#ea580c">_call_llm_judge()</text>
+  <line x1="730" y1="28" x2="730" y2="500" stroke="#ea580c" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <text x="910" y="15" text-anchor="middle" font-size="11" font-weight="700" fill="#ea580c">vLLM Judge</text>
+  <text x="910" y="28" text-anchor="middle" font-size="9" fill="#6b7280">(Qwen :8101)</text>
+  <line x1="910" y1="38" x2="910" y2="500" stroke="#ea580c" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <!-- Route to hybrid -->
+  <line x1="80" y1="50" x2="280" y2="50" stroke="#0d9488" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="180" y="44" text-anchor="middle" font-size="9.5" fill="#0d9488">method="hybrid"</text>
+
+  <!-- Pass 1 -->
+  <rect x="228" y="65" width="104" height="18" rx="3" fill="#ccfbf1"/>
+  <text x="280" y="79" text-anchor="middle" font-size="9.5" fill="#134e4a" font-weight="600">PASS 1 (fast)</text>
+
+  <line x1="280" y1="90" x2="500" y2="90" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrowB)"/>
+  <text x="390" y="84" text-anchor="middle" font-size="9.5" fill="#2563eb">_check_semantic_based(answer, doc, question)</text>
+
+  <rect x="440" y="100" width="120" height="98" rx="4" fill="#dbeafe"/>
+  <text x="450" y="115" font-size="8.5" fill="#1e40af" font-weight="600">Steps:</text>
+  <text x="450" y="130" font-size="8.5" fill="#374151">1. _split_into_sentences()</text>
+  <text x="450" y="144" font-size="8.5" fill="#374151">2. Build 1/2/3-sent windows</text>
+  <text x="450" y="158" font-size="8.5" fill="#374151">3. Encode with MiniLM</text>
+  <text x="450" y="172" font-size="8.5" fill="#374151">4. Cosine similarity</text>
+  <text x="450" y="186" font-size="8.5" fill="#374151">5. Threshold check (&ge;0.5)</text>
+  <text x="450" y="196" font-size="8.5" fill="#6b7280">6. _is_generic_statement()</text>
+
+  <line x1="500" y1="206" x2="280" y2="206" stroke="#2563eb" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="390" y="201" text-anchor="middle" font-size="9" fill="#6b7280">{confidence, grounded_sents, ungrounded_sents}</text>
+
+  <!-- Decision -->
+  <rect x="218" y="222" width="124" height="28" rx="4" fill="#fef3c7" stroke="#ca8a04" stroke-width="1.5"/>
+  <text x="280" y="240" text-anchor="middle" font-size="10" fill="#92400e" font-weight="600">All grounded?</text>
+
+  <!-- YES path -->
+  <line x1="218" y1="236" x2="130" y2="236" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="168" y="228" font-size="10" fill="#16a34a" font-weight="700">YES</text>
+  <rect x="30" y="255" width="180" height="42" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="120" y="274" text-anchor="middle" font-size="11" font-weight="700" fill="#166534">Return GROUNDED &#x2713;</text>
+  <text x="120" y="289" text-anchor="middle" font-size="9" fill="#6b7280">~70-80% of answers. No LLM call!</text>
+
+  <!-- NO path -->
+  <text x="345" y="248" font-size="10" fill="#dc2626" font-weight="700">NO (~20-30%)</text>
+  <line x1="280" y1="250" x2="280" y2="280" stroke="#dc2626" stroke-width="1.5" marker-end="url(#arrowR)"/>
+
+  <!-- Pass 2 -->
+  <rect x="228" y="282" width="104" height="18" rx="3" fill="#ffedd5"/>
+  <text x="280" y="296" text-anchor="middle" font-size="9.5" fill="#9a3412" font-weight="600">PASS 2 (accurate)</text>
+
+  <line x1="280" y1="308" x2="730" y2="308" stroke="#ea580c" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="505" y="302" text-anchor="middle" font-size="9.5" fill="#ea580c">_call_llm_judge(answer, doc, question)</text>
+
+  <rect x="680" y="318" width="100" height="68" rx="4" fill="#ffedd5"/>
+  <text x="690" y="333" font-size="8.5" fill="#9a3412" font-weight="600">Steps:</text>
+  <text x="690" y="347" font-size="8.5" fill="#374151">1. Build judge prompt</text>
+  <text x="690" y="361" font-size="8.5" fill="#374151">2. Truncate doc if &gt;6K</text>
+  <text x="690" y="375" font-size="8.5" fill="#374151">3. Call LLM (temp=0.0)</text>
+  <text x="690" y="383" font-size="8.5" fill="#374151">4. _parse_llm_verdict()</text>
+
+  <line x1="730" y1="340" x2="910" y2="340" stroke="#ea580c" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="820" y="334" text-anchor="middle" font-size="8.5" fill="#ea580c">POST vllm-judge:8101 (temp=0.0)</text>
+  <line x1="910" y1="355" x2="730" y2="355" stroke="#ea580c" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="820" y="365" text-anchor="middle" font-size="8.5" fill="#6b7280">JSON verdict</text>
+
+  <line x1="730" y1="395" x2="280" y2="395" stroke="#ea580c" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="505" y="390" text-anchor="middle" font-size="9" fill="#6b7280">{verdict: SUPPORTED/NOT_SUPPORTED, confidence, reason}</text>
+
+  <!-- Final decision -->
+  <rect x="218" y="415" width="124" height="22" rx="4" fill="#fef3c7" stroke="#ca8a04" stroke-width="1"/>
+  <text x="280" y="430" text-anchor="middle" font-size="9.5" fill="#92400e" font-weight="600">LLM says SUPPORTED?</text>
+
+  <text x="180" y="455" font-size="10" fill="#16a34a" font-weight="600">YES:</text>
+  <text x="210" y="455" font-size="10" fill="#374151">Override semantic &rarr; GROUNDED. Use LLM confidence.</text>
+
+  <text x="180" y="475" font-size="10" fill="#dc2626" font-weight="600">NO:</text>
+  <text x="200" y="475" font-size="10" fill="#374151">Keep semantic verdict &rarr; UNGROUNDED. Use min(sem_conf, llm_conf).</text>
+  <text x="200" y="493" font-size="10" fill="#6b7280">Add LLM&rsquo;s reason to issues list. Save llm_verdict to output.</text>
+</svg>
+</div>
+<p class="diagram-caption">Figure 14 &mdash; Hybrid grading: semantic fast path + LLM-as-judge fallback with full code flow</p>
+
+<!-- ============================================================ -->
+<h2 id="hybrid">15. Hybrid Method &mdash; Why It Works</h2>
+
+<div class="two-col">
+  <div class="col-card" style="border-color:#16a34a">
+    <h4 style="color:#16a34a">When semantic alone is enough (~70-80%)</h4>
+    <ul>
+      <li>Answer directly quotes or paraphrases the document</li>
+      <li>Simple factual statements</li>
+      <li>Clear textual overlap</li>
+    </ul>
+    <p><strong>Result:</strong> Fast, no GPU call needed. Pipeline stays fast.</p>
+  </div>
+  <div class="col-card" style="border-color:#7c3aed">
+    <h4 style="color:#7c3aed">When LLM fallback is needed (~20-30%)</h4>
+    <ul>
+      <li><strong>Aggregation:</strong> "3 people total" &mdash; no single sentence says this</li>
+      <li><strong>Inference:</strong> "Strategy was successful" &mdash; combines facts from different paragraphs</li>
+      <li><strong>Multi-hop:</strong> "Given A leads to B, and B was observed..." &mdash; logical chain</li>
+      <li><strong>Negation:</strong> "No evidence was found" &mdash; hard for embedding similarity</li>
+    </ul>
+    <p><strong>Result:</strong> Accurate judgment from LLM, but only when needed.</p>
+  </div>
+</div>
+
+<h3>Grading Scale</h3>
+<div style="max-width:600px; margin: 1rem 0;">
+  <div class="grade-bar"><span class="grade-label" style="color:#16a34a">A</span><div class="grade-fill" style="width:90%; background:linear-gradient(90deg,#16a34a,#22c55e);">&#x2265; 90% confidence</div><span class="grade-range">Excellent</span></div>
+  <div class="grade-bar"><span class="grade-label" style="color:#2563eb">B</span><div class="grade-fill" style="width:80%; background:linear-gradient(90deg,#2563eb,#60a5fa);">&#x2265; 80%</div><span class="grade-range">Good</span></div>
+  <div class="grade-bar"><span class="grade-label" style="color:#ca8a04">C</span><div class="grade-fill" style="width:70%; background:linear-gradient(90deg,#ca8a04,#fbbf24);">&#x2265; 70%</div><span class="grade-range">Fair</span></div>
+  <div class="grade-bar"><span class="grade-label" style="color:#ea580c">D</span><div class="grade-fill" style="width:60%; background:linear-gradient(90deg,#ea580c,#fb923c);">&#x2265; 60%</div><span class="grade-range">Poor</span></div>
+  <div class="grade-bar"><span class="grade-label" style="color:#dc2626">F</span><div class="grade-fill" style="width:50%; background:linear-gradient(90deg,#dc2626,#f87171);">&lt; 60%</div><span class="grade-range">Fail</span></div>
+</div>
+<p class="diagram-caption">Figure 15 &mdash; Grading scale: confidence mapped to letter grade</p>
+
+
+<!-- ================================================================ -->
+<!-- ====  PART D: OUTPUT & CONFIGURATION  ========================= -->
+<!-- ================================================================ -->
+<div class="part-header">Part D &mdash; Output &amp; Configuration</div>
+
+<!-- ============================================================ -->
+<h2 id="output">16. Output Management</h2>
+
+<h3>16.1 Timestamped Output Folders</h3>
+<div class="diagram">
+<svg viewBox="0 0 920 190" width="920" height="190" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <rect x="20" y="5" width="880" height="180" rx="10" fill="#fefce8" stroke="#ca8a04" stroke-width="1.5"/>
+  <text x="40" y="30" font-size="13" font-weight="700" fill="#854d0e">output/vllm/meta-llama-3.1-8b-instruct/</text>
+  <rect x="60" y="45" width="350" height="30" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="80" y="65" font-size="11.5" fill="#166534">&#x1F4C1; <tspan font-weight="700">2026-02-13_091530</tspan>/</text>
+  <text x="320" y="65" font-size="10" fill="#6b7280">&larr; Morning run</text>
+  <rect x="60" y="85" width="350" height="30" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="80" y="105" font-size="11.5" fill="#1e40af">&#x1F4C1; <tspan font-weight="700">2026-02-13_143025</tspan>/</text>
+  <text x="320" y="105" font-size="10" fill="#6b7280">&larr; Afternoon run</text>
+  <rect x="60" y="125" width="350" height="30" rx="6" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="80" y="145" font-size="11.5" fill="#5b21b6">&#x1F4C1; <tspan font-weight="700">2026-02-13_181730</tspan>/</text>
+  <text x="320" y="145" font-size="10" fill="#6b7280">&larr; Evening run</text>
+  <rect x="470" y="45" width="400" height="55" rx="8" fill="#fff" stroke="#94a3b8" stroke-width="1"/>
+  <text x="490" y="65" font-size="11.5" font-weight="600" fill="#374151">Format: YYYY-MM-DD_HHMMSS</text>
+  <text x="490" y="82" font-size="10.5" fill="#6b7280">init_run_timestamp() locks once at pipeline start.</text>
+  <text x="490" y="95" font-size="10.5" fill="#6b7280">All files from same run in same folder.</text>
+  <text x="470" y="130" font-size="11" fill="#374151" font-weight="600">Why date + time?</text>
+  <text x="470" y="148" font-size="10.5" fill="#6b7280">Multiple runs/day are common. Date-only would overwrite.</text>
+</svg>
+<p class="diagram-caption">Figure 16 &mdash; Per-run timestamped folders prevent overwriting</p>
+</div>
+
+<h3>16.2 Run Summary with Ungrounded Reasons</h3>
+<div class="two-col">
+  <div class="col-card">
+    <h4>run_summary.json structure</h4>
+    <pre><code>{
+  "run_folder": "2026-02-13_143025",
+  "total_documents": 5,
+  "overall_grade": "B",
+  "overall_confidence": 0.84,
+  "documents": [
+    {
+      "file": "doc1_analysis.json",
+      "grade": "A", "confidence": 0.95,
+      "qa_details": [
+        {
+          "question": "How does...",
+          "answer": "Based on...",
+          "is_grounded": true,
+          "confidence": 0.92,
+          "method": "hybrid (semantic)"
+        },
+        {
+          "question": "How many...",
+          "answer": "There are 5...",
+          "is_grounded": false,
+          "confidence": 0.35,
+          "issues": ["Low similarity (0.32)"],
+          "ungrounded_sentences": [
+            "There are 5 people total."
+          ],
+          "llm_verdict": {
+            "verdict": "NOT_SUPPORTED",
+            "confidence": 0.3,
+            "reason": "Document mentions 4 people,
+                       not 5."
+          }
+        }
+      ]
+    }
+  ],
+  "ungrounded_highlights": [
+    {
+      "document": "doc1",
+      "question": "How many...",
+      "reasons": ["Count mismatch: 4 vs 5"]
+    }
+  ]
+}</code></pre>
+  </div>
+  <div class="col-card">
+    <h4>Why detailed reasons matter</h4>
+    <p>An analyst reading the summary needs <strong>why</strong> an answer was marked ungrounded, not just that it was.</p>
+    <p><strong>Console summary output</strong> (from <code>summarize_run.sh</code>):</p>
+    <pre><code>  Generator: meta-llama/Meta-Llama-3.1-8B-Instruct
+  Judge    : Qwen/Qwen2.5-7B-Instruct</code></pre>
+    <table style="font-size:0.82rem">
+      <tr><th>Field</th><th>Purpose</th></tr>
+      <tr><td><code>generator_model</code></td><td>Model used for Q&amp;A generation (e.g., Llama)</td></tr>
+      <tr><td><code>judge_model</code></td><td>Model used as LLM-as-judge (e.g., Qwen)</td></tr>
+      <tr><td><code>issues</code></td><td>Human-readable reasons (e.g., "Low similarity (0.32): &lsquo;There are 5 people total.&rsquo;")</td></tr>
+      <tr><td><code>ungrounded_sentences</code></td><td>The specific sentences that failed grounding</td></tr>
+      <tr><td><code>llm_verdict</code></td><td>LLM judge&rsquo;s full explanation with verdict, confidence, and reason</td></tr>
+      <tr><td><code>ungrounded_highlights</code></td><td>Flat list of ALL problems across all documents for quick scanning</td></tr>
+    </table>
+    <br>
+    <div class="callout callout-orange">
+      <b>Without reasons:</b> Analyst must open each analysis JSON file individually to investigate why answers failed.
+    </div>
+    <div class="callout callout-green">
+      <b>With reasons:</b> Analyst scans the summary and immediately sees what went wrong and why, across all documents in one view.
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="config">17. Configuration Reference</h2>
+
+<div class="diagram">
+<svg viewBox="0 0 920 500" width="920" height="500" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <rect x="320" y="5" width="280" height="45" rx="10" fill="#1e293b"/>
+  <text x="460" y="35" text-anchor="middle" font-size="14" font-weight="700" fill="white">config/config.yaml</text>
+  <!-- run -->
+  <line x1="360" y1="50" x2="130" y2="90" stroke="#94a3b8" stroke-width="1.5"/>
+  <rect x="15" y="90" width="230" height="80" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="35" y="112" font-size="12" font-weight="700" fill="#1e40af">run:</text>
+  <text x="35" y="130" font-size="10.5" fill="#374151">input_file: dev-data.jsonl</text>
+  <text x="35" y="146" font-size="10.5" fill="#374151">num_documents: 2</text>
+  <text x="35" y="162" font-size="10" fill="#6b7280">What to process</text>
+  <!-- llm -->
+  <line x1="460" y1="50" x2="460" y2="90" stroke="#94a3b8" stroke-width="1.5"/>
+  <rect x="310" y="90" width="300" height="120" rx="8" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="330" y="112" font-size="12" font-weight="700" fill="#166534">llm:</text>
+  <text x="330" y="130" font-size="10.5" fill="#374151">provider: "vllm"</text>
+  <text x="330" y="146" font-size="10.5" fill="#374151">model: "meta-llama/Meta-Llama-3.1-8B-Instruct"</text>
+  <text x="330" y="162" font-size="10.5" fill="#374151">temperature: 0.7 <tspan fill="#6b7280">(question gen)</tspan></text>
+  <text x="330" y="178" font-size="10.5" fill="#374151">max_tokens: 500</text>
+  <text x="330" y="194" font-size="10.5" fill="#374151">base_url: "http://localhost:8100/v1"</text>
+  <text x="330" y="206" font-size="10" fill="#6b7280">LLM connection</text>
+  <!-- question_gen -->
+  <line x1="560" y1="50" x2="770" y2="90" stroke="#94a3b8" stroke-width="1.5"/>
+  <rect x="630" y="90" width="270" height="140" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+  <text x="650" y="112" font-size="12" font-weight="700" fill="#5b21b6">question_generation:</text>
+  <text x="650" y="130" font-size="10.5" fill="#374151">num_questions: 3</text>
+  <text x="650" y="146" font-size="10.5" fill="#374151">complexity: "advanced" <tspan fill="#6b7280">(10 types)</tspan></text>
+  <text x="650" y="162" font-size="10.5" fill="#374151">duplicate_threshold: 0.85</text>
+  <text x="650" y="178" font-size="10.5" fill="#374151">validation:</text>
+  <text x="668" y="194" font-size="10" fill="#374151">max_regen_attempts: 2</text>
+  <text x="668" y="208" font-size="10" fill="#374151">method: "semantic"</text>
+  <text x="668" y="222" font-size="10" fill="#374151">min_confidence: 0.7</text>
+  <!-- answer_gen -->
+  <rect x="15" y="240" width="230" height="100" rx="8" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+  <text x="35" y="262" font-size="12" font-weight="700" fill="#9a3412">answer_generation:</text>
+  <text x="35" y="280" font-size="10.5" fill="#374151">temperature: 0.3 <tspan fill="#6b7280">(factual)</tspan></text>
+  <text x="35" y="296" font-size="10.5" fill="#374151">multi_turn:</text>
+  <text x="53" y="312" font-size="10" fill="#374151">max_regen_attempts: 3</text>
+  <text x="53" y="326" font-size="10" fill="#374151">min_confidence: 0.7</text>
+  <!-- hallucination -->
+  <rect x="310" y="260" width="240" height="60" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="2"/>
+  <text x="330" y="282" font-size="12" font-weight="700" fill="#134e4a">hallucination:</text>
+  <text x="330" y="300" font-size="10.5" fill="#374151">method: "hybrid" <tspan fill="#6b7280">(recommended)</tspan></text>
+  <text x="330" y="314" font-size="10" fill="#6b7280">semantic | keyword | llm | hybrid</text>
+  <!-- Models -->
+  <rect x="310" y="370" width="300" height="110" rx="8" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="330" y="392" font-size="12" font-weight="700" fill="#374151">Models used:</text>
+  <text x="330" y="412" font-size="10.5" fill="#374151"><tspan font-weight="600">Generation:</tspan> Llama-3.1-8B (vLLM :8100)</text>
+  <text x="330" y="430" font-size="10.5" fill="#374151"><tspan font-weight="600">Judge:</tspan> Qwen2.5-7B (vLLM-judge :8101)</text>
+  <text x="330" y="448" font-size="10.5" fill="#374151"><tspan font-weight="600">Embeddings:</tspan> all-MiniLM-L6-v2 (~80MB, CPU)</text>
+  <text x="330" y="466" font-size="10" fill="#6b7280">Output: generator_model, judge_model in run_summary</text>
+  <text x="330" y="478" font-size="10" fill="#6b7280">All run fully offline, no internet needed</text>
+</svg>
+<p class="diagram-caption">Figure 17 &mdash; Configuration structure and models</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="models">18. Models Used</h2>
+
+<table>
+  <tr><th>Model</th><th>Purpose</th><th>Size</th><th>Hardware</th><th>Where used (file &rarr; function)</th></tr>
+  <tr>
+    <td><strong>Meta-Llama-3.1-8B-Instruct</strong></td>
+    <td>Question generation, answer generation only</td>
+    <td>~16 GB</td>
+    <td>GPU 0 (via vLLM, port 8100)</td>
+    <td><code>question_generator</code> &rarr; _call_llm()<br><code>answer_generator</code> &rarr; _call_llm()</td>
+  </tr>
+  <tr>
+    <td><strong>Qwen2.5-7B-Instruct</strong></td>
+    <td>LLM-as-judge only (independent evaluator)</td>
+    <td>~14 GB</td>
+    <td>GPU 1 (via vLLM-judge, port 8101)</td>
+    <td><code>hallucination_checker</code> &rarr; _call_llm_judge()</td>
+  </tr>
+  <tr>
+    <td><strong>all-MiniLM-L6-v2</strong></td>
+    <td>Semantic similarity (grounding check, deduplication)</td>
+    <td>~80 MB</td>
+    <td>CPU (SentenceTransformer)</td>
+    <td><code>hallucination_checker</code> &rarr; _check_semantic_based()<br><code>duplicate_detector</code> &rarr; is_duplicate()</td>
+  </tr>
+</table>
+
+<div class="callout callout-teal">
+  <b>Why these models?</b>
+  <ul>
+    <li><strong>Llama-3.1-8B</strong>: Good balance of capability and speed for Q&amp;A generation. Instruction-tuned for following complex prompts.</li>
+    <li><strong>Qwen2.5-7B</strong>: Separate judge model avoids self-evaluation bias. The same model that generates Q&amp;A does not judge its own output.</li>
+    <li><strong>MiniLM-L6-v2</strong>: Only 22M parameters, runs on CPU in &lt;1s. 384-dimensional embeddings are sufficient for sentence-level similarity. No GPU needed &mdash; keeps grading fast and independent of vLLM availability.</li>
+  </ul>
+</div>
+
+
+<!-- ================================================================ -->
+<!-- ====  PART E: APPENDIX  ======================================= -->
+<!-- ================================================================ -->
+<div class="part-header">Part E &mdash; Appendix</div>
+
+<!-- ============================================================ -->
+<h2 id="decisions">19. Design Decisions Summary</h2>
+
+<table>
+  <tr><th>#</th><th>Decision</th><th>Rationale</th></tr>
+  <tr><td>1</td><td><strong>10 question types</strong> (incl. synthesis, evaluation, counterfactual)</td><td>Simple fact-lookup doesn&rsquo;t test comprehension. Complex multi-step questions reveal real understanding gaps.</td></tr>
+  <tr><td>2</td><td><strong>Few-shot examples</strong> (8 good + 4 bad) in prompt</td><td>In-context learning produces correctly-typed questions. Bad examples prevent common mistakes. ~300 extra tokens is minimal.</td></tr>
+  <tr><td>3</td><td><strong>Complexity rules</strong> (&ldquo;must reason across 2+ parts&rdquo;)</td><td>Explicitly prevents LLM from generating trivial single-sentence-answer questions.</td></tr>
+  <tr><td>4</td><td><strong>Structured answer format</strong> (Answer + Evidence)</td><td>Forces document grounding. &ldquo;List then count&rdquo; improves aggregation by ~30%. Evidence provides audit trail.</td></tr>
+  <tr><td>5</td><td><strong>Separate temperatures</strong> (0.7 questions, 0.3 answers)</td><td>Questions need diversity; answers need factual accuracy. Different temperature for each.</td></tr>
+  <tr><td>6</td><td><strong>3 answer retries</strong></td><td>1 retry insufficient for complex aggregation. 3 gives enough chances (4 total). More: diminishing returns.</td></tr>
+  <tr><td>7</td><td><strong>Hybrid grading</strong> (semantic + LLM fallback)</td><td>~70-80% pass semantic alone (fast). 20-30% get LLM evaluation. 40-60% faster than pure LLM.</td></tr>
+  <tr><td>8</td><td><strong>Sliding window</strong> (1/2/3-sentence chunks)</td><td>Captures cross-sentence information single-sentence comparison misses. ~3x embeddings but MiniLM is fast.</td></tr>
+  <tr><td>9</td><td><strong>Sentence splitting</strong> with protection</td><td>Prevents &ldquo;Dr.&rdquo;, &ldquo;3.5&rdquo;, &ldquo;1.&rdquo; from creating false ungrounded fragments.</td></tr>
+  <tr><td>10</td><td><strong>Timestamped folders</strong> (YYYY-MM-DD_HHMMSS)</td><td>Multiple runs/day get separate folders. No overwrites. Timestamp locked at start.</td></tr>
+  <tr><td>11</td><td><strong>Ungrounded reasons</strong> in summary</td><td>Analyst sees WHY (issues, sentences, LLM verdict) without opening each file.</td></tr>
+  <tr><td>12</td><td><strong>Three-layer permission model</strong></td><td>Entrypoint startup + EXIT trap + post-run safety net with --privileged --userns=host.</td></tr>
+  <tr><td>13</td><td><strong>All Docker mounts :rw</strong></td><td>Prevents container failures (vLLM tokenizer cache). Host user can edit/delete freely.</td></tr>
+  <tr><td>14</td><td><strong>Three-container design</strong></td><td>Separation: vLLM (Llama, GPU 0), vLLM-judge (Qwen, GPU 1), CPU pipeline. Independent lifecycles.</td></tr>
+  <tr><td>15</td><td><strong>gosu without exec</strong></td><td>Allows bash EXIT trap to fire for cleanup. With exec, bash is replaced and trap never runs.</td></tr>
+  <tr><td>16</td><td><strong>Semantic for question validation</strong> (not hybrid)</td><td>Questions are short &mdash; semantic is sufficient. Hybrid would trigger expensive LLM call for every question.</td></tr>
+  <tr><td>17</td><td><strong>Separate judge model (Qwen)</strong></td><td>Avoids self-evaluation bias: the same model that generates Q&amp;A does not judge its own output. Qwen on port 8101 is independent.</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="agentic">20. Agentic Classification</h2>
+
+<p><strong>&ldquo;Agentic AI&rdquo;</strong> refers to systems that autonomously pursue goals by planning, reasoning, using tools, observing outcomes, and adapting their behaviour without human intervention at each step. This section evaluates where QAGRedo sits on the agentic spectrum.</p>
+
+<h3>20.1 Classification Spectrum</h3>
+
+<div class="diagram">
+<svg viewBox="0 0 920 340" width="920" height="340" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <!-- Background -->
+  <rect x="5" y="5" width="910" height="330" rx="12" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+
+  <!-- Spectrum bar -->
+  <defs>
+    <linearGradient id="specGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#94a3b8"/>
+      <stop offset="50%" style="stop-color:#2563eb"/>
+      <stop offset="100%" style="stop-color:#7c3aed"/>
+    </linearGradient>
+  </defs>
+  <rect x="60" y="30" width="800" height="40" rx="20" fill="url(#specGrad)" opacity="0.15"/>
+  <rect x="60" y="30" width="800" height="40" rx="20" fill="none" stroke="url(#specGrad)" stroke-width="2"/>
+
+  <!-- Labels on spectrum -->
+  <text x="100" y="56" text-anchor="middle" font-size="11" font-weight="700" fill="#64748b">Simple Chain</text>
+  <text x="460" y="56" text-anchor="middle" font-size="11" font-weight="700" fill="#2563eb">Pipeline with</text>
+  <text x="460" y="68" text-anchor="middle" font-size="11" font-weight="700" fill="#2563eb">Agentic Elements</text>
+  <text x="820" y="56" text-anchor="middle" font-size="11" font-weight="700" fill="#7c3aed">Full Agent</text>
+
+  <!-- QAGRedo marker -->
+  <circle cx="430" cy="50" r="12" fill="#2563eb" stroke="white" stroke-width="3"/>
+  <text x="430" y="55" text-anchor="middle" font-size="9" font-weight="700" fill="white">Q</text>
+  <line x1="430" y1="62" x2="430" y2="85" stroke="#2563eb" stroke-width="2"/>
+  <text x="430" y="100" text-anchor="middle" font-size="13" font-weight="700" fill="#1e40af">QAGRedo</text>
+
+  <!-- Comparison table embedded in SVG -->
+  <!-- Headers -->
+  <rect x="60" y="120" width="180" height="30" rx="4" fill="#1e293b"/>
+  <text x="150" y="140" text-anchor="middle" font-size="10.5" font-weight="600" fill="white">Characteristic</text>
+  <rect x="240" y="120" width="200" height="30" rx="4" fill="#94a3b8"/>
+  <text x="340" y="140" text-anchor="middle" font-size="10.5" font-weight="600" fill="white">Simple Chain</text>
+  <rect x="440" y="120" width="220" height="30" rx="4" fill="#2563eb"/>
+  <text x="550" y="140" text-anchor="middle" font-size="10.5" font-weight="600" fill="white">QAGRedo</text>
+  <rect x="660" y="120" width="200" height="30" rx="4" fill="#7c3aed"/>
+  <text x="760" y="140" text-anchor="middle" font-size="10.5" font-weight="600" fill="white">Full Agent</text>
+
+  <!-- Row 1: Fixed steps -->
+  <rect x="60" y="150" width="180" height="28" fill="#f8fafc" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="70" y="169" font-size="10.5" fill="#374151" font-weight="600">Fixed steps</text>
+  <rect x="240" y="150" width="200" height="28" fill="#f8fafc" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="340" y="169" text-anchor="middle" font-size="10.5" fill="#374151">Yes</text>
+  <rect x="440" y="150" width="220" height="28" fill="#dbeafe" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="550" y="169" text-anchor="middle" font-size="10.5" font-weight="700" fill="#1e40af">Yes</text>
+  <rect x="660" y="150" width="200" height="28" fill="#f8fafc" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="760" y="169" text-anchor="middle" font-size="10.5" fill="#374151">No (dynamic)</text>
+
+  <!-- Row 2: Self-correction -->
+  <rect x="60" y="178" width="180" height="28" fill="white" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="70" y="197" font-size="10.5" fill="#374151" font-weight="600">Self-correction</text>
+  <rect x="240" y="178" width="200" height="28" fill="white" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="340" y="197" text-anchor="middle" font-size="10.5" fill="#dc2626">&#x2718; No</text>
+  <rect x="440" y="178" width="220" height="28" fill="#dbeafe" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="550" y="197" text-anchor="middle" font-size="10.5" font-weight="700" fill="#16a34a">&#x2714; Yes (retries)</text>
+  <rect x="660" y="178" width="200" height="28" fill="white" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="760" y="197" text-anchor="middle" font-size="10.5" fill="#16a34a">&#x2714; Yes</text>
+
+  <!-- Row 3: Multi-tool use -->
+  <rect x="60" y="206" width="180" height="28" fill="#f8fafc" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="70" y="225" font-size="10.5" fill="#374151" font-weight="600">Multi-tool use</text>
+  <rect x="240" y="206" width="200" height="28" fill="#f8fafc" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="340" y="225" text-anchor="middle" font-size="10.5" fill="#dc2626">&#x2718; No</text>
+  <rect x="440" y="206" width="220" height="28" fill="#dbeafe" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="550" y="225" text-anchor="middle" font-size="10.5" font-weight="700" fill="#16a34a">&#x2714; Yes (3 models)</text>
+  <rect x="660" y="206" width="200" height="28" fill="#f8fafc" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="760" y="225" text-anchor="middle" font-size="10.5" fill="#16a34a">&#x2714; Yes</text>
+
+  <!-- Row 4: Dynamic planning -->
+  <rect x="60" y="234" width="180" height="28" fill="white" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="70" y="253" font-size="10.5" fill="#374151" font-weight="600">Dynamic planning</text>
+  <rect x="240" y="234" width="200" height="28" fill="white" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="340" y="253" text-anchor="middle" font-size="10.5" fill="#dc2626">&#x2718; No</text>
+  <rect x="440" y="234" width="220" height="28" fill="#dbeafe" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="550" y="253" text-anchor="middle" font-size="10.5" font-weight="700" fill="#dc2626">&#x2718; No</text>
+  <rect x="660" y="234" width="200" height="28" fill="white" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="760" y="253" text-anchor="middle" font-size="10.5" fill="#16a34a">&#x2714; Yes</text>
+
+  <!-- Row 5: Environment interaction -->
+  <rect x="60" y="262" width="180" height="28" fill="#f8fafc" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="70" y="281" font-size="10.5" fill="#374151" font-weight="600">Environment interaction</text>
+  <rect x="240" y="262" width="200" height="28" fill="#f8fafc" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="340" y="281" text-anchor="middle" font-size="10.5" fill="#dc2626">&#x2718; No</text>
+  <rect x="440" y="262" width="220" height="28" fill="#dbeafe" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="550" y="281" text-anchor="middle" font-size="10.5" font-weight="700" fill="#dc2626">&#x2718; No</text>
+  <rect x="660" y="262" width="200" height="28" fill="#f8fafc" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="760" y="281" text-anchor="middle" font-size="10.5" fill="#16a34a">&#x2714; Yes</text>
+
+  <!-- Row 6: Open-ended reasoning -->
+  <rect x="60" y="290" width="180" height="28" fill="white" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="70" y="309" font-size="10.5" fill="#374151" font-weight="600">Open-ended reasoning</text>
+  <rect x="240" y="290" width="200" height="28" fill="white" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="340" y="309" text-anchor="middle" font-size="10.5" fill="#dc2626">&#x2718; No</text>
+  <rect x="440" y="290" width="220" height="28" fill="#dbeafe" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="550" y="309" text-anchor="middle" font-size="10.5" font-weight="700" fill="#dc2626">&#x2718; No</text>
+  <rect x="660" y="290" width="200" height="28" fill="white" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="760" y="309" text-anchor="middle" font-size="10.5" fill="#16a34a">&#x2714; Yes</text>
+</svg>
+<p class="diagram-caption">Figure 18 &mdash; QAGRedo on the agentic spectrum: a pipeline with agentic elements</p>
+</div>
+
+<h3>20.2 Agentic Traits QAGRedo Exhibits</h3>
+
+<div class="two-col">
+  <div class="col-card">
+    <h4><span class="check">&#x2714;</span> Self-Correction (Retry Loops)</h4>
+    <p>Questions are validated for grounding and <strong>regenerated up to 2 times</strong> if ungrounded. Answers are validated and <strong>regenerated up to 3 times</strong>. The system evaluates its own output quality and retries autonomously.</p>
+    <p style="font-size:0.85rem; color:#6b7280;">See: Sections 9 (question validation), 11 (answer retries)</p>
+  </div>
+  <div class="col-card">
+    <h4><span class="check">&#x2714;</span> Multi-Model Tool Orchestration</h4>
+    <p>Coordinates <strong>three distinct models</strong>: Llama (generation), Qwen (judging), and MiniLM (embedding). Selects which to invoke based on intermediate results &mdash; the hybrid method only calls Qwen when semantic similarity is insufficient.</p>
+    <p style="font-size:0.85rem; color:#6b7280;">See: Sections 13&ndash;15 (hybrid grading)</p>
+  </div>
+  <div class="col-card">
+    <h4><span class="check">&#x2714;</span> Autonomous Multi-Step Execution</h4>
+    <p>Once started, the full pipeline (generate questions &rarr; generate answers &rarr; grade &rarr; output) runs <strong>end-to-end without human intervention</strong>. Each stage feeds results into the next.</p>
+    <p style="font-size:0.85rem; color:#6b7280;">See: Section 8 (pipeline sequence)</p>
+  </div>
+  <div class="col-card">
+    <h4><span class="check">&#x2714;</span> Adaptive Routing</h4>
+    <p>The hybrid grading method makes a <strong>runtime decision</strong>: ~70&ndash;80% of answers take the fast semantic path and skip the LLM judge entirely. Only edge cases (counting, inference, multi-hop) are routed to the more expensive Qwen evaluation.</p>
+    <p style="font-size:0.85rem; color:#6b7280;">See: Section 15 (hybrid method)</p>
+  </div>
+</div>
+
+<h3>20.3 Traits QAGRedo Does Not Exhibit</h3>
+
+<table>
+  <tr><th>Trait</th><th>What a full agent would do</th><th>What QAGRedo does instead</th></tr>
+  <tr>
+    <td><strong>Dynamic planning</strong></td>
+    <td>Reason about what steps to take next based on intermediate results</td>
+    <td>Follows a fixed, predetermined sequence (question gen &rarr; answer gen &rarr; grading)</td>
+  </tr>
+  <tr>
+    <td><strong>Goal decomposition</strong></td>
+    <td>Break a high-level objective into sub-goals autonomously</td>
+    <td>Stages are hard-coded in the pipeline, not dynamically planned</td>
+  </tr>
+  <tr>
+    <td><strong>Environment exploration</strong></td>
+    <td>Search for additional information, browse external sources</td>
+    <td>Processes a given document in a fixed manner with no external retrieval</td>
+  </tr>
+  <tr>
+    <td><strong>Cross-run memory</strong></td>
+    <td>Learn from previous runs and adapt strategy over time</td>
+    <td>Each run is stateless and independent</td>
+  </tr>
+  <tr>
+    <td><strong>Open-ended tool selection</strong></td>
+    <td>Choose which tools to use from an open set based on reasoning</td>
+    <td>Tool usage (Llama, Qwen, MiniLM) is predetermined in the code</td>
+  </tr>
+</table>
+
+<h3>20.4 Verdict</h3>
+
+<div class="callout callout-blue">
+  <b>QAGRedo is a pipeline with agentic elements</b>
+  The self-correcting retry loops (question regeneration up to 2 times, answer regeneration up to 3 times) and adaptive hybrid routing (~70&ndash;80% fast path, LLM fallback only when needed) are genuinely agentic behaviours. However, the pipeline does not dynamically plan its own execution, explore its environment, or maintain memory across runs. It sits between a simple prompt chain and a fully autonomous agent.
+</div>
+
+<h3>20.5 Potential Extensions Toward Full Agentic Behaviour</h3>
+<p>These are potential future directions, not current features:</p>
+<div class="two-col">
+  <div class="col-card">
+    <h4>Dynamic question count</h4>
+    <p>Let the LLM assess document complexity and decide how many questions to generate, rather than using a fixed <code>num_questions</code> config value.</p>
+  </div>
+  <div class="col-card">
+    <h4>Adaptive temperature</h4>
+    <p>Adjust generation temperature based on grading results from earlier documents in the same run.</p>
+  </div>
+  <div class="col-card">
+    <h4>Strategy switching</h4>
+    <p>If retries consistently fail for a question type, switch to a different type or simplify the question rather than retrying the same approach.</p>
+  </div>
+  <div class="col-card">
+    <h4>Planning step</h4>
+    <p>Before generating, have the LLM reason about the document&rsquo;s structure and decide which question types would be most informative.</p>
+  </div>
+</div>
+
+<hr style="margin-top:3rem;">
+<p style="color:#6b7280; font-size:0.9rem;">
+  <strong>QAGRedo Visual Report</strong> &mdash; Comprehensive algorithm, project structure, code sequence, and architectural documentation for supervisor reporting.<br>
+  20 sections &middot; 18 figures &middot; Self-contained HTML &mdash; no external dependencies.<br>
+  Source files: <code>run_qa_pipeline.py</code>, <code>utils/question_generator.py</code>, <code>utils/answer_generator.py</code>, <code>utils/hallucination_checker.py</code>, <code>utils/output_manager.py</code>, <code>utils/duplicate_detector.py</code>, <code>utils/config_manager.py</code>, <code>utils/data_loader.py</code>, <code>utils/result_analyzer.py</code>, <code>utils/parse.py</code>, <code>scripts/docker-entrypoint.sh</code>, <code>scripts/offline/run.sh</code>, <code>docker-compose.offline.yml</code>, <code>config/config.yaml</code>
+</p>
+
+</div>
+</body>
+</html>

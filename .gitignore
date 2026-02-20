@@ -48,7 +48,16 @@ Thumbs.db
 
 # Local model assets (keep out of git)
 models/
+models_embed/
+models_llm/
 qagredo_host/
+
+# Virtual environments
+.venv/
+
+# HuggingFace cache
+hf_cache/
+hf_cache_judge/
 
 # Output files (generated results)
 output/

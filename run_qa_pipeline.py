@@ -18,6 +18,8 @@ from utils import (
     generate_questions,
     save_results,
 )
+from utils.output_manager import init_run_timestamp
+from utils.hallucination_checker import set_llm_config
 from utils.config_manager import (
     build_effective_config,
 )
@@ -30,7 +32,6 @@ def _infer_numeric_output_profile(provider: str, model: str) -> str:
 
     Example scheme:
       - 1: Llama (served via vLLM)
-      - 2: Qwen (served via vLLM)
       - 3: OpenAI
     """
     provider_l = (provider or "").lower()
@@ -38,8 +39,6 @@ def _infer_numeric_output_profile(provider: str, model: str) -> str:
 
     if provider_l == "openai":
         return "3"
-    if "qwen" in model_l:
-        return "2"
     if "llama" in model_l or "meta-llama" in model_l:
         return "1"
     # Fallback: keep provider name to avoid collisions.
@@ -74,6 +73,9 @@ def build_qa_pairs(question_result: Dict[str, Any], qa_result: Dict[str, Any], g
 
 
 def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
+    # Lock the run timestamp so all output files go into the same folder
+    run_ts = init_run_timestamp()
+
     input_path = settings["input_file"]
     print("=" * 80)
     print("Configurable Q&A Pipeline")
@@ -86,7 +88,15 @@ def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
         f"{settings.get('model') or config.get('llm', {}).get('model', 'config default')}"
     )
     print(f"Documents to run: {settings['num_documents']}")
+    print(f"Run folder      : {run_ts}")
     print("=" * 80)
+    print()
+
+    # ---- hallucination check method ----
+    halluc_method = config.get("hallucination", {}).get("method", "hybrid")
+    if halluc_method in ("llm", "hybrid"):
+        set_llm_config(config)
+    print(f"Halluc. method : {halluc_method}")
     print()
 
     documents = load_data_file(input_path)
@@ -144,10 +154,10 @@ def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
             print(f"A{q_idx}. {answer}")
         print()
 
-        print("Grading for Hallucination...")
+        print(f"Grading for Hallucination (method={halluc_method})...")
         analysis_info = None
         try:
-            graded_results = grade_qa_results([qa_result], method="semantic")
+            graded_results = grade_qa_results([qa_result], method=halluc_method)
             analysis_info = graded_results[0]
             print_grading_report(graded_results)
         except Exception as exc:
@@ -182,6 +192,7 @@ def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
                 "overall_grade": (analysis_info or {}).get("overall_grade"),
                 "overall_confidence": (analysis_info or {}).get("overall_confidence"),
                 "grading_method": (analysis_info or {}).get("grading_method"),
+                "judge_model": (analysis_info or {}).get("judge_model"),
             },
         }
 

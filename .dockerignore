@@ -18,8 +18,6 @@ examples/
 docs_archive/
 
 # Tests (not needed in image)
-scripts/test_runners/
-scripts/tests/
 tests/
 
 # Local data (if not required at runtime)

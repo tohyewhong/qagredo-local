@@ -1,0 +1,82 @@
+# Single configuration file (includes secrets).
+#
+# WARNING: This file contains API keys and will be committed to git
+# per your request. Anyone with repo access can read these secrets.
+# (Env var overrides still work if you later decide to stop committing keys.)
+
+offline_mode: true  # or env: OFFLINE_MODE=1
+
+run:
+  input_file: dev-data.jsonl
+  num_documents: 10
+
+llm:
+  # provider: "vllm" (offline/local) or "openai" (cloud)
+  provider: "vllm"
+
+  # Default model for the chosen provider.
+  # - vLLM: a local model name/path served by your vLLM server
+  # - OpenAI: e.g. "gpt-4o-mini"
+  model: "meta-llama/Meta-Llama-3.1-8B-Instruct"
+
+  # Common generation knobs
+  temperature: 0.7
+  max_tokens: 500
+
+  # Retry behavior
+  max_retries: 3
+  retry_delay: 1.0
+
+  # API key for the chosen provider.
+  # - For openai: your real OpenAI API key
+  # - For vllm: can be any string; vLLM typically doesn't validate it
+  api_key: "llama-local"
+
+  # Provider-specific settings
+  # vLLM: OpenAI-compatible endpoint
+  base_url: "http://localhost:8100/v1"
+  timeout: 60
+
+# Answer generation settings
+answer_generation:
+  # Lower temperature for answers (more deterministic = fewer hallucinations)
+  # If not set, defaults to 0.3 (lower than question generation's 0.7)
+  temperature: 0.3
+
+# Question generation settings
+question_generation:
+  num_questions: 3
+  # Complexity: "basic", "moderate", or "advanced"
+  #   basic    - simple factual questions
+  #   moderate - analysis + comparison + inference
+  #   advanced - full range: analysis, aggregation, comparison, inference,
+  #              causal, temporal, multi-hop, synthesis, evaluation,
+  #              counterfactual (recommended)
+  complexity: "advanced"
+  # Optional: override specific question types (uncomment to customize)
+  # question_types: ["analysis", "aggregation", "comparison", "inference", "causal", "synthesis", "evaluation", "counterfactual"]
+
+# ---- Judge LLM (separate model for independent grading) ----
+# A DIFFERENT model from the generator to avoid self-evaluation bias.
+# Qwen judges whether Llama's answers are grounded in the document.
+# If not configured, falls back to the main "llm" settings above.
+judge:
+  provider: "vllm"
+  model: "Qwen/Qwen2.5-7B-Instruct"
+  base_url: "http://localhost:8101/v1"
+  api_key: "qwen-local"
+  temperature: 0.0       # deterministic for judging
+  max_tokens: 200
+  timeout: 60
+  max_retries: 3
+  retry_delay: 1.0
+
+# Hallucination checking method
+# Options:
+#   "semantic"  - sentence-level cosine similarity via MiniLM (fast, no GPU)
+#   "keyword"   - key-phrase substring matching (fast, no GPU)
+#   "llm"       - LLM-as-judge via separate Qwen model (accurate, handles counting/inference)
+#   "hybrid"    - semantic first, LLM fallback for low-confidence (recommended)
+hallucination:
+  method: "hybrid"
+

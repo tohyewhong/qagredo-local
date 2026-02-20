@@ -15,8 +15,8 @@ USER root
 
 # Synchronize container runtime user/group with host (so mounted folders are writable).
 # docker-compose.offline.yml passes these build args.
-ARG UID=1001
-ARG GID=1001
+ARG UID=10005
+ARG GID=10006
 ARG USERNAME=qagredo
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -25,6 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     sudo \
+    gosu \
     libffi-dev \
     libssl-dev \
     tmux \
@@ -55,8 +56,9 @@ COPY run_qa_pipeline.py .
 COPY utils ./utils
 COPY scripts ./scripts
 COPY config ./config
+COPY docs ./docs
 COPY README.md .
-COPY QUICKSTART_OFFLINE.md .
+COPY docs/OFFLINE_SETUP_GUIDE.md ./OFFLINE_SETUP_GUIDE.md
 
 # Optional corporate CA bundle
 #
@@ -66,7 +68,7 @@ COPY QUICKSTART_OFFLINE.md .
 # Put your corporate root CA at:
 #   certbundle/certbundle.crt
 #
-# (The repo includes `certbundle/README.md` with details.)
+# (See `docs/certbundle/README.md` for details.)
 RUN if [ -f /workspace/certbundle/certbundle.crt ]; then \
       echo "[INFO] Installing custom CA from /workspace/certbundle/certbundle.crt"; \
       mkdir -p /usr/local/share/ca-certificates; \
@@ -120,6 +122,18 @@ RUN if [ "$BAKE_MINILM" = "1" ]; then \
 
 EXPOSE 8888
 
-# start jupyter lab (compose overrides for CLI runs)
-USER ${USERNAME}
+# Copy the entrypoint script that adjusts UID/GID at runtime.
+# This is the proper Docker pattern: the container starts as root,
+# the entrypoint matches the container user to the host user's UID/GID,
+# then drops privileges with gosu.  All files created inside bind-mounted
+# volumes (output/, hf_cache/) are owned by the host user.
+COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Set HOME so bash -l doesn't try to read /home/jovyan/.bash_profile
+ENV HOME=/home/${USERNAME}
+
+# The entrypoint runs as root, adjusts UID/GID, then drops to ${USERNAME}.
+# CMD is passed as arguments to the entrypoint.
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--ServerApp.token=", "--ServerApp.password="]

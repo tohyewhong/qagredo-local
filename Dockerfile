@@ -25,8 +25,8 @@ USER root
 
 # Synchronize container runtime user/group with host (so mounted folders are writable).
 # docker-compose.offline.yml passes these build args.
-ARG UID=1001
-ARG GID=1001
+ARG UID=10005
+ARG GID=10006
 ARG USERNAME=qagredo
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -35,6 +35,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     sudo \
+    gosu \
     libffi-dev \
     libssl-dev \
     tmux \
@@ -54,7 +55,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
     TRANSFORMERS_CACHE=/opt/hf_cache/hub \
     HUGGINGFACE_HUB_CACHE=/opt/hf_cache/hub \
     SENTENCE_TRANSFORMERS_HOME=/opt/hf_cache/sentence-transformers \
-    SENTENCE_TRANSFORMERS_MODEL_PATH=/opt/models_embed/all-MiniLM-L6-v2
+    SENTENCE_TRANSFORMERS_MODEL_PATH=/opt/models_embed/all-MiniLM-L6-v2 \
+    JUPYTER_DATA_DIR=/workspace/.jupyter/data \
+    JUPYTER_RUNTIME_DIR=/workspace/.jupyter/runtime
 
 # copy the files (not optimised but did not want to break anything)
 WORKDIR /workspace/
@@ -65,8 +68,9 @@ COPY run_qa_pipeline.py .
 COPY utils ./utils
 COPY scripts ./scripts
 COPY config ./config
+COPY docs ./docs
 COPY README.md .
-COPY QUICKSTART_OFFLINE.md .
+COPY docs/OFFLINE_SETUP_GUIDE.md ./OFFLINE_SETUP_GUIDE.md
 
 # Optional corporate CA bundle
 #
@@ -76,7 +80,7 @@ COPY QUICKSTART_OFFLINE.md .
 # Put your corporate root CA at:
 #   certbundle/certbundle.crt
 #
-# (The repo includes `certbundle/README.md` with details.)
+# (See `docs/certbundle/README.md` for details.)
 RUN if [ -f /workspace/certbundle/certbundle.crt ]; then \
       echo "[INFO] Installing custom CA from /workspace/certbundle/certbundle.crt"; \
       mkdir -p /usr/local/share/ca-certificates; \
@@ -88,7 +92,7 @@ RUN if [ -f /workspace/certbundle/certbundle.crt ]; then \
     fi
 
 # ensure runtime mountpoints exist
-RUN mkdir -p /opt/hf_cache /opt/models_embed
+RUN mkdir -p /opt/hf_cache /opt/models_embed /workspace/.jupyter/data /workspace/.jupyter/runtime
 
 # Create or update the runtime user to match the requested UID/GID, then set ownership.
 RUN set -eux; \
@@ -123,14 +127,28 @@ RUN set -eux; \
 #   docker build --build-arg BAKE_MINILM=0 -t qagredo-v1:latest .
 ARG BAKE_MINILM=1
 RUN if [ "$BAKE_MINILM" = "1" ]; then \
-      python -c "from pathlib import Path; from sentence_transformers import SentenceTransformer; dst=Path('/opt/models_embed/all-MiniLM-L6-v2'); dst.parent.mkdir(parents=True, exist_ok=True); model=SentenceTransformer('all-MiniLM-L6-v2', device='cpu'); model.save(str(dst)); print(f'[OK] Saved all-MiniLM-L6-v2 to: {dst}')" \
+      # NOTE: The image defaults to offline mode (HF_HUB_OFFLINE=1) for runtime.\n\
+      # During build we temporarily allow downloads to bake MiniLM into the image.\n\
+      HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 python -c "from pathlib import Path; from sentence_transformers import SentenceTransformer; dst=Path('/opt/models_embed/all-MiniLM-L6-v2'); dst.parent.mkdir(parents=True, exist_ok=True); model=SentenceTransformer('all-MiniLM-L6-v2', device='cpu'); model.save(str(dst)); print(f'[OK] Saved all-MiniLM-L6-v2 to: {dst}')" \
     ; else \
       echo "[INFO] Skipping BAKE_MINILM=0 (will rely on mounting host/models_embed at runtime)"; \
     fi
 
 EXPOSE 8888
 
-# start jupyter lab (compose overrides for CLI runs)
-USER ${USERNAME}
+# Copy the entrypoint script that adjusts UID/GID at runtime.
+# This is the proper Docker pattern: the container starts as root,
+# the entrypoint matches the container user to the host user's UID/GID,
+# then drops privileges with gosu.  All files created inside bind-mounted
+# volumes (output/, hf_cache/) are owned by the host user.
+COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Set HOME so bash -l doesn't try to read /home/jovyan/.bash_profile
+ENV HOME=/home/${USERNAME}
+
+# The entrypoint runs as root, adjusts UID/GID, then drops to ${USERNAME}.
+# CMD is passed as arguments to the entrypoint.
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--ServerApp.token=", "--ServerApp.password="]
 

@@ -1,47 +1,58 @@
-# Two-container setup for a single offline server:
-# - vLLM serves an OpenAI-compatible API on http://localhost:8100/v1
-# - QAGRedo runs the pipeline and calls vLLM via http://vllm:8100/v1
+# Three-container setup for a single offline server:
+# - vllm       : Llama-3.1-8B on GPU 0, port 8100 — generates questions & answers
+# - vllm-judge : Qwen2.5-7B  on GPU 1, port 8101 — independent LLM-as-judge
+# - qagredo    : Python pipeline (CPU) — calls both vLLM services
 #
-# Host folder layout (on the machine running docker compose):
-#   ${QAGREDO_HOST_DIR}/
-#     config/        (your single config.yaml)
-#     data/          (input JSON/JSONL)
-#     output/        (generated results)
-#     models_llm/    (LLM weights folders for vLLM; e.g. Meta-Llama-3.1-8B-Instruct/)
-#     models_embed/  (embedding models for sentence-transformers; e.g. all-MiniLM-L6-v2/)
-#     hf_cache/      (HF cache; mounted to /opt/hf_cache in qagredo)
+# WHY two LLMs?  Using the same model to generate AND judge creates self-
+# evaluation bias.  A separate judge model (different architecture, different
+# training data) provides an independent second opinion.
+#
+# EVERYTHING lives in one directory (qagredo_host/).  All code, config, data,
+# and output are bind-mounted from that directory so edits persist across
+# Docker restarts.
+#
+# Directory layout (same dir as this compose file):
+#   ./
+#     config/config.yaml        → /workspace/config
+#     data/                     → /workspace/data
+#     output/                   → /workspace/output
+#     utils/                    → /workspace/utils
+#     scripts/                  → /workspace/scripts
+#     run_qa_pipeline.py        → /workspace/run_qa_pipeline.py
+#     models_llm/               → /models         (both vLLM instances)
+#     models_embed/             → /opt/models_embed
+#     hf_cache/                 → /opt/hf_cache
 #
 # Usage:
-#   export QAGREDO_HOST_DIR=~/qagredo_host
-#   export VLLM_MODEL=/models/Meta-Llama-3.1-8B-Instruct   # or /models/Qwen2.5-7B-Instruct
-#   docker compose -f docker-compose.offline.yml up -d vllm
+#   cd qagredo_host
+#   docker compose -f docker-compose.offline.yml up -d vllm vllm-judge
 #   docker compose -f docker-compose.offline.yml run --rm qagredo
+#   # Or simply:  bash run.sh
 
 name: qagredo_offline
 
 services:
+  # ---- Generator LLM: Llama-3.1-8B on GPU 0, port 8100 ----
   vllm:
-    # Pin vLLM image to a tag compatible with your NVIDIA driver.
-    # Your host driver is 535.x (CUDA 12.2). vLLM images built on CUDA 12.4+ can
-    # crash at runtime with "cudaGetDeviceCount ... Error 804".
-    #
-    # Override if needed:
-    #   export VLLM_IMAGE=vllm/vllm-openai:<tag>
     image: ${VLLM_IMAGE:-vllm/vllm-openai:v0.5.3.post1}
     container_name: qagredo-vllm
     ports:
       - "8100:8100"
     shm_size: "8gb"
     environment:
-      # Optional cache path (not required if you always use local model paths under /models)
       HF_HOME: /root/.cache/huggingface
       TRANSFORMERS_CACHE: /root/.cache/huggingface/hub
       HUGGINGFACE_HUB_CACHE: /root/.cache/huggingface/hub
+      # GPU assignment is handled by deploy.resources.reservations.devices
+      # Do NOT set CUDA_VISIBLE_DEVICES here — Docker maps the reserved GPU
+      # as device 0 inside the container; setting "0" again would be redundant,
+      # and setting "1" would cause pynvml.NVMLError_InvalidArgument.
     volumes:
-      - ${QAGREDO_HOST_DIR:-./qagredo_host}/models_llm:/models:ro
-      - ${QAGREDO_HOST_DIR:-./qagredo_host}/hf_cache:/root/.cache/huggingface:rw
-    # vllm/vllm-openai images already set the entrypoint to the API server,
-    # so we only pass the server arguments here (not "python -m ...").
+      - ./models_llm:/models:ro
+      # hf_cache must be rw — vLLM writes tokenizer cache here at startup.
+      # run.sh's post-run chown (with --privileged --userns=host) fixes
+      # any root-owned files after the run.
+      - ./hf_cache:/root/.cache/huggingface:rw
     command:
       - --host
       - 0.0.0.0
@@ -49,19 +60,16 @@ services:
       - "8100"
       - --model
       - ${VLLM_MODEL:-/models/Meta-Llama-3.1-8B-Instruct}
-      # Make the OpenAI "model" name stable and human-friendly.
-      # QAGRedo sends config.llm.model (e.g. "meta-llama/Meta-Llama-3.1-8B-Instruct").
-      # Without this, vLLM may expose the model ID as a local path and QAGRedo will get 404.
       - --served-model-name
       - ${VLLM_SERVED_MODEL_NAME:-meta-llama/Meta-Llama-3.1-8B-Instruct}
       - --tensor-parallel-size
-      - ${VLLM_TP_SIZE:-2}
+      - "1"
       - --dtype
       - half
       - --max-model-len
-      - ${VLLM_MAX_MODEL_LEN:-2048}
+      - ${VLLM_MAX_MODEL_LEN:-8192}
       - --gpu-memory-utilization
-      - ${VLLM_GPU_UTIL:-0.85}
+      - ${VLLM_GPU_UTIL:-0.90}
       - --api-key
       - ${VLLM_API_KEY:-llama-local}
       - --trust-remote-code
@@ -70,7 +78,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: 2
+              device_ids: ["0"]
               capabilities: [gpu]
     healthcheck:
       test: ["CMD", "bash", "-lc", "curl -sf http://localhost:8100/health >/dev/null"]
@@ -79,51 +87,125 @@ services:
       retries: 40
       start_period: 10s
 
+  # ---- Judge LLM: Qwen2.5-7B on GPU 1, port 8101 ----
+  # A DIFFERENT model from the generator to avoid self-evaluation bias.
+  # Qwen judges whether Llama's answers are grounded in the document.
+  vllm-judge:
+    image: ${VLLM_IMAGE:-vllm/vllm-openai:v0.5.3.post1}
+    container_name: qagredo-vllm-judge
+    ports:
+      - "8101:8101"
+    shm_size: "4gb"
+    environment:
+      HF_HOME: /root/.cache/huggingface
+      TRANSFORMERS_CACHE: /root/.cache/huggingface/hub
+      HUGGINGFACE_HUB_CACHE: /root/.cache/huggingface/hub
+      # GPU assignment handled by deploy.resources below (device_ids: ["1"])
+    volumes:
+      - ./models_llm:/models:ro
+      - ./hf_cache_judge:/root/.cache/huggingface:rw
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8101"
+      - --model
+      - ${VLLM_JUDGE_MODEL:-/models/Qwen2.5-7B-Instruct}
+      - --served-model-name
+      - ${VLLM_JUDGE_SERVED_NAME:-Qwen/Qwen2.5-7B-Instruct}
+      - --tensor-parallel-size
+      - "1"
+      - --dtype
+      - half
+      - --max-model-len
+      - ${VLLM_JUDGE_MAX_MODEL_LEN:-8192}
+      - --gpu-memory-utilization
+      - ${VLLM_JUDGE_GPU_UTIL:-0.90}
+      - --api-key
+      - ${VLLM_JUDGE_API_KEY:-qwen-local}
+      - --trust-remote-code
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["1"]
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "curl -sf http://localhost:8101/health >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+      start_period: 10s
+
   qagredo:
-    # Build on an internet machine, then `docker save` and transfer for offline use.
-    # You can also skip build here and just `docker load` the prebuilt image.
-    image: qagredo-v1:latest
-    # Runs as the image default user (jupyter `jovyan` in Dockerfile).
-    # Ensure your host folders under ${QAGREDO_HOST_DIR} are readable/writable as needed.
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        UID: "1001"
-        GID: "1001"
-        USERNAME: "qagredo"
+    image: qagredo-v1:latest
     container_name: qagredo-runner
+    # privileged + userns:host ensure the entrypoint can chown bind-mounted
+    # files even when Docker uses user namespace remapping.
+    privileged: true
+    userns_mode: host
+    ports:
+      - "8899:8888"
     depends_on:
       vllm:
         condition: service_healthy
+      vllm-judge:
+        condition: service_healthy
     environment:
+      # ---- Timezone (match host for consistent timestamps) ----
+      TZ: ${TZ:-Asia/Singapore}
+      # ---- UID/GID mapping (entrypoint adjusts user to match host) ----
+      HOST_UID: ${HOST_UID:-1000}
+      HOST_GID: ${HOST_GID:-1000}
+      # ---- offline mode ----
       OFFLINE_MODE: "1"
       HF_HUB_OFFLINE: "1"
       TRANSFORMERS_OFFLINE: "1"
       PYDANTIC_DISABLE_PLUGIN_LOADING: "1"
-      # Prefer a direct local embedding model path (more reliable than HF cache layout)
       SENTENCE_TRANSFORMERS_MODEL_PATH: "/opt/models_embed/all-MiniLM-L6-v2"
-      # Ensure the runner calls the vLLM container over the docker network
+      # ---- Generator LLM (Llama on GPU 0) ----
       VLLM_BASE_URL: "http://vllm:8100/v1"
-      # Ensure the runner's API key matches the vLLM server
       VLLM_API_KEY: ${VLLM_API_KEY:-llama-local}
+      # ---- Judge LLM (Qwen on GPU 1) ----
+      VLLM_JUDGE_BASE_URL: "http://vllm-judge:8101/v1"
+      VLLM_JUDGE_MODEL: ${VLLM_JUDGE_SERVED_NAME:-Qwen/Qwen2.5-7B-Instruct}
+      VLLM_JUDGE_API_KEY: ${VLLM_JUDGE_API_KEY:-qwen-local}
     volumes:
-      - ${QAGREDO_HOST_DIR:-./qagredo_host}/config:/workspace/config:rw
-      - ${QAGREDO_HOST_DIR:-./qagredo_host}/data:/workspace/data:rw
-      - ${QAGREDO_HOST_DIR:-./qagredo_host}/output:/workspace/output:rw
-      - ${QAGREDO_HOST_DIR:-./qagredo_host}/hf_cache:/opt/hf_cache:rw
-      - ${QAGREDO_HOST_DIR:-./qagredo_host}/models_embed:/opt/models_embed:ro
+      # ---- ALL mounts are rw so the host user can always edit/delete ----
+      - ./run_qa_pipeline.py:/workspace/run_qa_pipeline.py:rw
+      - ./utils:/workspace/utils:rw
+      - ./scripts:/workspace/scripts:rw
+      - ./config:/workspace/config:rw
+      - ./data:/workspace/data:rw
+      - ./output:/workspace/output:rw
+      - ./hf_cache:/opt/hf_cache:rw
+      - ./models_embed:/opt/models_embed:rw
+      # ---- Documentation (host edits visible in container, and vice versa) ----
+      - ./README.md:/workspace/README.md:rw
+      - ./OFFLINE_GUIDE.md:/workspace/OFFLINE_GUIDE.md:rw
+      - ./docs:/workspace/docs:rw
     command:
       - bash
-      - -lc
+      - -c
       - |
-        echo "[INFO] Waiting for vLLM to be ready at http://vllm:8100/health ..."
+        echo "[INFO] Waiting for vLLM (generator) at http://vllm:8100/health ..."
         for i in $(seq 1 120); do
           if curl -sf http://vllm:8100/health >/dev/null; then
-            echo "[OK] vLLM is ready"
+            echo "[OK] vLLM generator (Llama) is ready"
+            break
+          fi
+          sleep 2
+        done
+        echo "[INFO] Waiting for vLLM (judge) at http://vllm-judge:8101/health ..."
+        for i in $(seq 1 120); do
+          if curl -sf http://vllm-judge:8101/health >/dev/null; then
+            echo "[OK] vLLM judge (Qwen) is ready"
             break
           fi
           sleep 2
         done
         python /workspace/run_qa_pipeline.py
-
