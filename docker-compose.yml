@@ -190,6 +190,7 @@ services:
       - bash
       - -c
       - |
+        unset TRANSFORMERS_CACHE  # remove once qagredo-v1 image is rebuilt
         echo "[INFO] Waiting for vLLM (generator) at http://vllm:8100/health ..."
         for i in $(seq 1 120); do
           if curl -sf http://vllm:8100/health >/dev/null; then
