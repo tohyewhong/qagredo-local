@@ -1,8 +1,9 @@
 """Run question & answer generation sequentially using configurable settings."""
 
-# CRITICAL: Set this BEFORE any imports to prevent Pydantic plugin loading issues
+# CRITICAL: These must run BEFORE any imports
 import os
 os.environ.setdefault("PYDANTIC_DISABLE_PLUGIN_LOADING", "1")
+os.environ.pop("TRANSFORMERS_CACHE", None)  # deprecated; HF_HOME is used instead
 
 import argparse
 import sys
