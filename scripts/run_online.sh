@@ -77,7 +77,7 @@ main() {
   require_cmd unzip
 
   [[ -d "$REPO_DIR" ]] || die "Repo folder not found: $REPO_DIR"
-  [[ -f "$REPO_DIR/docker-compose.offline.yml" ]] || die "Missing: $REPO_DIR/docker-compose.offline.yml"
+  [[ -f "$REPO_DIR/docker-compose.yml" ]] || die "Missing: $REPO_DIR/docker-compose.yml"
 
   info "Repo folder: $REPO_DIR"
   info "Host folder: $HOST_DIR"
@@ -194,7 +194,7 @@ main() {
     export VLLM_MODEL="$VLLM_MODEL_IN_CONTAINER"
     export VLLM_API_KEY="$VLLM_API_KEY"
     export VLLM_SERVED_MODEL_NAME="$VLLM_SERVED_MODEL_NAME"
-    docker compose -f docker-compose.offline.yml up -d vllm
+    docker compose -f docker-compose.yml up -d vllm
   )
 
   info "Waiting for vLLM health: http://localhost:8100/health"
@@ -213,7 +213,7 @@ main() {
   (
     cd "$REPO_DIR"
     export QAGREDO_HOST_DIR="$HOST_DIR"
-    docker compose -f docker-compose.offline.yml run --rm qagredo
+    docker compose -f docker-compose.yml run --rm qagredo
   )
 
   ok "Done. Output folder:"

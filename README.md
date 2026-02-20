@@ -114,7 +114,7 @@ See `docs/ALGORITHM_REPORT.md` for the full algorithm details and design rationa
 | **vLLM-judge** (`qagredo-vllm-judge`) | Qwen2.5-7B — independent LLM-as-judge for hallucination checking | GPU 1 | 8101 |
 | **QAGRedo** (`qagredo-runner`) | Pipeline orchestration + MiniLM for semantic similarity | CPU | (none) |
 
-Judging uses a **separate model** (Qwen) from generation (Llama) to avoid self-evaluation bias. To start both vLLM services: `docker compose -f docker-compose.offline.yml up -d vllm vllm-judge`
+Judging uses a **separate model** (Qwen) from generation (Llama) to avoid self-evaluation bias. To start both vLLM services: `docker compose -f docker-compose.yml up -d vllm vllm-judge`
 
 All files live in a single **`qagredo_host/`** directory. Docker mounts
 from it directly. Any edit you make persists across container restarts.
@@ -124,7 +124,7 @@ qagredo_host/
 ├── run.sh                             # start vLLM + vLLM-judge + run pipeline
 ├── setup_offline.sh                   # one-time setup (load images, link models)
 ├── jupyter.sh                         # start Jupyter Lab
-├── docker-compose.offline.yml         # Docker Compose (mounts from ./)
+├── docker-compose.yml         # Docker Compose (mounts from ./)
 ├── run_qa_pipeline.py                 # main entry point
 ├── config/config.yaml                 # pipeline configuration
 ├── utils/                             # Python source code
@@ -194,7 +194,7 @@ If not running, start both via Docker Compose:
 
 ```bash
 cd /home/tyewhong/qagredo
-docker compose -f docker-compose.offline.yml up -d vllm vllm-judge
+docker compose -f docker-compose.yml up -d vllm vllm-judge
 ```
 
 Ensure `config/config.yaml` has `llm.base_url: "http://localhost:8100/v1"`, then:

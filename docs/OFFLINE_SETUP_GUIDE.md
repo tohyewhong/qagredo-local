@@ -51,7 +51,7 @@ qagredo_host/                          <-- ONE directory, everything is here
 |-- run.sh                             # start vLLM + vLLM-judge + run pipeline
 |-- setup_offline.sh                   # one-time setup (load images, link models)
 |-- jupyter.sh                         # start Jupyter Lab
-|-- docker-compose.offline.yml         # Docker Compose (mounts from ./)
+|-- docker-compose.yml         # Docker Compose (mounts from ./)
 |-- run_qa_pipeline.py                 # main Python entry point
 |-- config/config.yaml                 # pipeline configuration
 |-- utils/                             # Python source code
@@ -77,7 +77,7 @@ When Docker is down, everything is still here.
 
 ```bash
 # QAGRedo image
-docker compose -f docker-compose.offline.yml build qagredo
+docker compose -f docker-compose.yml build qagredo
 docker save -o qagredo-v1.tar qagredo-v1:latest
 
 # vLLM image (used by BOTH vllm and vllm-judge containers; exported as rootfs for smaller size)

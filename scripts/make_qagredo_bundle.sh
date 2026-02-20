@@ -75,7 +75,7 @@ main() {
   require_cmd sha256sum
 
   [[ -d "$REPO_DIR" ]] || die "Repo folder not found: $REPO_DIR"
-  [[ -f "$REPO_DIR/docker-compose.offline.yml" ]] || die "Missing: $REPO_DIR/docker-compose.offline.yml"
+  [[ -f "$REPO_DIR/docker-compose.yml" ]] || die "Missing: $REPO_DIR/docker-compose.yml"
 
   info "Repo dir : $REPO_DIR"
   info "Output   : $OUTPUT_TGZ"
@@ -93,7 +93,7 @@ main() {
 
   # ---- copy docker compose file (strip build: block for offline use) ----
   info "Copying Docker Compose file..."
-  _strip_build_block < "$REPO_DIR/docker-compose.offline.yml" > "$STAGING_DIR/docker-compose.offline.yml"
+  _strip_build_block < "$REPO_DIR/docker-compose.yml" > "$STAGING_DIR/docker-compose.yml"
 
   # ---- copy application code ----
   info "Copying application code..."

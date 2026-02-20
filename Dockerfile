@@ -1,13 +1,3 @@
-# This Dockerfile is the default build entrypoint.
-# It mirrors the contents of Dockerfile.airgap for convenience.
-#
-# If you previously built with:
-#   docker build -f Dockerfile.airgap ...
-# you can now simply run:
-#   docker build ...
-#
-# (We still keep Dockerfile.airgap for backward compatibility.)
-
 # Boss-proposed pattern:
 # - Jupyter base image (already includes user `jovyan`)
 # - Install OS deps as root
@@ -24,7 +14,7 @@ FROM jupyter/base-notebook:python-3.10
 USER root
 
 # Synchronize container runtime user/group with host (so mounted folders are writable).
-# docker-compose.offline.yml passes these build args.
+# docker-compose.yml passes these build args.
 ARG UID=10005
 ARG GID=10006
 ARG USERNAME=qagredo
@@ -52,7 +42,6 @@ ENV DEBIAN_FRONTEND=noninteractive \
     HF_HUB_OFFLINE=1 \
     TRANSFORMERS_OFFLINE=1 \
     HF_HOME=/opt/hf_cache \
-    TRANSFORMERS_CACHE=/opt/hf_cache/hub \
     HUGGINGFACE_HUB_CACHE=/opt/hf_cache/hub \
     SENTENCE_TRANSFORMERS_HOME=/opt/hf_cache/sentence-transformers \
     SENTENCE_TRANSFORMERS_MODEL_PATH=/opt/models_embed/all-MiniLM-L6-v2 \

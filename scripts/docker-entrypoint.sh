@@ -35,7 +35,7 @@ TARGET_GID="${HOST_GID:-1000}"
 USERNAME="qagredo"
 
 # All bind-mounted writable directories.
-# These MUST match the volume mounts in docker-compose.offline.yml and jupyter.sh.
+# These MUST match the volume mounts in docker-compose.yml and jupyter.sh.
 WRITABLE_DIRS=(
     /workspace/output
     /workspace/config

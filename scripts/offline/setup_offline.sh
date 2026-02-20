@@ -340,7 +340,7 @@ for d in config data output utils scripts; do
 done
 _check "config/config.yaml exists" test -f "$HOST_DIR/config/config.yaml"
 _check "run_qa_pipeline.py exists" test -f "$HOST_DIR/run_qa_pipeline.py"
-_check "docker-compose.offline.yml exists" test -f "$HOST_DIR/docker-compose.offline.yml"
+_check "docker-compose.yml exists" test -f "$HOST_DIR/docker-compose.yml"
 
 # Models
 _has_llm_model() {

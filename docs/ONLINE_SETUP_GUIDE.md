@@ -236,7 +236,7 @@ If you do **not** get `HTTP/1.1 200 OK`, start vLLM via Docker Compose:
 
 ```bash
 cd /home/tyewhong/qagredo
-docker compose -f docker-compose.offline.yml up -d vllm vllm-judge
+docker compose -f docker-compose.yml up -d vllm vllm-judge
 ```
 
 #### A4.2) Ensure QAGRedo points to `localhost` (host mode)
@@ -484,8 +484,8 @@ export VLLM_JUDGE_MODEL=/models/Qwen2.5-7B-Instruct
 export VLLM_JUDGE_API_KEY=llama-local
 export VLLM_JUDGE_SERVED_MODEL_NAME=Qwen/Qwen2.5-7B-Instruct
 
-docker compose -f docker-compose.offline.yml up -d vllm vllm-judge
-docker compose -f docker-compose.offline.yml run --rm qagredo
+docker compose -f docker-compose.yml up -d vllm vllm-judge
+docker compose -f docker-compose.yml run --rm qagredo
 ```
 
 ## Useful vLLM URLs

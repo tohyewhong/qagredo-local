@@ -155,7 +155,7 @@ This is **not** the default offline compose flow, but it’s useful for troubles
 
 ## Where this comes from (repo files)
 
-- **Compose networking + ports**: `docker-compose.offline.yml`
+- **Compose networking + ports**: `docker-compose.yml`
 - **Jupyter publish behavior**: `jupyter.sh` (publishes `-p ${PORT}:8888`)
-- **Jupyter default port**: `Dockerfile` / `Dockerfile.airgap` expose `8888`
+- **Jupyter default port**: `Dockerfile` exposes `8888`
 

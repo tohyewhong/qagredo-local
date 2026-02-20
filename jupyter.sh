@@ -47,7 +47,7 @@ export VLLM_JUDGE_GPU_UTIL="${VLLM_JUDGE_GPU_UTIL:-0.90}"
 
 JUPYTER_PORT="${JUPYTER_PORT:-8899}"
 
-COMPOSE_FILE="$HOST_DIR/docker-compose.offline.yml"
+COMPOSE_FILE="$HOST_DIR/docker-compose.yml"
 
 START_VLLM=1
 

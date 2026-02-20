@@ -25,8 +25,8 @@
 #
 # Usage:
 #   cd qagredo_host
-#   docker compose -f docker-compose.offline.yml up -d vllm vllm-judge
-#   docker compose -f docker-compose.offline.yml run --rm qagredo
+#   docker compose up -d vllm vllm-judge
+#   docker compose run --rm qagredo
 #   # Or simply:  bash run.sh
 
 name: qagredo_offline
@@ -41,7 +41,6 @@ services:
     shm_size: "8gb"
     environment:
       HF_HOME: /root/.cache/huggingface
-      TRANSFORMERS_CACHE: /root/.cache/huggingface/hub
       HUGGINGFACE_HUB_CACHE: /root/.cache/huggingface/hub
       # GPU assignment is handled by deploy.resources.reservations.devices
       # Do NOT set CUDA_VISIBLE_DEVICES here — Docker maps the reserved GPU
@@ -98,7 +97,6 @@ services:
     shm_size: "4gb"
     environment:
       HF_HOME: /root/.cache/huggingface
-      TRANSFORMERS_CACHE: /root/.cache/huggingface/hub
       HUGGINGFACE_HUB_CACHE: /root/.cache/huggingface/hub
       # GPU assignment handled by deploy.resources below (device_ids: ["1"])
     volumes:

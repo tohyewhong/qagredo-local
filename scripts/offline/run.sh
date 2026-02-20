@@ -61,7 +61,7 @@ export VLLM_JUDGE_API_KEY="${VLLM_JUDGE_API_KEY:-qwen-local}"
 export VLLM_JUDGE_MAX_MODEL_LEN="${VLLM_JUDGE_MAX_MODEL_LEN:-8192}"
 export VLLM_JUDGE_GPU_UTIL="${VLLM_JUDGE_GPU_UTIL:-0.90}"
 
-COMPOSE_FILE="$HOST_DIR/docker-compose.offline.yml"
+COMPOSE_FILE="$HOST_DIR/docker-compose.yml"
 
 _log() { echo "[run] $*"; }
 _warn() { echo "[run][WARN] $*" >&2; }

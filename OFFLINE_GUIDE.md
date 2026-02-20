@@ -55,7 +55,7 @@ qagredo_host/                          <-- YOU ARE HERE
 |   +-- ...
 |
 |-- run_qa_pipeline.py                   Main pipeline script
-|-- docker-compose.offline.yml           Docker services definition
+|-- docker-compose.yml           Docker services definition
 |-- scripts/
 |   |-- conversion/
 |   |   +-- convert_to_qagredo_jsonl.py  Convert JSON/PDF/TXT/XLSX -> JSONL

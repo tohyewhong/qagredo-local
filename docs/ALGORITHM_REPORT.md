@@ -694,7 +694,7 @@ and undeletable by the non-root host user.
 
 ### 6.3 Volume mounts
 
-All volumes in `docker-compose.offline.yml`:
+All volumes in `docker-compose.yml`:
 
 | Host path | Container path | Mode | Why |
 |-----------|---------------|------|-----|
