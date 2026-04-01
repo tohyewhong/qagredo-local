@@ -1,20 +1,21 @@
-# QUICKSTART: 5-File Offline Deployment
+# QUICKSTART: 6-File Offline Deployment
 
-This guide covers the **5-file approach** for deploying QAGRedo to an air-gapped server.
-You transfer **5 independent files** that change at different frequencies,
+This guide covers the **6-file approach** for deploying QAGRedo to an air-gapped server.
+You transfer **6 independent files** that change at different frequencies,
 so you only re-transfer what actually changed.
 
-## The 5 Files
+## The 6 Files
 
 | # | File | Size | Changes | Description |
 |---|------|------|---------|-------------|
 | 1 | `vllm-openai_v0.5.3.post1.rootfs.tar` | ~15-20 GB | Almost never | vLLM Docker image (docker export) |
 | 2 | `qagredo-v1.tar` | ~5-10 GB | Rarely | QAGRedo Docker image (docker save) |
-| 3 | `models_llm.tar` | ~30 GB | Rarely | LLM model weights (Llama + Qwen) |
-| 4 | `models_embed_all-MiniLM-L6-v2.tar` | ~263 MB | Rarely | Embedding model weights |
-| 5 | `qagredo_bundle.tar.gz` | ~few MB | Often | Code, config, data, runner scripts |
+| 3 | `models_llama.tar.gz` | ~12-16 GB | Rarely | Generator LLM weights (Llama) |
+| 4 | `models_qwen.tar.gz` | ~12-14 GB | Rarely | Judge LLM weights (Qwen) |
+| 5 | `models_embed_all-MiniLM-L6-v2.tar` | ~263 MB | Rarely | Embedding model weights |
+| 6 | `qagredo_bundle.tar.gz` | ~few MB | Often | Code, config, data, runner scripts |
 
-**Key benefit**: When you change code/config, you only re-transfer file #5 (~MB), not everything (~50+ GB).
+**Key benefit**: When you change code/config, you only re-transfer file #6 (~MB), not everything (~50+ GB).
 
 **Hardware**: 2 GPUs (24GB each) — one for Llama (generator), one for Qwen (judge).
 
@@ -26,9 +27,11 @@ The pipeline reads your documents and:
 
 1. **Generates complex questions** -- 10 question types (analysis, aggregation,
    comparison, inference, causal, temporal, multi-hop, synthesis, evaluation,
-   counterfactual) that require reasoning across multiple parts of the document
+   counterfactual) that require reasoning across multiple parts of the document,
+   with per-question comprehensiveness check to reject trivial questions
 2. **Generates grounded answers** -- structured format with supporting evidence,
-   low temperature (0.3), up to 3 retries for ungrounded answers
+   low temperature (0.3), up to 3 retries for ungrounded answers, plus one
+   targeted rewrite when question coverage is weak
 3. **Verifies grounding** -- hybrid method: fast semantic similarity (MiniLM)
    for most answers, Qwen (LLM-as-judge) fallback for counting/aggregation/inference
 4. **Grades** each document (A/B/C/D/F) and saves detailed reasons for any
@@ -71,7 +74,7 @@ When Docker is down, everything is still here.
 
 ---
 
-## ONLINE machine: Create the 5 files
+## ONLINE machine: Create the 6 files
 
 ### Files 1 & 2: Docker image tars (create once)
 
@@ -88,22 +91,25 @@ docker export -o vllm-openai_v0.5.3.post1.rootfs.tar vllm-export-tmp
 docker rm -f vllm-export-tmp
 ```
 
-### File 3: LLM model tar (create once)
+### Files 3 & 4: Split LLM model tars (create once)
 
 ```bash
-# Create models_llm.tar from your model folder(s)
-# Must include both Llama (generator) and Qwen (judge) model folders
-tar cf models_llm.tar models_llm/
+# Create split model archives from models_llm/
+tar czf models_llama.tar.gz -C models_llm Meta-Llama-3.1-8B-Instruct
+tar czf models_qwen.tar.gz  -C models_llm Qwen2.5-7B-Instruct
+
+# Optional legacy format (still supported by setup_offline.sh):
+# tar cf models_llm.tar models_llm/
 ```
 
-### File 4: Embedding model tar (create once)
+### File 5: Embedding model tar (create once)
 
 ```bash
 # Create embedding model tar
 tar cf models_embed_all-MiniLM-L6-v2.tar all-MiniLM-L6-v2/
 ```
 
-### File 5: Code bundle (create every time you change code/config)
+### File 6: Code bundle (create every time you change code/config)
 
 ```bash
 cd /path/to/qagredo
@@ -120,15 +126,16 @@ This produces:
 
 ## OFFLINE server: Deploy
 
-### Step 1: Copy all 5 files to one staging directory
+### Step 1: Copy all 6 files to one staging directory
 
 ```
 /home/user/offline20260209/
 |-- vllm-openai_v0.5.3.post1.rootfs.tar   (file 1)
 |-- qagredo-v1.tar                          (file 2)
-|-- models_llm.tar                          (file 3)
-|-- models_embed_all-MiniLM-L6-v2.tar      (file 4)
-+-- qagredo_bundle.tar.gz                   (file 5)
+|-- models_llama.tar.gz                     (file 3)
+|-- models_qwen.tar.gz                      (file 4)
+|-- models_embed_all-MiniLM-L6-v2.tar      (file 5)
++-- qagredo_bundle.tar.gz                   (file 6)
 ```
 
 ### Step 2: Extract models and bundle
@@ -137,7 +144,9 @@ This produces:
 cd /home/user/offline20260209
 
 # Extract models
-tar xf models_llm.tar
+mkdir -p models_llm
+tar xzf models_llama.tar.gz -C models_llm
+tar xzf models_qwen.tar.gz  -C models_llm
 mkdir -p models_embed
 tar xf models_embed_all-MiniLM-L6-v2.tar -C models_embed
 
@@ -174,22 +183,43 @@ bash setup_offline.sh
 
 ### Step 3b (optional): Convert input files to JSONL
 
-If your input data is in JSON, PDF, TXT, or XLSX format, convert it to JSONL first.
+If your input data is in JSON, JSONL, PDF, TXT, DOCX, XLSX, or CSV format, convert it to JSONL first.
+
+Important:
+- Conversion uses `scripts/conversion/convert_to_qagredo_jsonl.py` (parser-based, not LLM-based).
+- You can now skip this manual step by configuring `run.input_folder` / `run.input_type` in `config/config.yaml`.
+- Manual conversion remains useful when you want a fixed JSONL artifact.
+
+Quickstart (recommended):
+1) Install dependencies (one-time): `python3 -m pip install -r requirements.txt`
+2) Set runtime input selection in `config/config.yaml`
+3) Run `bash run.sh`
 
 ```bash
 cd /home/user/offline20260209/qagredo_host
 
-# Convert JSON / PDF / TXT / XLSX to JSONL
-python3 scripts/conversion/convert_to_qagredo_jsonl.py \
-  --input data/your-file.json \
-  --output data/your-file.jsonl
+run:
+  input_folder: /home/user/offline20260209/qagredo_host/data
+  input_type: auto          # auto/jsonl/json/txt/pdf/docx/xlsx/csv
+  max_files: 50             # optional (folder mode)
+  num_documents: 10
+  min_content_words: 20     # skip too-short docs
+  min_content_chars: 0
 ```
 
 **Press/news JSON handling**: For press-style JSON files with `"english"` / `"native"` language
 wrappers, the converter extracts **only English articles** into the content.
 All `"native"` content is skipped (`null`, `{}`, or actual text).
 
-Then edit `config/config.yaml`:
+Optional manual conversion:
+
+```bash
+python3 scripts/conversion/convert_to_qagredo_jsonl.py \
+  --input data/your-file.json \
+  --output data/your-file.jsonl
+```
+
+Then set:
 ```yaml
 run:
   input_file: your-file.jsonl
@@ -212,8 +242,11 @@ so multiple runs per day do not overwrite each other.
 
 **Pipeline details**:
 - 10 question types with few-shot examples (advanced complexity by default)
+- Per-question comprehensiveness check (rejects trivial questions, regenerates with guidance)
 - Structured answers with supporting evidence (temp=0.3)
 - Up to 3 retries for ungrounded answers
+- Coverage validation checks if each answer fully addresses the question
+- One targeted rewrite pass for low-coverage answers (kept only if grounded)
 - Hybrid hallucination checking: semantic first, Qwen (LLM-as-judge) fallback
 
 Change settings in `config/config.yaml`:
@@ -240,6 +273,7 @@ bash run.sh
 bash run.sh --down      # stop all three containers
 bash run.sh --logs      # tail vLLM logs (generator + judge)
 bash run.sh --status    # show container status
+bash run.sh -- --input-folder train-data_txt --input-type txt --max-files 10 --num-documents 10 --min-content-words 20
 ```
 
 ### Step 4b: Summarize the run results

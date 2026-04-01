@@ -2,7 +2,7 @@
 """
 Multi-format input normalizer for QAGRedo.
 
-Converts: pdf | txt | xlsx | json | jsonl
+Converts: pdf | txt | docx | xlsx | csv | json | jsonl
 Outputs: JSONL where each line is a normalized document record that QAGRedo can ingest.
 
 Canonical record schema (per line):
@@ -22,6 +22,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import re
 import sys
@@ -29,7 +30,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 
-SUPPORTED_INPUT_TYPES = ("pdf", "txt", "xlsx", "json", "jsonl")
+SUPPORTED_INPUT_TYPES = ("pdf", "txt", "docx", "xlsx", "csv", "json", "jsonl")
 
 
 def _repo_root() -> Path:
@@ -623,6 +624,20 @@ def _extract_pdf(path: Path) -> str:
     return "\n\n".join(parts).strip()
 
 
+def _extract_docx(path: Path) -> str:
+    try:
+        from docx import Document
+    except Exception as e:  # pragma: no cover
+        raise RuntimeError(
+            "DOCX support requires the 'python-docx' package. "
+            "Install it (or run `pip install -r requirements.txt`)."
+        ) from e
+
+    doc = Document(str(path))
+    paragraphs = [p.text.strip() for p in doc.paragraphs if p.text and p.text.strip()]
+    return "\n\n".join(paragraphs).strip()
+
+
 def _extract_xlsx(path: Path) -> tuple[str, Dict[str, Any]]:
     try:
         import openpyxl
@@ -651,6 +666,35 @@ def _extract_xlsx(path: Path) -> tuple[str, Dict[str, Any]]:
     text = "\n".join(chunks).strip()
     meta = {"sheet_names": sheet_names, "num_sheets": len(sheet_names)}
     return text, meta
+
+
+def _load_csv_docs(path: Path) -> List[Dict[str, Any]]:
+    docs: List[Dict[str, Any]] = []
+    with path.open("r", encoding="utf-8-sig", errors="replace", newline="") as f:
+        reader = csv.DictReader(f)
+        fieldnames = [str(n).strip() for n in (reader.fieldnames or []) if n and str(n).strip()]
+        for row_idx, row in enumerate(reader, start=1):
+            if not row:
+                continue
+            parts: List[str] = []
+            for key in fieldnames:
+                value = row.get(key)
+                if value is None:
+                    continue
+                value_str = str(value).strip()
+                if value_str:
+                    parts.append(f"{key}: {value_str}")
+            if not parts:
+                continue
+            docs.append(
+                {
+                    "content": "\n".join(parts),
+                    "metadata": {"row_number": row_idx, "columns": fieldnames},
+                }
+            )
+    if not docs:
+        raise ValueError(f"No rows with non-empty text found in CSV file: {path}")
+    return docs
 
 
 def _load_json_docs(path: Path) -> List[Dict[str, Any]]:
@@ -759,6 +803,11 @@ def convert_to_qagredo_jsonl(input_file: str, output_file: str, input_type: Opti
         raw = {"id": stem, "title": input_path.stem, "content": text, "source": source_str, "type": "text_document"}
         records.append(_canonicalize_record(raw, fallback_id=stem, fallback_title=input_path.stem, source=source_str, input_type="txt"))
 
+    elif inferred_type == "docx":
+        text = _extract_docx(input_path)
+        raw = {"id": stem, "title": input_path.stem, "content": text, "source": source_str, "type": "text_document"}
+        records.append(_canonicalize_record(raw, fallback_id=stem, fallback_title=input_path.stem, source=source_str, input_type="docx"))
+
     elif inferred_type == "pdf":
         text = _extract_pdf(input_path)
         raw = {"id": stem, "title": input_path.stem, "content": text, "source": source_str, "type": "text_document"}
@@ -810,6 +859,23 @@ def convert_to_qagredo_jsonl(input_file: str, output_file: str, input_type: Opti
                 )
             )
 
+    elif inferred_type == "csv":
+        docs = _load_csv_docs(input_path)
+        for idx, doc in enumerate(docs, start=1):
+            row_meta = dict(doc.get("metadata") or {})
+            doc_id = str(doc.get("id") or f"{stem}_{idx}")
+            title = str(doc.get("title") or f"{input_path.stem} row {idx}")
+            records.append(
+                _canonicalize_record(
+                    doc,
+                    fallback_id=doc_id,
+                    fallback_title=title,
+                    source=source_str,
+                    input_type="csv",
+                    extra_metadata={"source_path": source_str, **row_meta},
+                )
+            )
+
     else:
         raise ValueError(f"Unsupported input type: {inferred_type}")
 
@@ -832,8 +898,8 @@ def convert_to_qagredo_jsonl(input_file: str, output_file: str, input_type: Opti
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Convert pdf/txt/xlsx/json/jsonl into QAGRedo-compatible JSONL.")
-    p.add_argument("--input", required=True, help="Input file path (pdf/txt/xlsx/json/jsonl)")
+    p = argparse.ArgumentParser(description="Convert pdf/txt/docx/xlsx/csv/json/jsonl into QAGRedo-compatible JSONL.")
+    p.add_argument("--input", required=True, help="Input file path (pdf/txt/docx/xlsx/csv/json/jsonl)")
     p.add_argument("--output", required=True, help="Output JSONL path")
     p.add_argument(
         "--input-type",

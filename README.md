@@ -14,7 +14,7 @@ is factually supported by the source document.
 | `docs/ONLINE_SETUP_GUIDE.md` | Step-by-step guide for running on the online/dev machine and creating offline bundles |
 | `docs/VISUAL_REPORT.html` | **Visual report** with diagrams -- open in any browser |
 | `docs/ALGORITHM_REPORT.md` | Full algorithm details, design decisions, and rationale |
-| `docs/OFFLINE_SETUP_GUIDE.md` | 5-file offline deployment (recommended) |
+| `docs/OFFLINE_SETUP_GUIDE.md` | 6-file offline deployment (recommended) |
 | `docs/architecture/NETWORK_DIAGRAM.md` | Container networking, ports, URLs |
 
 ---
@@ -43,18 +43,23 @@ for complex reasoning — a separate model avoids self-evaluation bias).
    | 8 | **Synthesis** | Combine 3+ pieces of information from different parts into a comprehensive answer no single sentence provides | *Drawing from the financial data, leadership changes, and market conditions, what overall picture emerges?* |
    | 9 | **Evaluation / Critical Assessment** | Assess the strength, adequacy, or consistency of claims or evidence in the document | *How well-supported is the claim that [assertion]?* |
    | 10 | **Counterfactual / Hypothetical** | Reason about what would change if a stated fact or condition were different | *What would likely have been different if [condition] had not occurred?* |
-2. **Grounded answers** -- structured prompts force the LLM to cite supporting
-   evidence, with up to 3 retries if answers contain hallucinations.
-3. **Hybrid verification** -- fast semantic similarity for clear cases, LLM
+2. **Per-question comprehensiveness check** -- every generated question is
+   evaluated by the LLM for depth, self-containment, and reasoning complexity.
+   Questions that are too simple (single-sentence lookup) are automatically
+   regenerated with targeted feedback.
+3. **Grounded answers** -- structured prompts force the LLM to cite supporting
+   evidence, with up to 3 retries for ungrounded answers plus a targeted
+   rewrite pass when question coverage is weak.
+4. **Hybrid verification** -- fast semantic similarity for clear cases, LLM
    fallback for counting, aggregation, and inference.
-4. **Audit trail** -- every answer includes supporting evidence quotes and
+5. **Audit trail** -- every answer includes supporting evidence quotes and
    detailed grounding reasons in the output.
-5. **Air-gapped deployment** -- runs entirely offline on GPU servers with no
+6. **Air-gapped deployment** -- runs entirely offline on GPU servers with no
    internet access.
-6. **Semi-agentic design** -- self-correcting retry loops and adaptive hybrid
-   routing give the pipeline agentic traits while keeping execution
-   deterministic (see `docs/ALGORITHM_REPORT.md` Section 11 for the full
-   analysis).
+7. **Semi-agentic design** -- self-correcting retry loops (grounding +
+   comprehensiveness) and adaptive hybrid routing give the pipeline agentic
+   traits while keeping execution deterministic (see
+   `docs/ALGORITHM_REPORT.md` Section 11 for the full analysis).
 
 ### How it works (high-level)
 
@@ -66,7 +71,9 @@ Input documents (JSONL)
   |   10 question types          |
   |   Few-shot examples          |    LLM (vLLM, temp=0.7)
   |   Deduplication (MiniLM)     |
-  |   Validation + retry         |
+  |   Grounding validation       |
+  |   Comprehensiveness check    |
+  |   Regeneration if too simple |
   +-----------------------------+
         |
         v
@@ -74,7 +81,8 @@ Input documents (JSONL)
   |   Structured format           |
   |   "List then count"           |    LLM (vLLM, temp=0.3)
   |   Supporting evidence         |
-  |   Validation + 3 retries      |
+  |   Grounding retries +         |
+  |   coverage rewrite pass       |
   +-----------------------------+
         |
         v
@@ -110,8 +118,8 @@ See `docs/ALGORITHM_REPORT.md` for the full algorithm details and design rationa
 
 | Container | Role | Resource | Port |
 |-----------|------|----------|------|
-| **vLLM** (`qagredo-vllm`) | Llama-3.1-8B — generates questions & answers | GPU 0 | 8100 |
-| **vLLM-judge** (`qagredo-vllm-judge`) | Qwen2.5-7B — independent LLM-as-judge for hallucination checking | GPU 1 | 8101 |
+| **vLLM** (`qagredo-vllm`) | Llama-3.1-8B — generates questions & answers | GPU 0 | 7100 |
+| **vLLM-judge** (`qagredo-vllm-judge`) | Qwen2.5-7B — independent LLM-as-judge for hallucination checking | GPU 1 | 7101 |
 | **QAGRedo** (`qagredo-runner`) | Pipeline orchestration + MiniLM for semantic similarity | CPU | (none) |
 
 Judging uses a **separate model** (Qwen) from generation (Llama) to avoid self-evaluation bias. To start both vLLM services: `docker compose -f docker-compose.yml up -d vllm vllm-judge`
@@ -128,7 +136,7 @@ qagredo_host/
 ├── run_qa_pipeline.py                 # main entry point
 ├── config/config.yaml                 # pipeline configuration
 ├── utils/                             # Python source code
-│   ├── question_generator.py          #   question generation (10 types)
+│   ├── question_generator.py          #   question generation (10 types) + comprehensiveness check
 │   ├── answer_generator.py            #   answer generation + retry
 │   ├── hallucination_checker.py       #   grounding verification
 │   ├── output_manager.py              #   timestamped output folders
@@ -186,8 +194,8 @@ Output folders are timestamped: `output/vllm/<model>/YYYY-MM-DD_HHMMSS/`
 You still need an LLM server. Verify vLLM is running on the host:
 
 ```bash
-curl -i http://localhost:8100/health   # generator (Llama)
-curl -i http://localhost:8101/health   # judge (Qwen)
+curl -i http://localhost:7100/health   # generator (Llama)
+curl -i http://localhost:7101/health   # judge (Qwen)
 ```
 
 If not running, start both via Docker Compose:
@@ -197,7 +205,7 @@ cd /home/tyewhong/qagredo
 docker compose -f docker-compose.yml up -d vllm vllm-judge
 ```
 
-Ensure `config/config.yaml` has `llm.base_url: "http://localhost:8100/v1"`, then:
+Ensure `config/config.yaml` has `llm.base_url: "http://localhost:7100/v1"`, then:
 
 ```bash
 cd /home/tyewhong/qagredo
@@ -210,6 +218,47 @@ cd /home/tyewhong/qagredo
 
 QAGRedo reads **JSONL** (one JSON object per line).
 
+Important:
+- Conversion is parser-based (not LLM-based) via `scripts/conversion/convert_to_qagredo_jsonl.py`.
+- The pipeline can now **auto-prepare** non-JSONL inputs (`txt/pdf/docx/xlsx/csv/json`) at runtime from `run` config.
+- Manual conversion is still available when you want explicit control over the generated JSONL.
+
+### Quickstart (3 steps)
+
+1) Install dependencies:
+
+```bash
+cd /home/tyewhong/qagredo
+python3 -m pip install -r requirements.txt
+```
+
+2) Configure input source in `config/config.yaml`:
+
+```yaml
+run:
+  input_folder: /home/tyewhong/qagredo/train-data_txt   # folder mode
+  input_type: txt                                        # or auto/jsonl/json/pdf/docx/xlsx/csv
+  max_files: 10                                          # only for folder mode
+  num_documents: 10
+  min_content_words: 20                                  # skip too-short docs
+  min_content_chars: 0
+```
+
+3) Run pipeline:
+
+```bash
+cd /home/tyewhong/qagredo
+bash run.sh
+```
+
+Optional (manual conversion path):
+
+```bash
+python3 scripts/conversion/convert_to_qagredo_jsonl.py \
+  --input data/your-file.pdf \
+  --output data/your-file.jsonl
+```
+
 ### Supported input formats
 
 | Format | Extension | Notes |
@@ -219,7 +268,9 @@ QAGRedo reads **JSONL** (one JSON object per line).
 | **JSONL** | `.jsonl` | One JSON object per line |
 | **PDF** | `.pdf` | Requires `pypdf` |
 | **Plain text** | `.txt` | Entire file becomes one document |
+| **Word document** | `.docx` | Paragraphs are joined into one document text (`python-docx`) |
 | **Excel** | `.xlsx` | Requires `openpyxl` |
+| **CSV** | `.csv` | Each row becomes one document record |
 
 **JSON repair**: auto-fixes missing commas, unterminated strings, trailing commas.
 
@@ -233,10 +284,16 @@ python3 scripts/conversion/convert_to_qagredo_jsonl.py \
   --output data/your-file.jsonl
 ```
 
-Then edit `config/config.yaml`:
+If using manual conversion, set:
 ```yaml
 run:
   input_file: your-file.jsonl
+```
+
+Runtime overrides are also supported:
+
+```bash
+bash run.sh -- --input-folder train-data_txt --input-type txt --max-files 10 --num-documents 10 --min-content-words 20
 ```
 
 ---
@@ -263,6 +320,20 @@ question_generation:
 - Include synthesis (combining 3+ facts), evaluation (assessing evidence
   strength), and counterfactual (reasoning about hypothetical changes)
 
+**Comprehensiveness check:** Every generated question (regardless of complexity
+setting) is individually evaluated by the LLM for depth, self-containment, and
+reasoning complexity. Questions that score below the threshold (default 0.6) are
+regenerated with targeted feedback up to 2 times. This ensures no trivial
+single-sentence-lookup questions survive. Configure in `config/config.yaml`:
+
+```yaml
+question_generation:
+  validation:
+    enable_comprehensiveness_check: true   # toggle on/off
+    comprehensiveness_min_score: 0.6       # 0.0-1.0, higher = stricter
+    comprehensiveness_max_attempts: 2      # regeneration attempts
+```
+
 **Few-shot examples** (good + bad patterns) are included in the prompt to
 steer the LLM toward correct question types and format, reducing failed
 generations and improving question diversity.
@@ -278,12 +349,17 @@ and a **lower temperature** (0.3 by default) to minimise hallucination:
 ```yaml
 answer_generation:
   temperature: 0.3    # lower = more factual, less creative
+  coverage_validation:
+    enable: true
+    min_score_threshold: 0.7
+    max_doc_chars: 5000
 ```
 
 Key design choices:
 - The LLM is asked to **list items before counting** (improves aggregation accuracy by ~30%)
 - The LLM must **quote supporting evidence** from the document
 - Answers that fail grounding checks are **retried up to 3 times**
+- Answers are checked for **question coverage** (whether all parts of the question are addressed); low-coverage answers get **one targeted rewrite pass**
 - The evidence is saved alongside answers in the output JSON for auditability
 
 **Why 0.3 temperature:** Answers must be factual and deterministic. See
@@ -325,7 +401,8 @@ output/vllm/meta-llama-3.1-8b-instruct/2026-02-13_143025/
 ### Per-document JSON
 
 Each processed document produces an analysis JSON file containing:
-- **questions** -- generated questions with type tags
+- **questions** -- generated questions with type tags and comprehensiveness
+  metadata (score, is_comprehensive, was_regenerated)
 - **answers** -- document-grounded answers
 - **supporting_evidence** -- quotes from the document supporting each answer
 - **grading** -- per-QA grounding status, confidence, method, and reasons
@@ -363,18 +440,19 @@ The `run_summary.json` includes:
 
 ---
 
-## Part B -- Offline deployment (5-file approach)
+## Part B -- Offline deployment (6-file approach)
 
-Transfer **5 files** to the air-gapped server. When you change code/config,
-only re-transfer file #5 (~few MB), not everything (~50+ GB).
+Transfer **6 files** to the air-gapped server. When you change code/config,
+only re-transfer file #6 (~few MB), not everything (~50+ GB).
 
 | # | File | Size | Changes |
 |---|------|------|---------|
 | 1 | `vllm-openai_v0.5.3.post1.rootfs.tar` | ~15-20 GB | Almost never |
 | 2 | `qagredo-v1.tar` | ~5-10 GB | Rarely |
-| 3 | `models_llm.tar` | ~30 GB | Rarely |
-| 4 | `models_embed_all-MiniLM-L6-v2.tar` | ~263 MB | Rarely |
-| 5 | `qagredo_bundle.tar.gz` | ~few MB | Often |
+| 3 | `models_llama.tar.gz` | ~12-16 GB | Rarely |
+| 4 | `models_qwen.tar.gz` | ~12-14 GB | Rarely |
+| 5 | `models_embed_all-MiniLM-L6-v2.tar` | ~263 MB | Rarely |
+| 6 | `qagredo_bundle.tar.gz` | ~few MB | Often |
 
 **Full step-by-step guide** (creating, transferring, deploying, and running):
 `docs/OFFLINE_SETUP_GUIDE.md`
@@ -383,7 +461,7 @@ only re-transfer file #5 (~few MB), not everything (~50+ GB).
 
 ## Day-to-day workflow
 
-Once files 1-4 are on the server:
+Once files 1-5 are on the server:
 
 1. **On dev machine**: edit code, then `bash scripts/make_qagredo_bundle.sh --include-data`
 2. **Transfer** just `qagredo_bundle.tar.gz` (~few MB)
@@ -424,8 +502,8 @@ and host user to read, write, and delete files.
 
 | Model | Purpose | Size | Runs on |
 |-------|---------|------|---------|
-| **Meta-Llama-3.1-8B-Instruct** | Question & answer generation | ~16 GB | GPU 0 (vLLM, port 8100) |
-| **Qwen2.5-7B-Instruct** | LLM-as-judge for hallucination checking (separate model avoids self-eval bias) | ~14 GB | GPU 1 (vLLM-judge, port 8101) |
+| **Meta-Llama-3.1-8B-Instruct** | Question & answer generation | ~16 GB | GPU 0 (vLLM, port 7100) |
+| **Qwen2.5-7B-Instruct** | LLM-as-judge for hallucination checking (separate model avoids self-eval bias) | ~14 GB | GPU 1 (vLLM-judge, port 7101) |
 | **all-MiniLM-L6-v2** | Semantic similarity (grounding check, dedup) | ~80 MB | CPU |
 
 ---
@@ -434,8 +512,8 @@ and host user to read, write, and delete files.
 
 ### vLLM health
 ```bash
-curl -i http://localhost:8100/health   # generator (Llama)
-curl -i http://localhost:8101/health   # judge (Qwen)
+curl -i http://localhost:7100/health   # generator (Llama)
+curl -i http://localhost:7101/health   # judge (Qwen)
 bash run.sh --logs
 ```
 
@@ -455,6 +533,6 @@ bash run.sh --logs
 
 ### Useful URLs
 
-- Generator (Llama): `http://localhost:8100/health` | Judge (Qwen): `http://localhost:8101/health`
-- API docs: `http://localhost:8100/docs` (generator), `http://localhost:8101/docs` (judge)
-- Models: `curl -H "Authorization: Bearer llama-local" http://localhost:8100/v1/models`
+- Generator (Llama): `http://localhost:7100/health` | Judge (Qwen): `http://localhost:7101/health`
+- API docs: `http://localhost:7100/docs` (generator), `http://localhost:7101/docs` (judge)
+- Models: `curl -H "Authorization: Bearer llama-local" http://localhost:7100/v1/models`

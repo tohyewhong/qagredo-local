@@ -260,7 +260,7 @@ def _call_vllm_llm(prompt: str, config: Dict[str, Any], max_retries: int, retry_
     if api_key == "EMPTY" or not api_key:
         api_key = "not-required"
 
-    base_url = config["llm"].get("base_url", "http://localhost:8100/v1")
+    base_url = config["llm"].get("base_url", "http://localhost:7100/v1")
     model = config["llm"].get("model", "meta-llama/Llama-2-7b-chat-hf")
     temperature = config["llm"].get("temperature", 0.7)
     max_tokens = config["llm"].get("max_tokens", 500)
@@ -423,6 +423,169 @@ Generate a NEW question grounded ONLY in the document. Provide only the question
     return current_question, validation_info
 
 
+def _parse_comprehensiveness_result(response: str) -> Dict[str, Any]:
+    """Parse the LLM's comprehensiveness evaluation JSON response."""
+    import json as _json
+    import re as _re
+
+    defaults = {
+        "is_comprehensive": False,
+        "score": 0.5,
+        "reason": "",
+        "weakness": "",
+    }
+
+    # Try direct JSON parse
+    try:
+        data = _json.loads(response)
+        return {
+            "is_comprehensive": bool(data.get("is_comprehensive", False)),
+            "score": min(max(float(data.get("score", 0.5)), 0.0), 1.0),
+            "reason": str(data.get("reason", "")),
+            "weakness": str(data.get("weakness", "")),
+        }
+    except (ValueError, _json.JSONDecodeError):
+        pass
+
+    # Try extracting JSON object from surrounding text
+    json_match = _re.search(r'\{[^{}]*\}', response, _re.DOTALL)
+    if json_match:
+        try:
+            data = _json.loads(json_match.group())
+            return {
+                "is_comprehensive": bool(data.get("is_comprehensive", False)),
+                "score": min(max(float(data.get("score", 0.5)), 0.0), 1.0),
+                "reason": str(data.get("reason", "")),
+                "weakness": str(data.get("weakness", "")),
+            }
+        except (ValueError, _json.JSONDecodeError):
+            pass
+
+    # Fallback: regex extraction from raw text
+    result = dict(defaults)
+    response_lower = response.lower()
+
+    if '"is_comprehensive": true' in response_lower or '"is_comprehensive":true' in response_lower:
+        result["is_comprehensive"] = True
+        result["score"] = 0.7
+    elif '"is_comprehensive": false' in response_lower or '"is_comprehensive":false' in response_lower:
+        result["is_comprehensive"] = False
+        result["score"] = 0.3
+
+    score_match = _re.search(r'"score"\s*:\s*([\d.]+)', response)
+    if score_match:
+        try:
+            result["score"] = min(max(float(score_match.group(1)), 0.0), 1.0)
+        except ValueError:
+            pass
+
+    reason_match = _re.search(r'"reason"\s*:\s*"([^"]*)"', response)
+    if reason_match:
+        result["reason"] = reason_match.group(1)
+
+    weakness_match = _re.search(r'"weakness"\s*:\s*"([^"]*)"', response)
+    if weakness_match:
+        result["weakness"] = weakness_match.group(1)
+
+    return result
+
+
+def _check_question_comprehensiveness(
+    question: str,
+    document_content: str,
+    config: Dict[str, Any],
+    min_score: float = 0.6,
+    max_attempts: int = 2,
+) -> tuple[str, Dict[str, Any]]:
+    """Check if a question is comprehensive and regenerate if not.
+
+    A comprehensive question requires multi-step reasoning, is self-contained,
+    and cannot be answered by copying a single sentence from the document.
+    """
+    comp_info: Dict[str, Any] = {
+        "score": 0.0,
+        "is_comprehensive": False,
+        "attempts": 0,
+        "was_regenerated": False,
+        "reason": "",
+    }
+
+    max_doc_chars = 6000
+    doc_text = document_content[:max_doc_chars]
+    if len(document_content) > max_doc_chars:
+        doc_text += "\n... [document truncated] ..."
+
+    current_question = question
+
+    for attempt in range(max_attempts + 1):
+        comp_info["attempts"] = attempt + 1
+
+        eval_prompt = f"""You are evaluating whether a question about a document is COMPREHENSIVE.
+
+A comprehensive question:
+1. Requires reasoning across MULTIPLE parts of the document (not a single-sentence lookup)
+2. Is self-contained and clearly worded
+3. Requires analysis, inference, comparison, synthesis, or multi-step reasoning
+4. Can be fully answered using only the document content
+5. Is NOT a simple "What is X?" or "When did Y happen?" factual lookup
+
+DOCUMENT:
+{doc_text}
+
+QUESTION:
+{current_question}
+
+Evaluate this question and respond with EXACTLY this JSON format (no other text):
+{{"is_comprehensive": true or false, "score": 0.0 to 1.0, "reason": "brief explanation", "weakness": "what could be improved if not comprehensive"}}"""
+
+        try:
+            response = _call_llm(eval_prompt, config).strip()
+            parsed = _parse_comprehensiveness_result(response)
+        except Exception:
+            comp_info["reason"] = "comprehensiveness check failed — keeping question as-is"
+            comp_info["score"] = 0.5
+            return current_question, comp_info
+
+        comp_info["score"] = parsed["score"]
+        comp_info["is_comprehensive"] = parsed["is_comprehensive"]
+        comp_info["reason"] = parsed["reason"]
+
+        if parsed["is_comprehensive"] and parsed["score"] >= min_score:
+            return current_question, comp_info
+
+        # Regenerate if we still have attempts left
+        if attempt < max_attempts:
+            comp_info["was_regenerated"] = True
+            weakness = parsed.get("weakness") or "not comprehensive enough"
+
+            regen_prompt = f"""Document:
+{doc_text}
+
+Previous Question (NOT COMPREHENSIVE ENOUGH):
+{current_question}
+
+Weakness: {weakness}
+
+Generate a NEW, more comprehensive question that:
+- Requires reasoning across multiple parts of the document
+- Cannot be answered by copying a single sentence
+- Requires analysis, comparison, inference, or synthesis
+- Is self-contained and clearly worded
+
+Provide ONLY the new question, nothing else."""
+
+            try:
+                regenerated = _call_llm(regen_prompt, config).strip()
+                if regenerated:
+                    current_question = regenerated
+                    if not current_question.endswith("?"):
+                        current_question += "?"
+            except Exception:
+                pass
+
+    return current_question, comp_info
+
+
 def generate_questions(
     documents: Union[List[Dict[str, Any]], Dict[str, Any], List[Any]],
     config: Optional[Dict[str, Any]] = None,
@@ -486,28 +649,47 @@ def generate_questions(
 
             validation_config = config.get("question_generation", {}).get("validation", {})
             enable_validation = validation_config.get("enable_rejection", True)
+            enable_comp_check = validation_config.get("enable_comprehensiveness_check", True)
             question_validation_details = []
-            if enable_validation:
+
+            if enable_validation or enable_comp_check:
                 min_confidence = validation_config.get("min_confidence_threshold", 0.7)
                 max_regeneration_attempts = validation_config.get("max_regeneration_attempts", 2)
+                comp_min_score = validation_config.get("comprehensiveness_min_score", 0.6)
+                comp_max_attempts = validation_config.get("comprehensiveness_max_attempts", 2)
+
                 validated_questions = []
                 for q_idx, question in enumerate(questions, 1):
-                    final_question, validation_info = _validate_and_regenerate_question(
-                        question=question,
-                        document_content=text_content,
-                        config=config,
-                        min_confidence=min_confidence,
-                        max_attempts=max_regeneration_attempts,
-                    )
+                    detail: Dict[str, Any] = {
+                        "question_index": q_idx,
+                        "original_question": question,
+                    }
+                    final_question = question
+
+                    if enable_validation:
+                        final_question, validation_info = _validate_and_regenerate_question(
+                            question=final_question,
+                            document_content=text_content,
+                            config=config,
+                            min_confidence=min_confidence,
+                            max_attempts=max_regeneration_attempts,
+                        )
+                        detail["validation_info"] = validation_info
+
+                    if enable_comp_check:
+                        final_question, comp_info = _check_question_comprehensiveness(
+                            question=final_question,
+                            document_content=text_content,
+                            config=config,
+                            min_score=comp_min_score,
+                            max_attempts=comp_max_attempts,
+                        )
+                        detail["comprehensiveness_check"] = comp_info
+
+                    detail["final_question"] = final_question
                     validated_questions.append(final_question)
-                    question_validation_details.append(
-                        {
-                            "question_index": q_idx,
-                            "original_question": question,
-                            "final_question": final_question,
-                            "validation_info": validation_info,
-                        }
-                    )
+                    question_validation_details.append(detail)
+
                 questions = validated_questions
 
             results.append(
@@ -522,7 +704,7 @@ def generate_questions(
                         "num_questions": len(questions),
                         "complexity": complexity,
                         "question_types": question_types or COMPLEXITY_PRESETS.get(complexity, {}).get("types", []),
-                        "question_validation": question_validation_details if enable_validation else None,
+                        "question_validation": question_validation_details if (enable_validation or enable_comp_check) else None,
                     },
                 }
             )

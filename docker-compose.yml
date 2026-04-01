@@ -1,6 +1,6 @@
 # Three-container setup for a single offline server:
-# - vllm       : Llama-3.1-8B on GPU 0, port 8100 — generates questions & answers
-# - vllm-judge : Qwen2.5-7B  on GPU 1, port 8101 — independent LLM-as-judge
+# - vllm       : Llama-3.1-8B on GPU 0, port 7100 — generates questions & answers
+# - vllm-judge : Qwen2.5-7B  on GPU 1, port 7101 — independent LLM-as-judge
 # - qagredo    : Python pipeline (CPU) — calls both vLLM services
 #
 # WHY two LLMs?  Using the same model to generate AND judge creates self-
@@ -32,12 +32,12 @@
 name: qagredo_offline
 
 services:
-  # ---- Generator LLM: Llama-3.1-8B on GPU 0, port 8100 ----
+  # ---- Generator LLM: Llama-3.1-8B on GPU 0, port 7100 ----
   vllm:
     image: ${VLLM_IMAGE:-vllm/vllm-openai:v0.5.3.post1}
     container_name: qagredo-vllm
     ports:
-      - "8100:8100"
+      - "7100:7100"
     shm_size: "8gb"
     environment:
       HF_HOME: /root/.cache/huggingface
@@ -56,7 +56,7 @@ services:
       - --host
       - 0.0.0.0
       - --port
-      - "8100"
+      - "7100"
       - --model
       - ${VLLM_MODEL:-/models/Meta-Llama-3.1-8B-Instruct}
       - --served-model-name
@@ -80,20 +80,20 @@ services:
               device_ids: ["0"]
               capabilities: [gpu]
     healthcheck:
-      test: ["CMD", "bash", "-lc", "curl -sf http://localhost:8100/health >/dev/null"]
+      test: ["CMD", "bash", "-lc", "curl -sf http://localhost:7100/health >/dev/null"]
       interval: 5s
       timeout: 3s
       retries: 40
       start_period: 10s
 
-  # ---- Judge LLM: Qwen2.5-7B on GPU 1, port 8101 ----
+  # ---- Judge LLM: Qwen2.5-7B on GPU 1, port 7101 ----
   # A DIFFERENT model from the generator to avoid self-evaluation bias.
   # Qwen judges whether Llama's answers are grounded in the document.
   vllm-judge:
     image: ${VLLM_IMAGE:-vllm/vllm-openai:v0.5.3.post1}
     container_name: qagredo-vllm-judge
     ports:
-      - "8101:8101"
+      - "7101:7101"
     shm_size: "4gb"
     environment:
       HF_HOME: /root/.cache/huggingface
@@ -106,7 +106,7 @@ services:
       - --host
       - 0.0.0.0
       - --port
-      - "8101"
+      - "7101"
       - --model
       - ${VLLM_JUDGE_MODEL:-/models/Qwen2.5-7B-Instruct}
       - --served-model-name
@@ -130,7 +130,7 @@ services:
               device_ids: ["1"]
               capabilities: [gpu]
     healthcheck:
-      test: ["CMD", "bash", "-lc", "curl -sf http://localhost:8101/health >/dev/null"]
+      test: ["CMD", "bash", "-lc", "curl -sf http://localhost:7101/health >/dev/null"]
       interval: 5s
       timeout: 3s
       retries: 40
@@ -166,10 +166,10 @@ services:
       PYDANTIC_DISABLE_PLUGIN_LOADING: "1"
       SENTENCE_TRANSFORMERS_MODEL_PATH: "/opt/models_embed/all-MiniLM-L6-v2"
       # ---- Generator LLM (Llama on GPU 0) ----
-      VLLM_BASE_URL: "http://vllm:8100/v1"
+      VLLM_BASE_URL: "http://vllm:7100/v1"
       VLLM_API_KEY: ${VLLM_API_KEY:-llama-local}
       # ---- Judge LLM (Qwen on GPU 1) ----
-      VLLM_JUDGE_BASE_URL: "http://vllm-judge:8101/v1"
+      VLLM_JUDGE_BASE_URL: "http://vllm-judge:7101/v1"
       VLLM_JUDGE_MODEL: ${VLLM_JUDGE_SERVED_NAME:-Qwen/Qwen2.5-7B-Instruct}
       VLLM_JUDGE_API_KEY: ${VLLM_JUDGE_API_KEY:-qwen-local}
     volumes:
@@ -191,17 +191,17 @@ services:
       - -c
       - |
         unset TRANSFORMERS_CACHE  # remove once qagredo-v1 image is rebuilt
-        echo "[INFO] Waiting for vLLM (generator) at http://vllm:8100/health ..."
+        echo "[INFO] Waiting for vLLM (generator) at http://vllm:7100/health ..."
         for i in $(seq 1 120); do
-          if curl -sf http://vllm:8100/health >/dev/null; then
+          if curl -sf http://vllm:7100/health >/dev/null; then
             echo "[OK] vLLM generator (Llama) is ready"
             break
           fi
           sleep 2
         done
-        echo "[INFO] Waiting for vLLM (judge) at http://vllm-judge:8101/health ..."
+        echo "[INFO] Waiting for vLLM (judge) at http://vllm-judge:7101/health ..."
         for i in $(seq 1 120); do
-          if curl -sf http://vllm-judge:8101/health >/dev/null; then
+          if curl -sf http://vllm-judge:7101/health >/dev/null; then
             echo "[OK] vLLM judge (Qwen) is ready"
             break
           fi

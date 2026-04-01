@@ -14,8 +14,8 @@ is supported by the source document (using **MiniLM** for semantic similarity
 and **LLM-as-judge** (a separate Qwen model) for complex reasoning, avoiding self-evaluation bias).
 
 You run **three containers**:
-- **vLLM** (Llama-3.1-8B on GPU 0, port 8100): generates questions and answers
-- **vLLM-judge** (Qwen2.5-7B on GPU 1, port 8101): independent LLM-as-judge for hallucination checking
+- **vLLM** (Llama-3.1-8B on GPU 0, port 7100): generates questions and answers
+- **vLLM-judge** (Qwen2.5-7B on GPU 1, port 7101): independent LLM-as-judge for hallucination checking
 - **QAGRedo** (CPU): pipeline orchestration + MiniLM for semantic similarity
 
 ### Pipeline overview
@@ -25,9 +25,10 @@ Documents (JSONL)
     |
     v
   Question Generation (10 types, few-shot examples, temp=0.7)
+    + Grounding validation + comprehensiveness check
     |
     v
-  Answer Generation (structured + evidence, temp=0.3, 3 retries)
+  Answer Generation (structured + evidence, temp=0.3, retries + coverage rewrite)
     |
     v
   Hallucination Grading (hybrid: semantic + Qwen LLM fallback)
@@ -38,8 +39,11 @@ Documents (JSONL)
 
 **Key features**:
 - 10 question types including synthesis, evaluation, and counterfactual
+- Per-question comprehensiveness check (rejects trivial questions, regenerates with guidance)
 - Structured answers with supporting evidence citations
 - Up to 3 retries for ungrounded answers
+- Coverage validation to ensure answers address all parts of each question
+- One targeted rewrite pass for low-coverage answers (accepted only if grounded)
 - Hybrid grading: fast semantic check (MiniLM, CPU) + Qwen LLM fallback for
   counting, aggregation, and inference
 - Per-run timestamped output folders (YYYY-MM-DD_HHMMSS)
@@ -136,13 +140,49 @@ Purpose: understand what will be created/modified.
 - Copy sample input data into `qagredo_host/data/dev-data.jsonl`
 - (If needed) extract `/home/tyewhong/Meta-Llama-3.1-8B-Instruct_hf_cache.zip` and build a real model folder under `qagredo_host/models_llm/Meta-Llama-3.1-8B-Instruct/`
 - Set up MiniLM (via `models_embed/` if present, otherwise HF cache) so semantic grading works offline
-- Start both vLLM services (main on port **8100**, judge on port **8101**), wait for `/health`, then run QAGRedo
+- Start both vLLM services (main on port **7100**, judge on port **7101**), wait for `/health`, then run QAGRedo
 
-## Convert your files into QAGRedo input (pdf/txt/xlsx/json/jsonl to JSONL)
+## Convert your files into QAGRedo input (pdf/txt/docx/xlsx/csv/json/jsonl to JSONL)
 
 QAGRedo reads **JSONL** (one JSON object per line). The bundled converter
 handles the heavy lifting -- it accepts multiple input formats and produces
 normalized JSONL that QAGRedo can ingest directly.
+
+Important:
+- Conversion is deterministic parser-based processing (not LLM-based).
+- The pipeline now supports runtime auto-preparation for non-JSONL inputs via `run.input_folder` / `run.input_type`.
+- Manual conversion remains available if you want a stable intermediate JSONL file.
+
+### Quickstart (3 steps)
+
+1) Install dependencies:
+
+```bash
+cd /home/tyewhong/qagredo
+python3 -m pip install -r requirements.txt
+```
+
+2) Configure runtime input selection:
+
+```bash
+cd /home/tyewhong/qagredo
+```
+
+```yaml
+run:
+  input_folder: /home/tyewhong/qagredo/train-data_txt
+  input_type: txt            # auto/jsonl/json/txt/pdf/docx/xlsx/csv
+  max_files: 10
+  num_documents: 10
+  min_content_words: 20
+  min_content_chars: 0
+```
+
+3) Run the pipeline:
+
+```bash
+bash run.sh
+```
 
 ### Supported input formats
 
@@ -153,7 +193,9 @@ normalized JSONL that QAGRedo can ingest directly.
 | **JSONL** | `.jsonl` | One JSON object per line |
 | **PDF** | `.pdf` | Requires `pypdf` (included in `requirements.txt`) |
 | **Plain text** | `.txt` | Entire file becomes one document |
+| **Word document** | `.docx` | Paragraphs are joined into one document text (`python-docx`) |
 | **Excel** | `.xlsx` | Requires `openpyxl` (included in `requirements.txt`) |
+| **CSV** | `.csv` | Each row becomes one document record |
 
 **JSON repair**: The converter auto-fixes common hand-editing mistakes in JSON
 files (missing commas between properties, unterminated strings, trailing
@@ -186,6 +228,16 @@ python3 scripts/conversion/convert_to_qagredo_jsonl.py \
   --input data/data.xlsx \
   --output data/data.jsonl
 
+# CSV
+python3 scripts/conversion/convert_to_qagredo_jsonl.py \
+  --input data/data.csv \
+  --output data/data_from_csv.jsonl
+
+# DOCX
+python3 scripts/conversion/convert_to_qagredo_jsonl.py \
+  --input data/brief.docx \
+  --output data/brief.jsonl
+
 # Plain text
 python3 scripts/conversion/convert_to_qagredo_jsonl.py \
   --input data/notes.txt \
@@ -206,7 +258,7 @@ Output JSONL format (per line):
 | `type` | `text_document` |
 | `metadata` | Optional -- preserves `country`, `source_date`, `languages`, etc. |
 
-### 3) Point QAGRedo to the converted JSONL
+### 3) Point QAGRedo to the converted JSONL (manual conversion path)
 
 Copy the output JSONL into the host data folder and update the config:
 
@@ -217,19 +269,25 @@ cp data/sample_press.jsonl ~/qagredo_host/data/
 Edit `config/config.yaml` and set:
 - `run.input_file: data/sample_press.jsonl`
 
+Runtime override example (without editing config):
+
+```bash
+bash run.sh -- --input-folder train-data_txt --input-type txt --max-files 10 --num-documents 10 --min-content-words 20
+```
+
 ### A4) Run WITHOUT Docker (host-only, advanced)
 
 Purpose: run `run_qa_pipeline.py` directly on the Linux host (no containers).
 
 Important notes:
 
-- You still need an LLM server. In host-only mode we run **vLLM on the host** (still on port `8100`).
+- You still need an LLM server. In host-only mode we run **vLLM on the host** (still on port `7100`).
 - Use the repo Python environment (`/home/tyewhong/qagredo/.venv/`). System `python3` may miss packages.
 
 #### A4.1) Start (or verify) vLLM on the host
 
 ```bash
-curl -i http://localhost:8100/health
+curl -i http://localhost:7100/health
 ```
 
 If you do **not** get `HTTP/1.1 200 OK`, start vLLM via Docker Compose:
@@ -243,7 +301,7 @@ docker compose -f docker-compose.yml up -d vllm vllm-judge
 
 When running on the host, the vLLM base URL must be:
 
-- `http://localhost:8100/v1`
+- `http://localhost:7100/v1`
 
 Check this file:
 
@@ -286,7 +344,7 @@ find /home/tyewhong/qagredo/output -name '*.json' | tail -n 5
 Purpose: the repo folder `/home/tyewhong/qagredo/` can be huge because of `.venv/`, but the offline server does **not** need it (Docker runs the app).\
 This step creates **small archives** that contain only what the offline server needs.
 
-### B2) Create the bundle (5-file approach)
+### B2) Create the bundle (6-file approach)
 
 Purpose: create a small code/config/data bundle you can re-transfer quickly whenever code changes.
 
@@ -298,21 +356,22 @@ bash scripts/make_qagredo_bundle.sh --include-data   # also include data/ files
 
 This produces `qagredo_bundle.tar.gz` (~few MB) plus a `.sha256` checksum.
 
-For the full 5-file transfer workflow (bundle + Docker images + models), see:
+For the full 6-file transfer workflow (bundle + Docker images + models), see:
 
 - `docs/OFFLINE_SETUP_GUIDE.md`
 
 ## Part C -- Transfer to the offline server
 
-Copy these 5 files to the offline server (USB / SCP):
+Copy these 6 files to the offline server (USB / SCP):
 
 | # | File | Size | Re-transfer when |
 |---|------|------|-----------------|
 | 1 | `vllm-openai_v0.5.3.post1.rootfs.tar` | ~15-20 GB | Rarely (new vLLM version) |
 | 2 | `qagredo-v1.tar` | ~5-10 GB | Rarely (new Docker image) |
-| 3 | `models_llm.tar` | ~30 GB | Rarely (new model) |
-| 4 | `models_embed_all-MiniLM-L6-v2.tar` | ~263 MB | Rarely (new embedding model) |
-| 5 | `qagredo_bundle.tar.gz` | ~few MB | Often (code/config/data changes) |
+| 3 | `models_llama.tar.gz` | ~12-16 GB | Rarely (new generator model) |
+| 4 | `models_qwen.tar.gz` | ~12-14 GB | Rarely (new judge model) |
+| 5 | `models_embed_all-MiniLM-L6-v2.tar` | ~263 MB | Rarely (new embedding model) |
+| 6 | `qagredo_bundle.tar.gz` | ~few MB | Often (code/config/data changes) |
 
 ### Optional verification (recommended)
 
@@ -354,8 +413,8 @@ Output folders are timestamped: `output/vllm/<model>/YYYY-MM-DD_HHMMSS/`
 Purpose: confirm both vLLM services are up.
 
 ```bash
-curl -i http://localhost:8100/health
-curl -i http://localhost:8101/health
+curl -i http://localhost:7100/health
+curl -i http://localhost:7101/health
 ```
 
 ### vLLM models (requires API key)
@@ -364,8 +423,8 @@ Purpose: confirm the models are registered in vLLM.
 
 ```bash
 export VLLM_API_KEY=llama-local
-curl -H "Authorization: Bearer ${VLLM_API_KEY}" http://localhost:8100/v1/models
-curl -H "Authorization: Bearer ${VLLM_API_KEY}" http://localhost:8101/v1/models
+curl -H "Authorization: Bearer ${VLLM_API_KEY}" http://localhost:7100/v1/models
+curl -H "Authorization: Bearer ${VLLM_API_KEY}" http://localhost:7101/v1/models
 ```
 
 ### Common problems
@@ -375,7 +434,7 @@ curl -H "Authorization: Bearer ${VLLM_API_KEY}" http://localhost:8101/v1/models
 | `>` prompt | Stuck in a heredoc. Type `EOF` on its own line or press `Ctrl+C` |
 | Unauthorized | `export VLLM_API_KEY=llama-local` |
 | Connection error | vLLM is still loading. Wait for "Uvicorn running..." |
-| Browser can't open `localhost:8100` | Your laptop's `localhost` is not the server. Use SSH tunnel / port-forward |
+| Browser can't open `localhost:7100` | Your laptop's `localhost` is not the server. Use SSH tunnel / port-forward |
 | Permission denied | `bash setup_offline.sh --force` |
 | Cannot delete hf_cache | `docker run --rm --privileged --userns=host -u 0 --entrypoint bash -v "$(pwd)/hf_cache:/hf" vllm/vllm-openai:v0.5.3.post1 -c "rm -rf /hf/modules /hf/hub"` |
 | Cannot delete hf_cache_judge | Same as above but use `hf_cache_judge` instead of `hf_cache` |
@@ -416,20 +475,20 @@ the host user regardless of Docker configuration.
 
 ## Browser note (port-forward)
 
-- On the server, vLLM is at `http://localhost:8100`, vLLM-judge at `http://localhost:8101`
+- On the server, vLLM is at `http://localhost:7100`, vLLM-judge at `http://localhost:7101`
 - In your laptop browser, Cursor may forward it to a different local port (e.g. `http://localhost:50400`)
 - The root path `/` shows `{"detail":"Not Found"}` -- normal
 
 Useful pages:
 
-- Main vLLM: Docs UI `http://localhost:8100/docs`, Health `http://localhost:8100/health`
-- Judge vLLM: Docs UI `http://localhost:8101/docs`, Health `http://localhost:8101/health`
+- Main vLLM: Docs UI `http://localhost:7100/docs`, Health `http://localhost:7100/health`
+- Judge vLLM: Docs UI `http://localhost:7101/docs`, Health `http://localhost:7101/health`
 
 ## Send this working setup to an offline server
 
-Recommended: use the 5-file bundle approach (see **Part B/C/D** above).
+Recommended: use the 6-file bundle approach (see **Part B/C/D** above).
 Run `bash scripts/make_qagredo_bundle.sh` to create `qagredo_bundle.tar.gz`, then transfer the
-5 files to the offline server. See `docs/OFFLINE_SETUP_GUIDE.md` for the full walkthrough.
+6 files to the offline server. See `docs/OFFLINE_SETUP_GUIDE.md` for the full walkthrough.
 
 ### 1) Export Docker images (online machine)
 
@@ -478,7 +537,7 @@ export VLLM_MODEL=/models/Meta-Llama-3.1-8B-Instruct
 export VLLM_API_KEY=llama-local
 export VLLM_SERVED_MODEL_NAME=meta-llama/Meta-Llama-3.1-8B-Instruct
 
-# Judge service (Qwen2.5-7B on port 8101)
+# Judge service (Qwen2.5-7B on port 7101)
 export VLLM_JUDGE_IMAGE=vllm/vllm-openai:v0.5.3.post1
 export VLLM_JUDGE_MODEL=/models/Qwen2.5-7B-Instruct
 export VLLM_JUDGE_API_KEY=llama-local
@@ -490,17 +549,17 @@ docker compose -f docker-compose.yml run --rm qagredo
 
 ## Useful vLLM URLs
 
-**Main vLLM (port 8100):**
-- API docs UI: `http://localhost:8100/docs`
-- OpenAPI JSON: `http://localhost:8100/openapi.json`
-- Health: `http://localhost:8100/health`
+**Main vLLM (port 7100):**
+- API docs UI: `http://localhost:7100/docs`
+- OpenAPI JSON: `http://localhost:7100/openapi.json`
+- Health: `http://localhost:7100/health`
 
-**Judge vLLM (port 8101):**
-- API docs UI: `http://localhost:8101/docs`
-- OpenAPI JSON: `http://localhost:8101/openapi.json`
-- Health: `http://localhost:8101/health`
+**Judge vLLM (port 7101):**
+- API docs UI: `http://localhost:7101/docs`
+- OpenAPI JSON: `http://localhost:7101/openapi.json`
+- Health: `http://localhost:7101/health`
 
-Note: the root URL `http://localhost:8100/` (and 8101) returns `{"detail":"Not Found"}` (normal).
+Note: the root URL `http://localhost:7100/` (and 7101) returns `{"detail":"Not Found"}` (normal).
 
 ## Common problems (quick)
 

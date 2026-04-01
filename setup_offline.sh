@@ -19,9 +19,10 @@ set -euo pipefail
 #   /some/staging/
 #   ├── vllm-openai_v0.5.3.post1.rootfs.tar   (file 1)
 #   ├── qagredo-v1.tar                          (file 2)
-#   ├── models_llm/                             (file 3a)
-#   ├── models_embed/                           (file 3b)
-#   └── qagredo_host/                           (file 5, extracted from bundle)
+#   ├── models_llama.tar.gz                     (file 3a)
+#   ├── models_qwen.tar.gz                      (file 3b)
+#   ├── models_embed_all-MiniLM-L6-v2.tar       (file 4)
+#   └── qagredo_host/                           (file 6, extracted from bundle)
 #       ├── setup_offline.sh   <-- you are here
 #       ├── run.sh
 #       ├── run_qa_pipeline.py
@@ -115,6 +116,12 @@ _find_dir() {
   return 1
 }
 
+_has_model_subdir() {
+  local base="${1:-}"
+  [[ -d "$base" ]] || return 1
+  find -L "$base" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | head -1 | grep -q .
+}
+
 # ============================================================================
 # Phase 1: Discover components
 # ============================================================================
@@ -140,14 +147,73 @@ else
   _warn "QAGRedo tar not found. Set QAGREDO_TAR=/path/to/file or place alongside this directory."
 fi
 
-# File 3a: LLM models directory
+# File 3a/3b: split model tarballs (preferred)
+if [[ -n "${MODELS_LLAMA_TAR:-}" && -f "$MODELS_LLAMA_TAR" ]]; then
+  _info "Llama model tar (env):  $MODELS_LLAMA_TAR"
+elif MODELS_LLAMA_TAR="$(_find_file "models_llama.tar.gz")"; then
+  _info "Llama model tar (auto): $MODELS_LLAMA_TAR"
+else
+  MODELS_LLAMA_TAR=""
+fi
+
+if [[ -n "${MODELS_QWEN_TAR:-}" && -f "$MODELS_QWEN_TAR" ]]; then
+  _info "Qwen model tar (env):  $MODELS_QWEN_TAR"
+elif MODELS_QWEN_TAR="$(_find_file "models_qwen.tar.gz")"; then
+  _info "Qwen model tar (auto): $MODELS_QWEN_TAR"
+else
+  MODELS_QWEN_TAR=""
+fi
+
+# File 3c: legacy combined LLM tarball (backward compatible)
+if [[ -n "${MODELS_LLM_TAR:-}" && -f "$MODELS_LLM_TAR" ]]; then
+  _info "Legacy models tar (env):  $MODELS_LLM_TAR"
+elif MODELS_LLM_TAR="$(_find_file "models_llm.tar")"; then
+  _info "Legacy models tar (auto): $MODELS_LLM_TAR"
+else
+  MODELS_LLM_TAR=""
+fi
+
+# LLM models directory
 if [[ -n "${MODELS_LLM_DIR:-}" && -d "$MODELS_LLM_DIR" ]]; then
   _info "Models LLM (env):  $MODELS_LLM_DIR"
 elif MODELS_LLM_DIR="$(_find_dir "models_llm")"; then
   _info "Models LLM (auto): $MODELS_LLM_DIR"
 else
   MODELS_LLM_DIR=""
-  _warn "models_llm/ not found. Set MODELS_LLM_DIR=/path/to/dir or place alongside this directory."
+
+  # If no directory exists yet, auto-extract from split tars (preferred) or legacy tar.
+  if [[ -n "$MODELS_LLM_TAR" || ( -n "$MODELS_LLAMA_TAR" && -n "$MODELS_QWEN_TAR" ) ]]; then
+    EXTRACT_BASE="$PARENT_DIR/models_llm"
+    if [[ -d "$EXTRACT_BASE" && "$FORCE" -ne 1 ]]; then
+      _info "Using existing extracted models dir: $EXTRACT_BASE"
+    else
+      rm -rf "$EXTRACT_BASE" 2>/dev/null || true
+      mkdir -p "$EXTRACT_BASE"
+
+      if [[ -n "$MODELS_LLM_TAR" ]]; then
+        _info "Extracting legacy models tar into: $PARENT_DIR"
+        tar xf "$MODELS_LLM_TAR" -C "$PARENT_DIR"
+      else
+        _info "Extracting split model archives into: $EXTRACT_BASE"
+        tar xzf "$MODELS_LLAMA_TAR" -C "$EXTRACT_BASE"
+        tar xzf "$MODELS_QWEN_TAR" -C "$EXTRACT_BASE"
+      fi
+    fi
+
+    if _has_model_subdir "$EXTRACT_BASE"; then
+      MODELS_LLM_DIR="$EXTRACT_BASE"
+      _info "Models LLM (prepared): $MODELS_LLM_DIR"
+    elif _has_model_subdir "$EXTRACT_BASE/models_llm"; then
+      MODELS_LLM_DIR="$EXTRACT_BASE/models_llm"
+      _info "Models LLM (prepared nested): $MODELS_LLM_DIR"
+    else
+      _warn "Model tar extraction completed, but no model folders were detected under $EXTRACT_BASE"
+    fi
+  fi
+
+  if [[ -z "$MODELS_LLM_DIR" ]]; then
+    _warn "models_llm/ not found. Provide MODELS_LLM_DIR or place models_llama.tar.gz + models_qwen.tar.gz (or legacy models_llm.tar) alongside this directory."
+  fi
 fi
 
 # File 3b: Embedding models directory
@@ -237,10 +303,10 @@ _fix_perms_if_needed() {
 
   local _uid; _uid="$(id -u)"
   local _gid; _gid="$(id -g)"
-  docker run --rm --privileged --userns=host -u 0 -v "$HOST_DIR:/qhost" "$fix_image" bash -c "
+  docker run --rm --privileged --userns=host -u 0 --entrypoint "" -v "$HOST_DIR:/qhost" "$fix_image" sh -c "
     set -e
-    mkdir -p /qhost/output /qhost/hf_cache
-    chown -R ${_uid}:${_gid} /qhost/config /qhost/data /qhost/output /qhost/hf_cache /qhost/utils /qhost/scripts 2>/dev/null || true
+    mkdir -p /qhost/output /qhost/hf_cache /qhost/hf_cache_judge
+    chown -R ${_uid}:${_gid} /qhost/config /qhost/data /qhost/output /qhost/hf_cache /qhost/hf_cache_judge /qhost/utils /qhost/scripts 2>/dev/null || true
   " && _info "Permissions fixed via Docker (chown to UID=$_uid)" || _warn "Docker permission fix failed (non-fatal)"
 }
 _fix_perms_if_needed
@@ -299,10 +365,10 @@ HOST_GID="$(id -g)"
 # Use Docker to set ownership to the current host user (works without sudo)
 if _image_exists "$QAGREDO_IMAGE"; then
   _info "Setting ownership to UID=$HOST_UID GID=$HOST_GID (your user)"
-  docker run --rm --privileged --userns=host -u 0 -v "$HOST_DIR:/qhost" "$QAGREDO_IMAGE" bash -c "
+  docker run --rm --privileged --userns=host -u 0 --entrypoint "" -v "$HOST_DIR:/qhost" "$QAGREDO_IMAGE" sh -c "
     set -e
-    mkdir -p /qhost/output /qhost/hf_cache /qhost/config /qhost/data
-    chown -R ${HOST_UID}:${HOST_GID} /qhost/output /qhost/hf_cache /qhost/config /qhost/data 2>/dev/null || true
+    mkdir -p /qhost/output /qhost/hf_cache /qhost/hf_cache_judge /qhost/config /qhost/data
+    chown -R ${HOST_UID}:${HOST_GID} /qhost/output /qhost/hf_cache /qhost/hf_cache_judge /qhost/config /qhost/data 2>/dev/null || true
   " && _info "Permissions fixed via container" || _warn "Permission fix via container failed (non-fatal)"
 else
   _warn "QAGRedo image not loaded yet; skipping permission fix"

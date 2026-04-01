@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>QAGRedo — pipeline (SVG in HTML)</title>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    body {
+      margin: 0;
+      font-family: "Source Sans 3", system-ui, sans-serif;
+      background: #fafbfc;
+      color: #1e293b;
+      line-height: 1.5;
+      padding: 1.5rem;
+    }
+    .wrap { max-width: 760px; margin: 0 auto; }
+    h1 { font-size: 1.35rem; margin: 0 0 0.5rem; }
+    p.lead { color: #64748b; margin: 0 0 1rem; font-size: 0.95rem; }
+    .frame {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 1rem;
+      overflow-x: auto;
+    }
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-width: 680px;
+      margin: 0 auto;
+    }
+    footer { margin-top: 1.5rem; font-size: 0.8rem; color: #94a3b8; }
+    code { font-size: 0.88em; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>QAGRedo pipeline (drawn in HTML / SVG)</h1>
+    <p class="lead">
+      Native SVG (no Mermaid). Layout matches <code>run_qa_pipeline.py</code>:
+      slot loop, grounding gate, replacement question, save, document loop.
+    </p>
+    <div class="frame">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 920" role="img" aria-labelledby="title desc">
+<title id="title">QAGRedo pipeline flowchart</title><desc id="desc">Slots, grounding gate, replacement, save, documents.</desc><defs>  <marker id="arrowhead" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" overflow="visible">    <polygon points="0 0, 9 4.5, 0 9" fill="#2563eb"/>  </marker></defs><style>.lbl{font-family:"Source Sans 3",system-ui,sans-serif;font-size:10px;fill:#2563eb}.lbld{font-size:9px;fill:#64748b}</style>
+<rect x="260" y="10" width="140" height="34" rx="17" fill="#e2e8f0" stroke="#334155" stroke-width="1.5"/>
+<text x="330.0" y="32.0" text-anchor="middle" font-family="Source Sans 3,system-ui,sans-serif" font-size="11" fill="#0f172a">Start</text>
+<rect x="230" y="52" width="200" height="38" rx="6" fill="#f8fafc" stroke="#334155" stroke-width="1.5"/>
+<text x="330" y="66" text-anchor="middle" font-family="Source Sans 3,system-ui,sans-serif" font-size="10" fill="#0f172a">Load &amp; normalize</text>
+<text x="330" y="80" text-anchor="middle" font-family="Source Sans 3,system-ui,sans-serif" font-size="10" fill="#0f172a">(JSONL)</text>
+<line x1="330" y1="44" x2="330" y2="52" stroke="#2563eb" stroke-width="1.8" marker-end="url(#arrowhead)"/>
+<line x1="330" y1="90" x2="330" y2="108" stroke="#2563eb" stroke-width="1.8" marker-end="url(#arrowhead)"/>
+<rect x="210" y="108" width="240" height="44" rx="6" fill="#f8fafc" stroke="#334155" stroke-width="1.5"/>
+<text x="330" y="122" text-anchor="middle" font-family="Source Sans 3,system-ui,sans-serif" font-size="10" fill="#0f172a">generate_questions</text>
+<text x="330" y="136" text-anchor="middle" font-family="Source Sans 3,system-ui,sans-serif" font-size="10" fill="#0f172a">(N per document)</text>
+<polygon points="330,176 408,210 330,244 252,210" fill="#f8fafc" stroke="#334155" stroke-width="1.5"/>
+<text x="330" y="214" text-anchor="middle" font-family="Source Sans 3,system-ui,sans-serif" font-size="9" fill="#0f172a">More slots?</text>
+<line x1="330" y1="152" x2="330" y2="176" stroke="#2563eb" stroke-width="1.8" marker-end="url(#arrowhead)"/>
+<rect x="478" y="188" width="152" height="44" rx="6" fill="#f8fafc" stroke="#334155" stroke-width="1.5"/>
+<text x="554" y="202" text-anchor="middle" font-family="Source Sans 3,system-ui,sans-serif" font-size="9" fill="#0f172a">save_results</text>
+<text x="554" y="216" text-anchor="middle" font-family="Source Sans 3,system-ui,sans-serif" font-size="9" fill="#0f172a">(+ optional filters)</text>
+<line x1="408" y1="210" x2="478" y2="210" stroke="#2563eb" stroke-width="1.8" marker-end="url(#arrowhead)"/>
+<text x="412" y="204" text-anchor="start" class="lbl">no</text>
+<rect x="230" y="252" width="200" height="38" rx="6" fill="#f8fafc" stroke="#334155" stroke-width="1.5"/>
+<text x="330" y="276" text-anchor="middle" font-family="Source Sans 3,system-ui,sans-serif" font-size="10" fill="#0f172a">generate_answers</text>
+<line x1="330" y1="244" x2="330" y2="252" stroke="#2563eb" stroke-width="1.8" marker-end="url(#arrowhead)"/>
+<rect x="215" y="304" width="230" height="40" rx="6" fill="#f8fafc" stroke="#334155" stroke-width="1.5"/>
+<text x="330" y="318" text-anchor="middle" font-family="Source Sans 3,system-ui,sans-serif" font-size="9" fill="#0f172a">grade + build pair +</text>
+<text x="330" y="332" text-anchor="middle" font-family="Source Sans 3,system-ui,sans-serif" font-size="9" fill="#0f172a">grounding gate</text>
+<line x1="330" y1="290" x2="330" y2="304" stroke="#2563eb" stroke-width="1.8" marker-end="url(#arrowhead)"/>
+<polygon points="330,364 408,398 330,432 252,398" fill="#f8fafc" stroke="#334155" stroke-width="1.5"/>
+<text x="330" y="386" text-anchor="middle" font-family="Source Sans 3,system-ui,sans-serif" font-size="8" fill="#0f172a">Passes</text>
+<text x="330" y="400" text-anchor="middle" font-family="Source Sans 3,system-ui,sans-serif" font-size="8" fill="#0f172a">quality gate?</text>
+<line x1="330" y1="344" x2="330" y2="364" stroke="#2563eb" stroke-width="1.8" marker-end="url(#arrowhead)"/>
+<path d="M 408 398 L 560 398 L 560 172 L 330 172 L 330 176" fill="none" stroke="#2563eb" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#arrowhead)"/>
+<text x="565" y="285" text-anchor="start" class="lbl">next slot</text>
+<polygon points="125,420 177,448 125,476 73,448" fill="#f8fafc" stroke="#334155" stroke-width="1.5"/>
+<text x="125" y="438" text-anchor="middle" font-family="Source Sans 3,system-ui,sans-serif" font-size="7" fill="#0f172a">Regeneration</text>
+<text x="125" y="452" text-anchor="middle" font-family="Source Sans 3,system-ui,sans-serif" font-size="7" fill="#0f172a">rounds left?</text>
+<line x1="252" y1="398" x2="177" y2="398" stroke="#2563eb" stroke-width="1.8" marker-end="url(#arrowhead)"/>
+<text x="248" y="392" text-anchor="end" class="lbl">no</text>
+<rect x="48" y="508" width="100" height="32" rx="6" fill="#f8fafc" stroke="#334155" stroke-width="1.5"/>
+<text x="98" y="526" text-anchor="middle" font-family="Source Sans 3,system-ui,sans-serif" font-size="9" fill="#0f172a">Keep last</text>
+<line x1="125" y1="476" x2="125" y2="508" stroke="#2563eb" stroke-width="1.8" marker-end="url(#arrowhead)"/>
+<text x="121" y="502" text-anchor="end" class="lbl">no</text>
+<rect x="210" y="468" width="128" height="40" rx="6" fill="#f8fafc" stroke="#334155" stroke-width="1.5"/>
+<text x="274" y="476" text-anchor="middle" font-family="Source Sans 3,system-ui,sans-serif" font-size="8" fill="#0f172a">generate_questions</text>
+<text x="274" y="490" text-anchor="middle" font-family="Source Sans 3,system-ui,sans-serif" font-size="8" fill="#0f172a">(×1 replace)</text>
+<path d="M 177 448 L 177 488 L 210 488" fill="none" stroke="#2563eb" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#arrowhead)"/>
+<text x="183" y="430" text-anchor="start" class="lbl">yes</text>
+<path d="M 274 468 L 274 280 L 430 280 L 430 252" fill="none" stroke="#2563eb" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#arrowhead)" stroke-dasharray="6 5"/>
+<text x="285" y="360" text-anchor="start" class="lbld">re-answer (same slot)</text>
+<path d="M 98 540 L 18 540 L 18 210 L 252 210" fill="none" stroke="#2563eb" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#arrowhead)"/>
+<text x="22" y="360" text-anchor="start" class="lbld">to slots</text>
+<polygon points="330,746 408,780 330,814 252,780" fill="#f8fafc" stroke="#334155" stroke-width="1.5"/>
+<text x="330" y="770" text-anchor="middle" font-family="Source Sans 3,system-ui,sans-serif" font-size="9" fill="#0f172a">Another</text>
+<text x="330" y="784" text-anchor="middle" font-family="Source Sans 3,system-ui,sans-serif" font-size="9" fill="#0f172a">document?</text>
+<path d="M 554 232 L 554 688 L 330 688 L 330 746" fill="none" stroke="#2563eb" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#arrowhead)"/>
+<rect x="498" y="762" width="118" height="36" rx="18" fill="#f8fafc" stroke="#334155" stroke-width="1.5"/>
+<text x="557" y="784" text-anchor="middle" font-family="Source Sans 3,system-ui,sans-serif" font-size="10" fill="#0f172a">Pipeline end</text>
+<line x1="408" y1="780" x2="498" y2="780" stroke="#2563eb" stroke-width="1.8" marker-end="url(#arrowhead)"/>
+<text x="412" y="774" text-anchor="start" class="lbl">no</text>
+<path d="M 252 780 L 48 780 L 48 138 L 330 138 L 330 108" fill="none" stroke="#2563eb" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#arrowhead)"/>
+<text x="52" y="520" text-anchor="start" class="lbl">next document</text>
+</svg>
+    </div>
+    <footer>
+      Regenerate:
+      <code>python3 scripts/utils/_rewrite_drawn_flowchart_html.py</code>
+      · Editable PPTX:
+      <code>python3 scripts/utils/build_qagredo_pipeline_flowchart_pptx.py</code>
+      →
+      <code>docs/architecture/diagrams/QAGRedo_Pipeline_Flowchart_editable.pptx</code>
+      · PNG/SVG:
+      <code>python3 scripts/utils/render_pipeline_flowchart_png.py</code>
+      →
+      <code>docs/architecture/diagrams/QAGRedo_Pipeline_Flowchart.png</code> (+ .svg)
+      (venv: pip install -r requirements-diagram.txt or apt librsvg2-bin)
+    </footer>
+  </div>
+</body>
+</html>

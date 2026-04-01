@@ -7,8 +7,29 @@
 offline_mode: true  # or env: OFFLINE_MODE=1
 
 run:
+  # Choose ONE source mode:
+  #   - input_folder mode (recommended for batches, supports auto conversion)
+  #   - input_file mode   (single file; auto converts txt/pdf/docx/xlsx/csv to JSONL)
+  #
+  # If input_folder is set, input_file is ignored.
+  input_folder: /home/tyewhong/qagredo/data/pdf
   input_file: dev-data.jsonl
+
+  # Source type:
+  #   auto | jsonl | json | txt | pdf | docx | xlsx | csv
+  # auto = infer by file extension.
+  input_type: pdf
+
+  # Number of files to load when using input_folder.
+  max_files: 10
+
+  # Number of documents to process after loading/conversion.
   num_documents: 10
+
+  # Skip documents that are too short (helps reduce hallucinations on tiny texts).
+  # Set to 0 to disable a threshold.
+  min_content_words: 20
+  min_content_chars: 0
 
 llm:
   # provider: "vllm" (offline/local) or "openai" (cloud)
@@ -34,7 +55,7 @@ llm:
 
   # Provider-specific settings
   # vLLM: OpenAI-compatible endpoint
-  base_url: "http://localhost:8100/v1"
+  base_url: "http://localhost:7100/v1"
   timeout: 60
 
 # Answer generation settings
@@ -42,6 +63,10 @@ answer_generation:
   # Lower temperature for answers (more deterministic = fewer hallucinations)
   # If not set, defaults to 0.3 (lower than question generation's 0.7)
   temperature: 0.3
+  coverage_validation:
+    enable: true
+    min_score_threshold: 0.7
+    max_doc_chars: 5000
 
 # Question generation settings
 question_generation:
@@ -56,6 +81,20 @@ question_generation:
   # Optional: override specific question types (uncomment to customize)
   # question_types: ["analysis", "aggregation", "comparison", "inference", "causal", "synthesis", "evaluation", "counterfactual"]
 
+  # Validation settings for generated questions
+  validation:
+    # Grounding check: reject questions that reference facts not in the document
+    enable_rejection: true
+    min_confidence_threshold: 0.7
+    max_regeneration_attempts: 2
+
+    # Comprehensiveness check: reject questions that are too simple or trivial.
+    # Each question is evaluated for depth, clarity, complexity, and
+    # answerability. Questions that fail are regenerated with guidance.
+    enable_comprehensiveness_check: true
+    comprehensiveness_min_score: 0.6
+    comprehensiveness_max_attempts: 2
+
 # ---- Judge LLM (separate model for independent grading) ----
 # A DIFFERENT model from the generator to avoid self-evaluation bias.
 # Qwen judges whether Llama's answers are grounded in the document.
@@ -63,7 +102,7 @@ question_generation:
 judge:
   provider: "vllm"
   model: "Qwen/Qwen2.5-7B-Instruct"
-  base_url: "http://localhost:8101/v1"
+  base_url: "http://localhost:7101/v1"
   api_key: "qwen-local"
   temperature: 0.0       # deterministic for judging
   max_tokens: 200

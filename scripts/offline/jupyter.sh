@@ -52,7 +52,22 @@ COMPOSE_FILE="$HOST_DIR/docker-compose.yml"
 START_VLLM=1
 
 _log() { echo "[jupyter] $*"; }
+_warn() { echo "[jupyter][WARN] $*" >&2; }
 die()  { echo "[jupyter][ERROR] $*" >&2; exit 1; }
+
+fix_host_ownership() {
+    _log "Fixing file ownership (UID=$HOST_UID GID=$HOST_GID) ..."
+    docker run --rm --privileged --userns=host -u 0 \
+      --entrypoint "" \
+      -v "$HOST_DIR/output:/fix/output" \
+      -v "$HOST_DIR/hf_cache:/fix/hf_cache" \
+      -v "$HOST_DIR/hf_cache_judge:/fix/hf_cache_judge" \
+      -v "$HOST_DIR/config:/fix/config" \
+      -v "$HOST_DIR/data:/fix/data" \
+      qagredo-v1:latest \
+      sh -c "chown -R $HOST_UID:$HOST_GID /fix/output /fix/hf_cache /fix/hf_cache_judge /fix/config /fix/data 2>/dev/null || true" \
+      2>/dev/null || _warn "Post-run permission fix skipped (non-fatal)"
+}
 
 # ---- parse args ----
 for arg in "$@"; do
@@ -64,6 +79,7 @@ for arg in "$@"; do
       _log "Stopping all containers..."
       docker compose -f "$COMPOSE_FILE" down
       docker rm -f qagredo-jupyter 2>/dev/null || true
+      fix_host_ownership
       _log "Done."
       exit 0
       ;;
@@ -115,7 +131,7 @@ if [[ "$START_VLLM" -eq 1 ]]; then
   HEALTH_INTERVAL=5
   elapsed=0
   while true; do
-    if curl -sf http://localhost:8100/health >/dev/null 2>&1; then
+    if curl -sf http://localhost:7100/health >/dev/null 2>&1; then
       _log "Generator (Llama) is ready! (took ~${elapsed}s)"
       break
     fi
@@ -132,7 +148,7 @@ if [[ "$START_VLLM" -eq 1 ]]; then
   _log "Waiting for Judge (Qwen) to become healthy ..."
   elapsed=0
   while true; do
-    if curl -sf http://localhost:8101/health >/dev/null 2>&1; then
+    if curl -sf http://localhost:7101/health >/dev/null 2>&1; then
       _log "Judge (Qwen) is ready! (took ~${elapsed}s)"
       break
     fi
@@ -171,6 +187,8 @@ if ! tty -s 2>/dev/null; then
   DOCKER_TTY_FLAGS="-d"
 fi
 
+trap fix_host_ownership EXIT
+
 docker run --rm $DOCKER_TTY_FLAGS \
   --name "$CONTAINER_NAME" \
   --network qagredo_offline_default \
@@ -182,9 +200,9 @@ docker run --rm $DOCKER_TTY_FLAGS \
   -e TRANSFORMERS_OFFLINE=1 \
   -e PYDANTIC_DISABLE_PLUGIN_LOADING=1 \
   -e SENTENCE_TRANSFORMERS_MODEL_PATH="/opt/models_embed/all-MiniLM-L6-v2" \
-  -e VLLM_BASE_URL="http://vllm:8100/v1" \
+  -e VLLM_BASE_URL="http://vllm:7100/v1" \
   -e VLLM_API_KEY="${VLLM_API_KEY}" \
-  -e VLLM_JUDGE_BASE_URL="http://vllm-judge:8101/v1" \
+  -e VLLM_JUDGE_BASE_URL="http://vllm-judge:7101/v1" \
   -e VLLM_JUDGE_MODEL="${VLLM_JUDGE_SERVED_NAME}" \
   -e VLLM_JUDGE_API_KEY="${VLLM_JUDGE_API_KEY}" \
   -e JUPYTER_DATA_DIR=/workspace/.jupyter/data \
@@ -200,14 +218,4 @@ docker run --rm $DOCKER_TTY_FLAGS \
   qagredo-v1:latest \
   jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --ServerApp.token='' --ServerApp.password='' --ServerApp.allow_origin='*'
 
-# ---- safety-net: fix ownership after Jupyter exits ----
-_log "Fixing file ownership (UID=$HOST_UID GID=$HOST_GID) ..."
-docker run --rm --privileged --userns=host -u 0 \
-  -v "$HOST_DIR/output:/fix/output" \
-  -v "$HOST_DIR/hf_cache:/fix/hf_cache" \
-  -v "$HOST_DIR/hf_cache_judge:/fix/hf_cache_judge" \
-  -v "$HOST_DIR/config:/fix/config" \
-  -v "$HOST_DIR/data:/fix/data" \
-  qagredo-v1:latest bash -c \
-    "chown -R $HOST_UID:$HOST_GID /fix/output /fix/hf_cache /fix/hf_cache_judge /fix/config /fix/data 2>/dev/null || true" \
-  2>/dev/null || true
+# EXIT trap fires here, running fix_host_ownership automatically.

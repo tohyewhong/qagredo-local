@@ -1,0 +1,74 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Length 1868 >>
+stream
+BT
+/F1 11 Tf
+50 780 Td
+13 TL
+(Case Narrative: story-m-2047) Tj
+T*
+(Type: medium story sample) Tj
+T*
+() Tj
+T*
+(At dawn, Mira arrived at Harbor Nine with a notebook full of crossed-out plans and one clear objective: follow the drifting signal before the tide erased it again.) Tj
+T*
+() Tj
+T*
+(She started with the old crane logs, where entries were half technical record and half rumor. Every third line mentioned a short pulse after midnight, always near Dock C, always gone before verification.) Tj
+T*
+() Tj
+T*
+(By noon she had mapped the pulse windows against weather shifts and found a strange rhythm that looked less like machine failure and more like a reply. The pattern widened whenever patrol boats changed route.) Tj
+T*
+() Tj
+T*
+(In the afternoon she met Teo, a retired operator who spoke in fragments. He remembered a test beacon from years ago, mothballed but never fully disconnected, and warned her that the relay cabinet had two undocumented toggles.) Tj
+T*
+() Tj
+T*
+(At 18:40, with rain beginning and visibility dropping, Mira opened the relay panel. The first toggle silenced local alarms; the second exposed an archived channel labeled only with a faded letter R.) Tj
+T*
+() Tj
+T*
+(When she activated channel R, the pulse resolved into packet bursts carrying old maintenance annotations, timestamped in different formats and stitched together by hand. It read like an interrupted conversation across years.) Tj
+T*
+() Tj
+T*
+(The final burst contained no numbers at all, just a sentence: if this reaches you, route traffic east for one night. Mira hesitated, then cross-checked current congestion. Eastbound lanes were unusually clear.) Tj
+T*
+() Tj
+T*
+(She forwarded a limited reroute to the night supervisor, flagging it as a provisional experiment. The harbor stayed stable, and the midnight pulse vanished for the first time in months.) Tj
+T*
+() Tj
+ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000121 00000 n 
+0000000247 00000 n 
+0000000317 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+2236
+%%EOF

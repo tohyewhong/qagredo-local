@@ -12,7 +12,9 @@ QAGRedo is an automated pipeline that:
 1. **Reads** your input documents (JSONL format)
 2. **Generates complex questions** using 10 question types (analysis,
    aggregation, comparison, inference, causal, temporal, multi-hop,
-   synthesis, evaluation, counterfactual)
+   synthesis, evaluation, counterfactual). Every question is individually
+   checked for **comprehensiveness** — trivial single-sentence-lookup
+   questions are automatically regenerated with targeted feedback.
 3. **Generates grounded answers** with supporting evidence, using a
    structured format and low temperature (0.3) for factual accuracy
 4. **Verifies grounding** using a hybrid method: fast semantic similarity
@@ -48,8 +50,8 @@ qagredo_host/                          <-- YOU ARE HERE
 |       +-- *_analysis.json
 |
 |-- utils/                               Python modules (edit to customise)
-|   |-- question_generator.py            10 question types, few-shot examples
-|   |-- answer_generator.py              Structured answers, 3 retries
+|   |-- question_generator.py            10 question types, few-shot examples, comprehensiveness check
+|   |-- answer_generator.py              Structured answers, grounding retries, coverage rewrite
 |   |-- hallucination_checker.py         Hybrid grading (semantic + LLM)
 |   |-- output_manager.py                Timestamped output folders
 |   +-- ...
@@ -64,7 +66,7 @@ qagredo_host/                          <-- YOU ARE HERE
 |
 |-- docs/                                Detailed documentation
 |   |-- ALGORITHM_REPORT.md              Algorithm details & design rationale
-|   |-- OFFLINE_SETUP_GUIDE.md            5-file offline deployment guide
+|   |-- OFFLINE_SETUP_GUIDE.md            6-file offline deployment guide
 |   +-- architecture/
 |
 |-- README.md                            Project overview
@@ -108,7 +110,7 @@ bash run.sh --summarize --all                 # Summarise all runs
 ### Convert input files
 
 ```bash
-# Convert JSON / PDF / TXT / XLSX to JSONL
+# Convert JSON / JSONL / PDF / TXT / DOCX / XLSX / CSV to JSONL
 python3 scripts/conversion/convert_to_qagredo_jsonl.py \
   --input data/my_input.json \
   --output data/my_input.jsonl
@@ -116,6 +118,9 @@ python3 scripts/conversion/convert_to_qagredo_jsonl.py \
 # Or via run.sh:
 bash run.sh --convert --input data/my_input.json --output data/my_input.jsonl
 ```
+
+You can also skip manual conversion and let the pipeline auto-prepare inputs
+from `run.input_folder` + `run.input_type` in `config/config.yaml`.
 
 ### Jupyter Lab
 
@@ -136,15 +141,15 @@ ssh -L 8899:localhost:8899 user@offline-server
 
 ## Day-to-day workflow
 
-### 1. Put your data in `data/`
+### 1. Put your data in `data/` (or point to any folder)
 
-Copy your input files (JSON or JSONL) into the `data/` folder:
+Copy your input files (JSON/JSONL/TXT/PDF/DOCX/XLSX/CSV) into `data/` or another folder:
 
 ```bash
 cp /path/to/my_documents.jsonl data/
 ```
 
-If you have JSON files that need conversion:
+Optional manual conversion:
 ```bash
 python3 scripts/conversion/convert_to_qagredo_jsonl.py \
     --input data/my_input.json \
@@ -153,7 +158,7 @@ python3 scripts/conversion/convert_to_qagredo_jsonl.py \
 
 ### 2. Edit `config/config.yaml`
 
-Open the config file and set your input file and parameters:
+Open the config file and set input selection + run parameters:
 
 ```bash
 vi config/config.yaml
@@ -164,8 +169,12 @@ Key settings to change:
 
 ```yaml
 run:
-  input_file: my_input.jsonl        # <-- your file in data/
+  input_folder: /home/user/offline20260209/qagredo_host/data
+  input_type: auto                  # auto/jsonl/json/txt/pdf/docx/xlsx/csv
+  max_files: 10                     # only used for input_folder mode
   num_documents: 5                  # <-- how many documents to process
+  min_content_words: 20             # skip too-short docs
+  min_content_chars: 0
 
 question_generation:
   num_questions: 3                  # <-- questions per document
@@ -188,6 +197,11 @@ This will:
 1. Start vLLM (GPU) and wait for it to be ready
 2. Run the QAGRedo pipeline
 3. Save results in `output/vllm/<model>/YYYY-MM-DD_HHMMSS/`
+
+Optional one-off override without editing config:
+```bash
+bash run.sh -- --input-folder train-data_txt --input-type txt --max-files 10 --num-documents 10 --min-content-words 20
+```
 
 Each run creates a **unique timestamped folder** (date + time), so multiple
 runs per day do not overwrite each other.
@@ -248,12 +262,21 @@ automatically. Each run goes to a new timestamped folder.
 The `advanced` preset (default) uses all 10 types. Each question must require
 reasoning across at least 2 different parts of the document.
 
-### Answer generation (structured + retries)
+**Comprehensiveness check:** After generation, every question is individually
+evaluated by the LLM for depth, self-containment, and reasoning complexity.
+Questions that score below the configured threshold are regenerated with
+targeted feedback (up to 2 attempts by default). This two-stage validation
+(grounding + comprehensiveness) ensures that only high-quality, non-trivial
+questions survive.
+
+### Answer generation (structured + retries + coverage rewrite)
 
 - **Structured format**: Answer + Supporting Evidence
 - **"List then count"**: improves aggregation accuracy by ~30%
 - **Low temperature** (0.3): suppresses creative hallucination
 - **3 retries**: if an answer fails grounding, it is regenerated up to 3 times
+- **Coverage validation**: checks whether the answer addresses all parts of the question
+- **One rewrite pass**: low-coverage answers get one targeted rewrite, accepted only if grounded
 
 ### Hallucination grading (hybrid)
 
@@ -284,8 +307,13 @@ reasoning across at least 2 different parts of the document.
 ```yaml
 # What to process
 run:
-  input_file: dev-data.jsonl        # file in data/ folder
+  input_folder: /home/user/offline20260209/qagredo_host/data
+  input_file: dev-data.jsonl        # used when input_folder is empty
+  input_type: auto                  # auto/jsonl/json/txt/pdf/docx/xlsx/csv
+  max_files: 10                     # folder mode only
   num_documents: 2                  # how many to process
+  min_content_words: 20             # skip short docs
+  min_content_chars: 0
 
 # LLM connection (usually don't need to change)
 llm:
@@ -294,7 +322,7 @@ llm:
   temperature: 0.7                  # for question generation
   max_tokens: 500
   api_key: "llama-local"
-  base_url: "http://localhost:8100/v1"
+  base_url: "http://localhost:7100/v1"
 
 # Answer generation
 answer_generation:
@@ -303,6 +331,10 @@ answer_generation:
     enable_rejection: true
     min_confidence_threshold: 0.7
     max_regeneration_attempts: 3    # up to 3 retries for answers
+  coverage_validation:
+    enable: true
+    min_score_threshold: 0.7
+    max_doc_chars: 5000
 
 # Question generation
 question_generation:
@@ -315,6 +347,9 @@ question_generation:
     min_confidence_threshold: 0.7
     max_regeneration_attempts: 2
     method: "semantic"
+    enable_comprehensiveness_check: true   # evaluate each question for depth/complexity
+    comprehensiveness_min_score: 0.6       # 0.0-1.0, higher = stricter
+    comprehensiveness_max_attempts: 2      # regeneration attempts for weak questions
 
 # Hallucination checking
 hallucination:
@@ -364,17 +399,17 @@ You need **three pieces of information** for each model:
 | Info | How to get it | Example |
 |------|---------------|---------|
 | **IP address** (or hostname) of Server A | Ask your admin, or run `hostname -I` on Server A | `192.168.1.50` |
-| **Port** the model is running on | Check Server A's vLLM startup command or ask your admin | `8100` (generator), `8101` (judge) |
+| **Port** the model is running on | Check Server A's vLLM startup command or ask your admin | `7100` (generator), `7101` (judge) |
 | **Served model name** | Run the curl command below against Server A | `meta-llama/Meta-Llama-3.1-8B-Instruct` |
 
 To find the exact model name that Server A is serving:
 
 ```bash
 # Generator model (replace IP and port with Server A's values)
-curl http://192.168.1.50:8100/v1/models
+curl http://192.168.1.50:7100/v1/models
 
 # Judge model
-curl http://192.168.1.50:8101/v1/models
+curl http://192.168.1.50:7101/v1/models
 ```
 
 The response will look like:
@@ -410,7 +445,7 @@ Server A is serving:
 llm:
   provider: "vllm"
   model: "meta-llama/Meta-Llama-3.1-8B-Instruct"   # must match Server A's served name
-  base_url: "http://192.168.1.50:8100/v1"           # Server A's IP and port
+  base_url: "http://192.168.1.50:7100/v1"           # Server A's IP and port
   api_key: "llama-local"                             # must match Server A's API key
   temperature: 0.7
   max_tokens: 500
@@ -425,7 +460,7 @@ llm:
 judge:
   provider: "vllm"
   model: "Qwen/Qwen2.5-7B-Instruct"                # must match Server A's served name
-  base_url: "http://192.168.1.50:8101/v1"           # Server A's IP and port
+  base_url: "http://192.168.1.50:7101/v1"           # Server A's IP and port
   api_key: "qwen-local"                              # must match Server A's API key
   temperature: 0.0
   max_tokens: 200
@@ -454,21 +489,21 @@ Always check that you can reach Server A's models before starting the pipeline:
 
 ```bash
 # Check generator health
-curl -i http://192.168.1.50:8100/health
+curl -i http://192.168.1.50:7100/health
 
 # Check judge health
-curl -i http://192.168.1.50:8101/health
+curl -i http://192.168.1.50:7101/health
 
 # List available generator models
-curl -s http://192.168.1.50:8100/v1/models | python3 -m json.tool
+curl -s http://192.168.1.50:7100/v1/models | python3 -m json.tool
 
 # List available judge models
-curl -s http://192.168.1.50:8101/v1/models | python3 -m json.tool
+curl -s http://192.168.1.50:7101/v1/models | python3 -m json.tool
 ```
 
 All four should succeed before you run the pipeline. If any fail, check:
 - Is Server A's vLLM actually running? (`bash run.sh --status` on Server A)
-- Is there a firewall blocking the port? (`telnet 192.168.1.50 8100`)
+- Is there a firewall blocking the port? (`telnet 192.168.1.50 7100`)
 - Is the IP correct? (`ping 192.168.1.50`)
 
 ### Swapping to completely different models (Model B and Model C)
@@ -542,7 +577,7 @@ Output will be saved to `output/vllm/org-model-b-70b-instruct/YYYY-MM-DD_HHMMSS/
 
 | Scenario | What to change |
 |----------|----------------|
-| Models on Server A, same ports (8100/8101) | Change `base_url` IP only (keep ports) |
+| Models on Server A, same ports (7100/7101) | Change `base_url` IP only (keep ports) |
 | Models on Server A, different ports | Change `base_url` IP and ports |
 | Different model names | Change `model` to match `/v1/models` output |
 | Different API key on Server A | Change `api_key` to match Server A's key |
@@ -584,7 +619,7 @@ Each file contains:
 | Section | Content |
 |---------|---------|
 | `document` | Source document metadata (id, title, content) |
-| `qa_pairs` | Generated questions + answers with per-pair grounding |
+| `qa_pairs` | Generated questions + answers with per-pair grounding and comprehensiveness metadata |
 | `qa_pairs[].grading` | `is_grounded`, `confidence`, `method`, `issues`, `ungrounded_sentences` |
 | `qa_pairs[].grading.llm_verdict` | Qwen judge verdict and reason (if hybrid/LLM was used) |
 | `supporting_evidence` | Quotes from the document supporting each answer |
@@ -685,7 +720,7 @@ echo $VLLM_SERVED_MODEL_NAME
 bash run.sh --status
 
 # Check if vLLM is healthy
-curl http://localhost:8100/health
+curl http://localhost:7100/health
 ```
 
 ---
@@ -730,6 +765,6 @@ These docs are also in this directory:
 |----------|-------------|
 | `docs/ONLINE_SETUP_GUIDE.md` | Step-by-step guide for the online/dev machine and creating offline bundles |
 | `docs/VISUAL_REPORT.html` | **Visual report** with diagrams -- open in any browser |
-| `docs/ALGORITHM_REPORT.md` | Full algorithm details, design decisions, and rationale for question generation (10 types), answer generation (structured + 3 retries), and grading (hybrid semantic + LLM-as-judge with Qwen) |
-| `docs/OFFLINE_SETUP_GUIDE.md` | Full 5-file offline deployment guide |
+| `docs/ALGORITHM_REPORT.md` | Full algorithm details, design decisions, and rationale for question generation (10 types), answer generation (structured + retries + coverage rewrite), and grading (hybrid semantic + LLM-as-judge with Qwen) |
+| `docs/OFFLINE_SETUP_GUIDE.md` | Full 6-file offline deployment guide |
 | `README.md` | Project overview and architecture |

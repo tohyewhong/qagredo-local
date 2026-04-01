@@ -1,6 +1,8 @@
 """Answer generator using LLM to generate answers from questions and documents."""
 
+import json
 import os
+import re
 import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -181,6 +183,131 @@ def _parse_structured_answer(raw_answer: str) -> tuple:
     return answer, evidence
 
 
+def _parse_coverage_result(response: str) -> Dict[str, Any]:
+    defaults: Dict[str, Any] = {
+        "is_covered": True,
+        "coverage_score": 1.0,
+        "reason": "",
+        "missing_points": [],
+    }
+
+    text = (response or "").strip()
+    if not text:
+        return defaults
+
+    # Try direct JSON parse first.
+    try:
+        parsed = json.loads(text)
+        missing = parsed.get("missing_points", [])
+        if not isinstance(missing, list):
+            missing = []
+        return {
+            "is_covered": bool(parsed.get("is_covered", True)),
+            "coverage_score": min(max(float(parsed.get("coverage_score", 1.0)), 0.0), 1.0),
+            "reason": str(parsed.get("reason", "")),
+            "missing_points": [str(item) for item in missing if str(item).strip()],
+        }
+    except (ValueError, TypeError, json.JSONDecodeError):
+        pass
+
+    # Try extracting JSON object from surrounding text.
+    match = re.search(r"\{[\s\S]*\}", text)
+    if match:
+        try:
+            parsed = json.loads(match.group(0))
+            missing = parsed.get("missing_points", [])
+            if not isinstance(missing, list):
+                missing = []
+            return {
+                "is_covered": bool(parsed.get("is_covered", True)),
+                "coverage_score": min(max(float(parsed.get("coverage_score", 1.0)), 0.0), 1.0),
+                "reason": str(parsed.get("reason", "")),
+                "missing_points": [str(item) for item in missing if str(item).strip()],
+            }
+        except (ValueError, TypeError, json.JSONDecodeError):
+            pass
+
+    # Conservative fallback if parser fails.
+    lowered = text.lower()
+    is_covered = not any(token in lowered for token in ["not covered", "missing", "incomplete", "partially"])
+    return {
+        "is_covered": is_covered,
+        "coverage_score": 0.8 if is_covered else 0.4,
+        "reason": text[:200],
+        "missing_points": [],
+    }
+
+
+def _check_question_coverage(
+    answer: str,
+    question: str,
+    document_content: str,
+    config: Dict[str, Any],
+) -> Dict[str, Any]:
+    max_doc_chars = int((config.get("answer_generation") or {}).get("coverage_validation", {}).get("max_doc_chars", 5000))
+    doc_text = document_content[:max_doc_chars]
+    if len(document_content) > max_doc_chars:
+        doc_text += "\n... [document truncated] ..."
+
+    prompt = f"""You are a QA evaluator checking if an answer FULLY addresses a question.
+
+DOCUMENT:
+{doc_text}
+
+QUESTION:
+{question}
+
+ANSWER:
+{answer}
+
+Evaluate whether the answer addresses all parts of the question while staying grounded in the document.
+Respond with EXACTLY this JSON (no extra text):
+{{"is_covered": true or false, "coverage_score": 0.0 to 1.0, "reason": "brief explanation", "missing_points": ["point 1", "point 2"]}}"""
+
+    try:
+        response = _call_llm(prompt, config)
+        return _parse_coverage_result(response)
+    except Exception:
+        # Do not block answer generation if the coverage judge fails.
+        return {
+            "is_covered": True,
+            "coverage_score": 1.0,
+            "reason": "coverage check failed — skipped",
+            "missing_points": [],
+        }
+
+
+def _rewrite_for_question_coverage(
+    answer: str,
+    question: str,
+    document_content: str,
+    missing_points: List[str],
+    config: Dict[str, Any],
+) -> tuple[str, str]:
+    missing = "\n".join(f"- {point}" for point in missing_points) if missing_points else "- Address all implied sub-parts of the question."
+    prompt = f"""Document:
+{document_content}
+
+Question:
+{question}
+
+Previous answer (did not fully address the question):
+{answer}
+
+Missing points to address:
+{missing}
+
+Rewrite the answer so it fully addresses the question using ONLY the document.
+If information is missing, state: "Insufficient information in the document."
+
+Format:
+Answer: [revised answer]
+Supporting evidence: [quotes from the document supporting the revised answer]"""
+
+    revised_raw = _call_llm(prompt, config)
+    return _parse_structured_answer(revised_raw)
+
+
 def _call_llm(prompt: str, config: Dict[str, Any]) -> str:
     provider = config["llm"].get("provider", "vllm").lower()
     max_retries = config["llm"].get("max_retries", 3)
@@ -202,7 +329,7 @@ def _call_vllm_llm(prompt: str, config: Dict[str, Any], max_retries: int, retry_
     if api_key == "EMPTY" or not api_key:
         api_key = "not-required"
 
-    base_url = config["llm"].get("base_url", "http://localhost:8100/v1")
+    base_url = config["llm"].get("base_url", "http://localhost:7100/v1")
     model = config["llm"].get("model", "meta-llama/Llama-2-7b-chat-hf")
     temperature = _get_answer_temperature(config)
     max_tokens = config["llm"].get("max_tokens", 500)
@@ -302,7 +429,7 @@ def generate_answers(
             if answer_cfg.get("enable_rejection", True):
                 min_conf = answer_cfg.get("min_confidence_threshold", 0.7)
                 max_attempts = answer_cfg.get("max_regeneration_attempts", 3)
-                answer, _ = _validate_and_regenerate_answer(
+                validated_answer, _ = _validate_and_regenerate_answer(
                     answer=answer,
                     question=question,
                     document_content=document_content,
@@ -310,6 +437,43 @@ def generate_answers(
                     min_confidence=min_conf,
                     max_attempts=max_attempts,
                 )
+                if validated_answer != answer:
+                    # Regenerated answers are plain text and may no longer match prior evidence.
+                    evidence = ""
+                answer = validated_answer
+
+            coverage_cfg = config.get("answer_generation", {}).get("coverage_validation", {})
+            if coverage_cfg.get("enable", True):
+                min_cov = coverage_cfg.get("min_score_threshold", 0.7)
+                coverage_result = _check_question_coverage(
+                    answer=answer,
+                    question=question,
+                    document_content=document_content,
+                    config=config,
+                )
+                needs_rewrite = (not coverage_result.get("is_covered", True)) or (
+                    float(coverage_result.get("coverage_score", 1.0)) < float(min_cov)
+                )
+
+                if needs_rewrite:
+                    revised_answer, revised_evidence = _rewrite_for_question_coverage(
+                        answer=answer,
+                        question=question,
+                        document_content=document_content,
+                        missing_points=coverage_result.get("missing_points", []),
+                        config=config,
+                    )
+                    halluc_method = (config.get("hallucination") or {}).get("method", "hybrid")
+                    revised_check = check_hallucination(
+                        answer=revised_answer,
+                        document_content=document_content,
+                        question=question,
+                        method=halluc_method,
+                    )
+                    min_conf = answer_cfg.get("min_confidence_threshold", 0.7)
+                    if revised_check.get("is_grounded", False) and revised_check.get("confidence", 0.0) >= min_conf:
+                        answer = revised_answer
+                        evidence = revised_evidence
         except Exception as exc:
             print(f"  [WARN] Answer generation failed for Q{q_idx}: {exc}")
             answer = "(Answer generation failed)"

@@ -186,7 +186,7 @@ main() {
   fi
 
   # Start vLLM
-  info "Starting vLLM (GPU) on port 8100"
+  info "Starting vLLM (GPU) on port 7100"
   (
     cd "$REPO_DIR"
     export QAGREDO_HOST_DIR="$HOST_DIR"
@@ -197,9 +197,9 @@ main() {
     docker compose -f docker-compose.yml up -d vllm
   )
 
-  info "Waiting for vLLM health: http://localhost:8100/health"
+  info "Waiting for vLLM health: http://localhost:7100/health"
   for i in $(seq 1 120); do
-    if curl -sf http://localhost:8100/health >/dev/null; then
+    if curl -sf http://localhost:7100/health >/dev/null; then
       ok "vLLM is ready"
       break
     fi

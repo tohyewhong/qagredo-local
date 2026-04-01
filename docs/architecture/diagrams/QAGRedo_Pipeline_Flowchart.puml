@@ -1,0 +1,36 @@
+@startuml
+title QAGRedo Pipeline Flowchart (Core Loop)
+
+skinparam linetype ortho
+skinparam shadowing false
+skinparam dpi 180
+skinparam defaultFontName Arial
+
+start
+
+:Load JSONL + normalize documents;
+
+while (Another document?) is (yes)
+  :generate_questions (N per document);
+
+  repeat
+    :generate_answers (current slot);
+    :grade + build pair + grounding gate;
+
+    if (Passes quality gate?) then (yes)
+      :Accept slot result;
+    else (no)
+      if (Regeneration rounds left?) then (yes)
+        :generate_questions (x1 replace);
+        :Re-answer same slot;
+      else (no)
+        :Keep last attempt;
+      endif
+    endif
+  repeat while (More slots?) is (yes)
+
+  :save_results (per config);
+endwhile (no)
+
+stop
+@enduml

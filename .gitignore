@@ -83,3 +83,4 @@ Miniforge3.sh
 data/samplepress.*
 
 qagredo/
+.venv_diagram/

@@ -46,7 +46,7 @@ HOST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export HOST_UID="${HOST_UID:-$(id -u)}"
 export HOST_GID="${HOST_GID:-$(id -g)}"
 
-# ---- defaults: Generator LLM (Llama on GPU 0, port 8100) ----
+# ---- defaults: Generator LLM (Llama on GPU 0, port 7100) ----
 export VLLM_MODEL="${VLLM_MODEL:-/models/Meta-Llama-3.1-8B-Instruct}"
 export VLLM_SERVED_MODEL_NAME="${VLLM_SERVED_MODEL_NAME:-meta-llama/Meta-Llama-3.1-8B-Instruct}"
 export VLLM_API_KEY="${VLLM_API_KEY:-llama-local}"
@@ -54,7 +54,7 @@ export VLLM_TP_SIZE="${VLLM_TP_SIZE:-1}"
 export VLLM_MAX_MODEL_LEN="${VLLM_MAX_MODEL_LEN:-8192}"
 export VLLM_GPU_UTIL="${VLLM_GPU_UTIL:-0.90}"
 
-# ---- defaults: Judge LLM (Qwen on GPU 1, port 8101) ----
+# ---- defaults: Judge LLM (Qwen on GPU 1, port 7101) ----
 export VLLM_JUDGE_MODEL="${VLLM_JUDGE_MODEL:-/models/Qwen2.5-7B-Instruct}"
 export VLLM_JUDGE_SERVED_NAME="${VLLM_JUDGE_SERVED_NAME:-Qwen/Qwen2.5-7B-Instruct}"
 export VLLM_JUDGE_API_KEY="${VLLM_JUDGE_API_KEY:-qwen-local}"
@@ -62,16 +62,39 @@ export VLLM_JUDGE_MAX_MODEL_LEN="${VLLM_JUDGE_MAX_MODEL_LEN:-8192}"
 export VLLM_JUDGE_GPU_UTIL="${VLLM_JUDGE_GPU_UTIL:-0.90}"
 
 COMPOSE_FILE="$HOST_DIR/docker-compose.yml"
+PIPELINE_ARGS=("$@")
 
 _log() { echo "[run] $*"; }
 _warn() { echo "[run][WARN] $*" >&2; }
 die()  { echo "[run][ERROR] $*" >&2; exit 1; }
+
+# ---------------------------------------------------------------------------
+#  fix_host_ownership — chown all writable bind-mount dirs back to host user
+# ---------------------------------------------------------------------------
+# The vLLM containers run as root, so files they create (hf_cache, hf_cache_judge)
+# are owned by root.  This function uses a throwaway container (as root, with
+# --entrypoint overridden to bypass docker-entrypoint.sh) to chown everything
+# back to the host user.
+fix_host_ownership() {
+    _log "Fixing file ownership (UID=$HOST_UID GID=$HOST_GID) ..."
+    docker run --rm --privileged --userns=host -u 0 \
+      --entrypoint "" \
+      -v "$HOST_DIR/output:/fix/output" \
+      -v "$HOST_DIR/hf_cache:/fix/hf_cache" \
+      -v "$HOST_DIR/hf_cache_judge:/fix/hf_cache_judge" \
+      -v "$HOST_DIR/config:/fix/config" \
+      -v "$HOST_DIR/data:/fix/data" \
+      qagredo-v1:latest \
+      sh -c "chown -R $HOST_UID:$HOST_GID /fix/output /fix/hf_cache /fix/hf_cache_judge /fix/config /fix/data 2>/dev/null || true" \
+      2>/dev/null || _warn "Post-run permission fix skipped (non-fatal)"
+}
 
 # ---- handle flags ----
 case "${1:-}" in
   --down)
     _log "Stopping all containers..."
     docker compose -f "$COMPOSE_FILE" down
+    fix_host_ownership
     _log "Done."
     exit 0
     ;;
@@ -83,13 +106,13 @@ case "${1:-}" in
   --status)
     docker compose -f "$COMPOSE_FILE" ps
     echo ""
-    if curl -sf http://localhost:8100/health >/dev/null 2>&1; then
-      echo "  vLLM Generator (Llama): healthy (http://localhost:8100)"
+    if curl -sf http://localhost:7100/health >/dev/null 2>&1; then
+      echo "  vLLM Generator (Llama): healthy (http://localhost:7100)"
     else
       echo "  vLLM Generator (Llama): not responding"
     fi
-    if curl -sf http://localhost:8101/health >/dev/null 2>&1; then
-      echo "  vLLM Judge    (Qwen) : healthy (http://localhost:8101)"
+    if curl -sf http://localhost:7101/health >/dev/null 2>&1; then
+      echo "  vLLM Judge    (Qwen) : healthy (http://localhost:7101)"
     else
       echo "  vLLM Judge    (Qwen) : not responding"
     fi
@@ -144,6 +167,7 @@ Usage: bash run.sh [COMMAND]
 
 Pipeline:
   (no args)           Start vLLM + run QAGRedo pipeline
+  -- [PIPELINE_ARGS]  Pass args to run_qa_pipeline.py (input/file/folder/count)
   --down              Stop all containers
   --status            Show container status + vLLM health
   --logs              Tail vLLM container logs (Ctrl+C to stop)
@@ -158,6 +182,8 @@ Results:
 Data:
   --convert IN OUT    Convert JSON to JSONL format
                       e.g. bash run.sh --convert data/input.json data/output.jsonl
+  Example custom run:
+    bash run.sh -- --input-folder train-data_txt --input-type txt --max-files 10 --num-documents 10
 
 Help:
   -h, --help          Show this message
@@ -202,8 +228,8 @@ _log "QAGRedo Pipeline"
 _log "==========================================="
 _log "  Host dir              : $HOST_DIR"
 _log "  Config                : $HOST_DIR/config/config.yaml"
-_log "  Generator (Llama)     : $VLLM_MODEL (GPU 0, port 8100)"
-_log "  Judge     (Qwen)      : $VLLM_JUDGE_MODEL (GPU 1, port 8101)"
+_log "  Generator (Llama)     : $VLLM_MODEL (GPU 0, port 7100)"
+_log "  Judge     (Qwen)      : $VLLM_JUDGE_MODEL (GPU 1, port 7101)"
 _log "  Container user        : UID=$HOST_UID GID=$HOST_GID"
 _log "  Compose file          : $COMPOSE_FILE"
 _log "==========================================="
@@ -212,17 +238,17 @@ _log "==========================================="
 mkdir -p "$HOST_DIR/hf_cache_judge" 2>/dev/null || true
 
 # ---- start both vLLM services ----
-_log "Starting vLLM Generator (Llama on GPU 0, port 8100) ..."
-_log "Starting vLLM Judge     (Qwen  on GPU 1, port 8101) ..."
+_log "Starting vLLM Generator (Llama on GPU 0, port 7100) ..."
+_log "Starting vLLM Judge     (Qwen  on GPU 1, port 7101) ..."
 docker compose -f "$COMPOSE_FILE" up -d vllm vllm-judge
 
 # ---- wait for Generator (Llama) ----
-_log "Waiting for Generator (Llama) at http://localhost:8100/health ..."
+_log "Waiting for Generator (Llama) at http://localhost:7100/health ..."
 HEALTH_TIMEOUT=300
 HEALTH_INTERVAL=5
 elapsed=0
 while true; do
-  if curl -sf http://localhost:8100/health >/dev/null 2>&1; then
+  if curl -sf http://localhost:7100/health >/dev/null 2>&1; then
     _log "Generator (Llama) is ready! (took ~${elapsed}s)"
     break
   fi
@@ -237,10 +263,10 @@ while true; do
 done
 
 # ---- wait for Judge (Qwen) ----
-_log "Waiting for Judge (Qwen) at http://localhost:8101/health ..."
+_log "Waiting for Judge (Qwen) at http://localhost:7101/health ..."
 elapsed=0
 while true; do
-  if curl -sf http://localhost:8101/health >/dev/null 2>&1; then
+  if curl -sf http://localhost:7101/health >/dev/null 2>&1; then
     _log "Judge (Qwen) is ready! (took ~${elapsed}s)"
     break
   fi
@@ -256,32 +282,21 @@ done
 
 # ---- run QAGRedo pipeline ----
 _log "Running QAGRedo pipeline ..."
+if [[ "${#PIPELINE_ARGS[@]}" -gt 0 ]]; then
+  _log "Pipeline args           : ${PIPELINE_ARGS[*]}"
+fi
 
-docker compose -f "$COMPOSE_FILE" run --rm qagredo
+# Ensure ownership is fixed even on Ctrl+C or unexpected exit.
+trap fix_host_ownership EXIT
+
+docker compose -f "$COMPOSE_FILE" run --rm qagredo python /workspace/run_qa_pipeline.py "${PIPELINE_ARGS[@]}"
 PIPELINE_EXIT=$?
-
-# ---- safety-net: fix ownership of ALL writable dirs ----
-# The container entrypoint has its own EXIT trap, but as a belt-and-suspenders
-# measure we also fix from the host side.  This covers:
-#   - vLLM writing root-owned files to hf_cache/
-#   - any edge case where the entrypoint trap didn't fire
-_log "Fixing file ownership (UID=$HOST_UID GID=$HOST_GID) ..."
-# --privileged --userns=host ensures chown works even when Docker uses
-# user namespace remapping (which maps container root to an unprivileged
-# host UID, making normal chown/chmod fail with "Operation not permitted").
-docker run --rm --privileged --userns=host -u 0 \
-  -v "$HOST_DIR/output:/fix/output" \
-  -v "$HOST_DIR/hf_cache:/fix/hf_cache" \
-  -v "$HOST_DIR/hf_cache_judge:/fix/hf_cache_judge" \
-  -v "$HOST_DIR/config:/fix/config" \
-  -v "$HOST_DIR/data:/fix/data" \
-  qagredo-v1:latest bash -c \
-    "chown -R $HOST_UID:$HOST_GID /fix/output /fix/hf_cache /fix/hf_cache_judge /fix/config /fix/data 2>/dev/null || true" \
-  2>/dev/null || _warn "Post-run permission fix skipped (non-fatal)"
 
 if [[ "$PIPELINE_EXIT" -ne 0 ]]; then
   _warn "Pipeline exited with code $PIPELINE_EXIT"
 fi
+
+# EXIT trap fires after this point, running fix_host_ownership automatically.
 
 _log "Done! Outputs are in: $HOST_DIR/output/"
 echo ""

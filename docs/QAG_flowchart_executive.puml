@@ -1,0 +1,41 @@
+@startuml
+skinparam shadowing false
+skinparam roundcorner 10
+skinparam defaultFontName Arial
+skinparam defaultFontSize 14
+skinparam activity {
+  BackgroundColor #F8FAFC
+  BorderColor #334155
+  DiamondBackgroundColor #FFF7ED
+  DiamondBorderColor #C2410C
+  FontColor #0F172A
+  StartColor #0891B2
+  EndColor #0891B2
+}
+
+start
+:Load input + config;
+
+repeat
+  :Question generation;
+  :Question validation
+(grounding + comprehensiveness);
+repeat while (Need better questions?) is (yes)
+
+repeat
+  :Answer generation (+ evidence);
+  :Answer validation
+(grounding confidence);
+repeat while (Ungrounded + retries left?) is (yes)
+
+:Coverage validation;
+if (Coverage low?) then (yes)
+  :Targeted rewrite
+(1 pass + grounding gate);
+endif
+
+:Hybrid grading
+(semantic fast path, LLM fallback);
+:Output JSON + run summary;
+stop
+@enduml

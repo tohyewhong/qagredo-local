@@ -41,7 +41,7 @@ def set_llm_config(config: Dict[str, Any]) -> None:
     judge_api_key = os.getenv("VLLM_JUDGE_API_KEY", "").strip()
 
     _judge_config = {
-        "base_url": judge_base_url or judge_section.get("base_url") or llm_section.get("base_url", "http://localhost:8101/v1"),
+        "base_url": judge_base_url or judge_section.get("base_url") or llm_section.get("base_url", "http://localhost:7101/v1"),
         "model": judge_model or judge_section.get("model") or llm_section.get("model", "Qwen/Qwen2.5-7B-Instruct"),
         "api_key": judge_api_key or judge_section.get("api_key") or llm_section.get("api_key", "qwen-local"),
         "timeout": judge_section.get("timeout", llm_section.get("timeout", 60)),
@@ -301,12 +301,12 @@ def _call_llm_judge(
             "LLM config not set. Call set_llm_config() before using method='llm' or 'hybrid'."
         )
 
-    # Use dedicated judge config (Qwen on port 8101)
+    # Use dedicated judge config (Qwen on port 7101)
     jcfg = _judge_config if _judge_config else _llm_config.get("llm", {})
     api_key = jcfg.get("api_key", "not-required")
     if api_key == "EMPTY" or not api_key:
         api_key = "not-required"
-    base_url = jcfg.get("base_url", "http://localhost:8101/v1")
+    base_url = jcfg.get("base_url", "http://localhost:7101/v1")
     model = jcfg.get("model", "Qwen/Qwen2.5-7B-Instruct")
     timeout = jcfg.get("timeout", 60)
     max_retries = jcfg.get("max_retries", 3)
@@ -614,9 +614,11 @@ def _split_into_sentences(text: str) -> List[str]:
     sentences: List[str] = []
     for s in expanded:
         s = s.replace("<DOT>", ".").replace("<ELLIPSIS>", "...").strip()
-        # Skip fragments that are too short to be meaningful sentences
-        # (e.g. standalone numbers "1", "2", single letters)
-        if s and len(s) > 2:
+        # Keep short numeric answers (e.g. "7", "3.5", "10%") so they are
+        # not misclassified as empty answers in downstream checks.
+        is_short_numeric = bool(re.fullmatch(r"[$€£]?\s*[-+]?\d+(?:[.,]\d+)?(?:%|/\d+)?", s))
+        # Otherwise skip very short fragments that are often noise.
+        if s and (len(s) > 2 or is_short_numeric):
             sentences.append(s)
     return sentences
 
