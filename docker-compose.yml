@@ -28,6 +28,53 @@
 #   docker compose up -d vllm vllm-judge
 #   docker compose run --rm qagredo
 #   # Or simply:  bash run.sh
+#
+# -----------------------------------------------------------------------------
+# Changing GPUs and GPU count (per vLLM service)
+# -----------------------------------------------------------------------------
+# For each of `vllm` and `vllm-judge`, keep these two edits in sync:
+#
+#   1) Which host GPU(s): under that service, set
+#        deploy.resources.reservations.devices[0].device_ids
+#      Use indices from `nvidia-smi` on the host, e.g. ["0"] or ["2", "3"].
+#
+#   2) How many GPUs for that one model: in the same service's `command`,
+#        --tensor-parallel-size  <N>
+#      N must equal the number of entries in device_ids for that service.
+#
+# Defaults here: generator on GPU 0 (N=1), judge on GPU 1 (N=1). When both
+# services run together, give them disjoint device_ids unless you mean to
+# share a GPU. Do not set CUDA_VISIBLE_DEVICES for GPU pick — use device_ids
+# as documented in each service's environment block.
+#
+# API URLs live in config/config.yaml; that file does not assign Docker GPUs.
+# -----------------------------------------------------------------------------
+#
+# -----------------------------------------------------------------------------
+# Optional: use external model directories (toggle by uncommenting)
+# -----------------------------------------------------------------------------
+# Your models live outside this repo:
+#   - /mnt/usr/models/Meta-Llama-3.3-70B-Instruct
+#   - /mnt/usr/models/Qwen3.5-27B
+#
+# To use them for vLLM-in-Docker:
+#   - In BOTH `vllm` and `vllm-judge` services, change the `volumes:` model mount
+#     from `./models_llm:/models:ro` to `/mnt/usr/models:/models:ro` (uncomment).
+#   - Set these env vars (in `.env` beside this file, or in your shell):
+#       VLLM_MODEL=/models/Meta-Llama-3.3-70B-Instruct
+#       VLLM_SERVED_MODEL_NAME=meta-llama/Meta-Llama-3.3-70B-Instruct
+#       VLLM_TP_SIZE=2
+#
+#       VLLM_JUDGE_MODEL=/models/Qwen3.5-27B
+#       VLLM_JUDGE_SERVED_NAME=Qwen/Qwen3.5-27B
+#       VLLM_JUDGE_TP_SIZE=2
+#
+# GPU COUNT / GPU IDs (important):
+#   - For each service, `--tensor-parallel-size` MUST equal the number of GPUs
+#     listed in that service's `device_ids`.
+#   - If you want "2 GPUs each" for generator + judge running at the same time,
+#     you typically need 4 physical GPUs total (e.g. generator [0,1], judge [2,3]).
+# -----------------------------------------------------------------------------
 
 name: qagredo_offline
 
@@ -48,6 +95,8 @@ services:
       # and setting "1" would cause pynvml.NVMLError_InvalidArgument.
     volumes:
       - ./models_llm:/models:ro
+      # External models option (uncomment to use /mnt/usr/models):
+      # - /mnt/usr/models:/models:ro
       # hf_cache must be rw — vLLM writes tokenizer cache here at startup.
       # run.sh's post-run chown (with --privileged --userns=host) fixes
       # any root-owned files after the run.
@@ -61,8 +110,9 @@ services:
       - ${VLLM_MODEL:-/models/Meta-Llama-3.1-8B-Instruct}
       - --served-model-name
       - ${VLLM_SERVED_MODEL_NAME:-meta-llama/Meta-Llama-3.1-8B-Instruct}
+      # GPU count for this worker; must match len(device_ids) in deploy below.
       - --tensor-parallel-size
-      - "1"
+      - "${VLLM_TP_SIZE:-1}"
       - --dtype
       - half
       - --max-model-len
@@ -77,6 +127,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
+              # Host GPU index(es); count must match --tensor-parallel-size above.
               device_ids: ["0"]
               capabilities: [gpu]
     healthcheck:
@@ -101,6 +152,8 @@ services:
       # GPU assignment handled by deploy.resources below (device_ids: ["1"])
     volumes:
       - ./models_llm:/models:ro
+      # External models option (uncomment to use /mnt/usr/models):
+      # - /mnt/usr/models:/models:ro
       - ./hf_cache_judge:/root/.cache/huggingface:rw
     command:
       - --host
@@ -111,8 +164,9 @@ services:
       - ${VLLM_JUDGE_MODEL:-/models/Qwen2.5-7B-Instruct}
       - --served-model-name
       - ${VLLM_JUDGE_SERVED_NAME:-Qwen/Qwen2.5-7B-Instruct}
+      # GPU count for this worker; must match len(device_ids) in deploy below.
       - --tensor-parallel-size
-      - "1"
+      - "${VLLM_JUDGE_TP_SIZE:-1}"
       - --dtype
       - half
       - --max-model-len
@@ -127,6 +181,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
+              # Host GPU index(es); count must match --tensor-parallel-size above.
               device_ids: ["1"]
               capabilities: [gpu]
     healthcheck:

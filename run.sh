@@ -31,6 +31,7 @@ set -euo pipefail
 #   VLLM_SERVED_MODEL_NAME=<org/model>
 #   VLLM_API_KEY=my-key
 #   VLLM_TP_SIZE=2
+#   VLLM_JUDGE_TP_SIZE=2
 #   VLLM_MAX_MODEL_LEN=8192
 #   VLLM_GPU_UTIL=0.85
 # ============================================================================
@@ -58,6 +59,7 @@ export VLLM_GPU_UTIL="${VLLM_GPU_UTIL:-0.90}"
 export VLLM_JUDGE_MODEL="${VLLM_JUDGE_MODEL:-/models/Qwen2.5-7B-Instruct}"
 export VLLM_JUDGE_SERVED_NAME="${VLLM_JUDGE_SERVED_NAME:-Qwen/Qwen2.5-7B-Instruct}"
 export VLLM_JUDGE_API_KEY="${VLLM_JUDGE_API_KEY:-qwen-local}"
+export VLLM_JUDGE_TP_SIZE="${VLLM_JUDGE_TP_SIZE:-1}"
 export VLLM_JUDGE_MAX_MODEL_LEN="${VLLM_JUDGE_MAX_MODEL_LEN:-8192}"
 export VLLM_JUDGE_GPU_UTIL="${VLLM_JUDGE_GPU_UTIL:-0.90}"
 
@@ -134,6 +136,7 @@ case "${1:-}" in
     echo "  VLLM_JUDGE_MODEL     = $VLLM_JUDGE_MODEL"
     echo "  VLLM_JUDGE_SERVED_NAME = $VLLM_JUDGE_SERVED_NAME"
     echo "  VLLM_JUDGE_API_KEY   = $VLLM_JUDGE_API_KEY"
+    echo "  VLLM_JUDGE_TP_SIZE   = $VLLM_JUDGE_TP_SIZE"
     echo "  HOST_UID             = $HOST_UID"
     echo "  HOST_GID             = $HOST_GID"
     echo ""

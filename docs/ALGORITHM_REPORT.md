@@ -9,14 +9,41 @@ management, and the Docker permission model.
 
 ## 1. Pipeline Overview
 
-Input conversion from `pdf/txt/docx/xlsx/csv/json/jsonl` to canonical JSONL is parser-based via `scripts/conversion/convert_to_qagredo_jsonl.py` (not an LLM reasoning step). Conversion can be done manually or auto-prepared at runtime from `run.input_folder` / `run.input_type`.
+Input conversion from `pdf/txt/doc/docx/xlsx/csv/json/jsonl` to canonical JSONL is parser-based via `scripts/conversion/convert_to_qagredo_jsonl.py` (not an LLM reasoning step). The **main pipeline** (`run_qa_pipeline.py`, invoked by `bash run.sh`) ingests **one** path: `run.input_file`, and chooses **JSON vs JSONL** from the **file extension** only — it does **not** read `run.input_type`. Use the converter CLI (or `bash run.sh --convert`, which forwards to the same script) to build JSONL from PDF/TXT/etc. YAML keys such as `run.input_type`, `run.input_folder`, and `run.max_files` are **not** passed into the converter; use **`--input-type`** on the converter when you need to override detection. With `--input-type auto` (default), type is inferred from each **`--input`** file’s extension. Optional **`--semantic-normalize`** can populate `metadata.semantic_enrichment` while preserving canonical `content`.
+
+### 1.1 Implementation sketch (runtime auto input preparation)
+
+Picture-first explanation:
+
+![Input preparation simple workflow](qagredo_input_prep_explained_16x9.png)
+
+Plain-language summary:
+- **Pipeline run**: set `run.input_file` to `.json` or `.jsonl` (and `run.input_folder: ""`). Extension selects the loader.
+- **Converter** (separate step): one **`--input`** file per run; use **`--input-type`** when you must override extension-based detection (YAML `run.input_type` is not wired to this script).
+- Process each source file; determine its type (`auto` detect or forced type) in the converter.
+- If it is already JSON/JSONL and semantic enrichment is off, use fast path.
+- Otherwise, convert to canonical JSONL.
+- Optionally add semantic metadata, then feed the JSONL path to `run.input_file`.
+
+Detailed decision flow is shown in the image above.
+
+You do not need Mermaid software to read this report.
+Mermaid is only needed if you want to edit/render Mermaid source diagrams locally.
 
 ```
 Document (JSONL)
      |
      v
+ +-------------------------------+
+|  0. LangGraph Orchestrator    |  <-- required state graph per document
+ |     - stage routing            |
+ |     - dynamic fallback         |
+ +---------------+---------------+
+                |
+                v
 +-------------------------------+
 |  1. Question Generator         |  <-- LLM (vLLM / OpenAI), temperature=0.7
+|     - LangChain prompt template|
 |     - Multi-type prompt         |
 |     - Few-shot examples         |
 |     - Deduplication (MiniLM)    |
@@ -27,6 +54,7 @@ Document (JSONL)
                 v
 +-------------------------------+
 |  2. Answer Generator           |  <-- LLM (vLLM / OpenAI), temperature=0.3
+|     - LangChain structured parse|
 |     - Structured format         |
 |     - "List then count"         |
 |     - Supporting evidence       |
@@ -63,7 +91,24 @@ Document (JSONL)
 | `utils/duplicate_detector.py` | Question deduplication |
 | `utils/output_manager.py` | Output path management & timestamping |
 | `utils/config_manager.py` | Configuration loading & validation |
+| `utils/langchain_components.py` | LangChain prompt/parsing adapters |
+| `utils/langgraph_pipeline.py` | LangGraph state graph orchestration |
 | `scripts/utils/summarize_run.sh` | Run summary with ungrounded reasons |
+
+### 1.2 Structural causal assumptions (for diagnosis)
+
+QAGRedo behaves as a staged causal system:
+
+1. Input normalization quality affects question quality.
+2. Question quality affects answer quality.
+3. Answer quality affects grounding/grading outcomes.
+4. Grading does not change generated answers; it only evaluates and labels them.
+
+Practical implication:
+
+- If grading quality is poor while answers are also poor, fix generation stages first.
+- If answers look strong but grades are unstable, inspect hallucination method/routing and judge configuration.
+- Avoid changing many stages at once; otherwise causal attribution is lost.
 
 ---
 
@@ -311,7 +356,7 @@ Supporting evidence: [relevant quotes from document]
 | Design choice | Rationale |
 |--------------|-----------|
 | "Answer using ONLY the document" | Prevents the LLM from using its training data, forcing document grounding |
-| "List items first, then count" | LLMs frequently miscount when asked to aggregate directly. Listing first forces step-by-step reasoning, improving accuracy by ~30% on aggregation questions |
+| "List items first, then count" | LLMs frequently miscount when asked to aggregate directly. Listing first forces step-by-step reasoning and produces more auditable count answers |
 | "Supporting evidence" section | Forces the LLM to cite specific text, creating an audit trail. Reviewers can verify answers without re-reading the full document |
 | "Insufficient information" option | Prevents the LLM from fabricating answers when the document doesn't contain enough information. Honest "I don't know" is better than hallucination |
 
@@ -344,17 +389,26 @@ Each answer goes through a validate-and-regenerate cycle, then a coverage check:
           Generate a NEW answer using ONLY the document."
       -> Re-check grounding
       -> Repeat up to 3 times (configurable)
-5. After all retries, keep the best attempt
-   (even if still ungrounded -- it's reported in the output)
-6. Run question-coverage validation (LLM evaluator):
+5. After all retries, keep the best attempt for **gating** the round
+   (failures still trigger replacement rounds)
+6. Count failed answers in this round
+7. If failed count > 0 and rounds remaining:
+      -> Generate that many replacement questions
+      -> Answer + grade them in next round
+8. Stop when all pass or max rounds reached
+9. **Save** `*_analysis.json`: **last round only**. If all pairs in that
+   round pass the gate, drop any straggler failures (should be none). If the
+   round **still has failures**, persist **all** final-round Q&A (including
+   failures). Superseded rounds are never written.
+10. Run question-coverage validation (LLM evaluator):
       -> Check whether all parts of the question are addressed
-7. If coverage score is below threshold:
+11. If coverage score is below threshold:
       -> Run one targeted rewrite pass using missing-point feedback
       -> Re-run grounding check on rewritten answer
       -> Accept rewritten answer only if it is grounded
 ```
 
-**Why 3 retries (not more, not fewer):**
+**Why 3 retries + 3 rounds (not more, not fewer):**
 - 1 retry: insufficient -- the LLM often needs 2-3 tries to produce a well-
   grounded answer for complex aggregation or inference questions.
 - 3 retries: good balance -- gives the LLM enough chances while keeping
@@ -362,13 +416,26 @@ Each answer goes through a validate-and-regenerate cycle, then a coverage check:
 - More than 3: diminishing returns -- if the LLM can't produce a grounded
   answer in 4 attempts, the question likely asks for information that requires
   inference beyond what sentence-level grounding can verify.
+- Separate question rounds provide a second lever: replace weak questions
+  rather than only rewriting the same answer.
+- Replacement rounds can run many LLM calls internally, but the **saved**
+  `qa_pairs` length is at most **`num_questions`** (only passing pairs from
+  the **final** round).
 
-**Why keep ungrounded answers:**
-- Discarding them would leave gaps in the output. The analyst needs to see
-  ALL questions and answers, including problematic ones, to understand where
-  the LLM struggles.
-- Ungrounded answers are clearly marked with `is_grounded: false` and include
-  detailed reasons in the output.
+**Saved output policy:**
+- Superseded rounds are never persisted. When the run **ends green** (all
+  pairs pass the gate), saved `qa_pairs` contain only those passing pairs from
+  the last round. When the run **ends with failures** after the last round,
+  saved output includes **the full last round** (failures included) and
+  `grading_summary` is averaged across **all** saved pairs so overall scores
+  reflect failures too.
+- When `run.save_grounded_qa_pairs_only` is **true**, ungrounded slots are
+  **dropped** before save (same gate as retries); documents with no
+  grounded pairs produce **no** analysis file.
+- When `run.minimal_qa_output` is **true**, the saved analysis JSON contains
+  `document: {"content": "..."}` (plain text aligned with the full-output
+  snapshot) and `{"qa_pairs": [{"question", "answer"}, ...]}` only (no
+  `hallucination_check`, citations, or timings / other run metadata).
 
 ### 3.5 Coverage validation and targeted rewrite
 
@@ -391,7 +458,9 @@ answer_generation:
   multi_turn:
     enable_rejection: true
     min_confidence_threshold: 0.7
-    max_regeneration_attempts: 3      # up to 3 retries
+    max_answer_attempts: 3            # total answer trials per question
+    max_regeneration_attempts: 2      # legacy fallback key
+    max_question_regeneration_rounds: 3  # replacement-question rounds
   coverage_validation:
     enable: true
     min_score_threshold: 0.7
@@ -461,8 +530,8 @@ For each answer sentence:
         If generic statement:  -> GROUNDED (auto-waived)
         Else:                  -> UNGROUNDED
 
-Confidence = grounded_sentences / total_sentences
-is_grounded = confidence >= 0.7 AND ungrounded_count == 0
+Confidence = len(grounded_sentences) / (len(grounded_sentences) + len(ungrounded_sentences))
+is_grounded = confidence >= 0.7 AND len(ungrounded_sentences) == 0
 ```
 
 **Why sliding window (not single-sentence comparison):**
@@ -562,9 +631,9 @@ PASS 2 -- LLM fallback (only if Pass 1 found ungrounded sentences):
 
 | Factor | Hybrid advantage |
 |--------|-----------------|
-| **Speed** | ~70-80% of answers pass semantic alone (no LLM call needed) |
-| **Accuracy** | The remaining 20-30% get full LLM evaluation for edge cases |
-| **Cost** | 40-60% faster than pure LLM mode (fewer GPU calls) |
+| **Speed** | Many answers pass semantic alone (no LLM call needed) |
+| **Accuracy** | Remaining edge cases get full LLM evaluation |
+| **Cost** | Fewer judge-model GPU calls than pure `llm` mode |
 | **Robustness** | If LLM is unavailable, degrades to semantic-only |
 
 **When LLM override is critical:**
@@ -577,10 +646,12 @@ PASS 2 -- LLM fallback (only if Pass 1 found ungrounded sentences):
 
 ### 4.4 Grading scale
 
-After checking all Q&A pairs for a document:
+After checking all final saved Q&A pairs for a document:
 
 ```
-overall_confidence = average(confidence of all Q&A pairs)
+overall_confidence = average(confidence of final saved Q&A pairs)
+(Current pipeline recomputes summary from final saved pairs with
+aggregate_grounded_only=False.)
 
 Grade mapping:
     >= 0.90  ->  A  (Excellent -- answers are well-grounded)
@@ -609,6 +680,39 @@ carry no factual claims that could be hallucinated.
 hallucination:
   method: "hybrid"    # "semantic", "keyword", "llm", "hybrid"
 ```
+
+### 4.7 Testing grading (flow)
+
+Use this when you need to **validate grading** without guessing which script
+path applies.
+
+![Grading test entry points](qagredo_grading_test_flow_16x9.png)
+
+**Source:** [`qagredo_grading_test_flow.dot`](qagredo_grading_test_flow.dot) —
+regenerate the raster:
+
+```bash
+dot -Tpng -o docs/qagredo_grading_test_flow_16x9.png \
+  docs/qagredo_grading_test_flow.dot
+```
+
+| Entry point | Exercises | Typical use |
+|-------------|-----------|-------------|
+| `scripts/utils/smoke_semantic_five_docs.py` | `check_hallucination` only, `method=semantic` | Quick CPU/embed smoke; no `grade_qa_results`. |
+| `scripts/utils/grade_qa_results.py` | `grade_qa_results` on a list JSON | Re-grade saved `*qa_results*`; ensure each dict has body text in a field `_document_text_for_grading` reads. |
+| `run_qa_pipeline.py` / `run.sh` | Full hybrid + `set_llm_config` | Ground truth for production; inspect `*_analysis.json`. |
+| `summarize_run.sh --json` | Aggregates per-QA `grading` | Run-wide triage after pipeline tests. |
+| `scripts/utils/quick_test.py` | `evaluate_document_quality` on **synthetic** `grading` | Threshold / band logic only — **not** the hallucination checker. |
+
+The pipeline now runs a **slot-based loop** in `run_qa_pipeline.py`:
+for each question slot (for example `num_questions=3`), it generates an answer
+and applies grounding/confidence checks. Each question gets up to
+`max_answer_attempts` total answer trials (default `3`). If all trials fail,
+that slot gets a replacement question (up to
+`max_question_regeneration_rounds`). Saved output keeps exactly
+`num_questions` final pairs; document `grading_summary` is derived from those
+saved pairs (batch judge when available, otherwise mean of each slot with
+`grading_method` `average_of_each_qa_pair`).
 
 ---
 
@@ -651,6 +755,9 @@ includes:
 4. **Ungrounded highlights** (`ungrounded_highlights`) -- a flat array of
    all ungrounded QA pairs across all documents with collected reasons,
    for quick scanning without drilling into each document.
+5. **Defensive parsing** -- summary generation tolerates null/malformed numeric
+   fields and falls back to per-QA grading confidence when document-level
+   values are missing.
 
 **Why include reasons:**
 - An analyst reading the summary needs to understand *why* an answer was
@@ -669,7 +776,8 @@ Each `*_analysis.json` file saved by `run_qa_pipeline.py` uses this top-level la
   "qa_pairs": [ { "...": "..." } ],
   "question_generation": { "...": "..." },
   "answer_generation": { "...": "..." },
-  "grading_summary": { "...": "..." }
+  "grading_summary": { "...": "..." },
+  "run_metrics": { "...": "..." }
 }
 ```
 
@@ -683,19 +791,46 @@ This section is the field-by-field reference for daily debugging and interpretat
 |------|------|-------------|---------|---------------------------|
 | `document.id` | string | Input record passthrough in `run_qa_pipeline.py` | `"doc_001"` | Primary document identifier used in logs and file naming. If missing, fallback ID (e.g. `doc_1`) is used. |
 | `document.title` | string \| null | Input record passthrough | `"Q4 Risk Update"` | Human-readable title. Can be null if source data does not provide it. |
-| `document.source` | string \| null | Input record passthrough | `"internal_report.pdf"` | Source provenance. Helpful when tracing bad QA back to original files. |
-| `document.type` | string \| null | Input record passthrough | `"report"` | Optional source type/category. |
-| `document.content` | string | Input record passthrough | `"..."` | Full document text used for generation and grading. If empty, generation usually skips or fails upstream. |
+| `document.source` | string \| null | `run_qa_pipeline.py` snapshot (`source` or fallback `sources`) | `"internal_report.pdf"` | Source provenance. Helpful when tracing bad QA back to original files. |
+| `document.type` | string \| null | `run_qa_pipeline.py` snapshot (`type` / `doc_type` / `metadata.type`) | `"report"` | Optional source type/category. |
+| `document.content` | string \| null | `run_qa_pipeline.py` `_extract_text_content()` (same priority as question generation) | `"..."` | Canonical body text in analysis output. Input lookup order: `content`, `text`, `body`, `document`, `article`, `passage`; list values joined. Used for generation. **`grade_qa_results()`** resolves the live grading string the same way via `_document_text_for_grading()` on the merged QA dict (same ordered fields only—never `questions`/`answers`). Null = no extractable text. |
 
 #### 5.4.2 `qa_pairs[]` block
+
+Rows are **always from the last replacement round only** (earlier rounds are
+never written). **If that round clears all failures** (every pair passes
+`is_grounded` **and** `min_confidence_threshold`), failing rows are omitted
+from the file. **If the pipeline stops with remaining failures** (e.g. max
+replacement rounds), the **entire** final round is saved—including ungrounded
+pairs—and `grading_summary` averages confidence over **all** those pairs so
+scores reflect failures.
 
 | Field | Type | Produced by | Example | Meaning / troubleshooting |
 |------|------|-------------|---------|---------------------------|
 | `qa_pairs[].question` | string | `build_qa_pairs()` in `run_qa_pipeline.py` | `"What sequence of events led to ...?"` | Final question after validation/regeneration steps. |
 | `qa_pairs[].answer` | string | `generate_answers_from_results()` output | `"The sequence was ..."` | Final answer after grounding retries and optional coverage rewrite. |
-| `qa_pairs[].grading` | object \| null | `grade_qa_results()` mapped via question text | `{...}` | Hallucination/grounding verdict for this QA pair. Null means grading failed or mapping missed. |
+| `qa_pairs[].hallucination_check` | object \| null | `grade_qa_results()` mapped by index into per-slot pair payload | `{...}` | Hallucination/grounding verdict for this QA pair. Null means all grading paths failed for that QA. |
+| `qa_pairs[].citation_spans` | object[] | `build_qa_pairs()` → `_evidence_to_citation_spans()` | `[{"start":40,"end":92,"text":"..."}]` | Offsets into `document.content` for each **unique** evidence fragment that matched (verbatim or whitespace-relaxed). See §5.4.2a. |
+| `qa_pairs[].citation_notes` | string[] | same | `["..."]` | Fragments with **no** match (paraphrase, typo, or missing in doc). Same normalization as spans: list-prefix strip + dedupe so repeated model lines do not inflate the array. |
 
-#### 5.4.3 `qa_pairs[].grading` fields
+#### 5.4.2a Citation resolution (`supporting_evidence` → spans / notes)
+
+Answer generation returns `supporting_evidence` in parallel with answers; it is **not** persisted on the analysis JSON. When assembling `qa_pairs`, `run_qa_pipeline.py` maps that text onto `document.content`:
+
+1. **Split** — newlines, then semicolons within a line (`_split_evidence_fragments`).
+2. **Normalize** — strip leading `-`, `*`, `•`, and numeric list markers such as `1.` / `1)` (stacked prefixes allowed via `_strip_evidence_line_prefixes`).
+3. **Dedupe** — drop fragments whose whitespace-collapsed text was already seen (first occurrence wins).
+4. **Match** — `_find_quote_span`: exact substring, else regex with flexible whitespace between tokens.
+
+```mermaid
+flowchart LR
+  EV["supporting_evidence (in-memory)"] --> SP["_split_evidence_fragments"]
+  SP --> MT["_find_quote_span per fragment"]
+  MT --> CS["citation_spans"]
+  MT --> CN["citation_notes"]
+```
+
+#### 5.4.3 `qa_pairs[].hallucination_check` fields
 
 | Field | Type | Produced by | Example | Meaning / troubleshooting |
 |------|------|-------------|---------|---------------------------|
@@ -705,11 +840,8 @@ This section is the field-by-field reference for daily debugging and interpretat
 | `issues` | string[] | Hallucination checker | `["Low similarity (0.41): '...'"]` | Why grounding was flagged. First place to inspect on failures. |
 | `grounded_sentences` | string[] | Hallucination checker | `["..."]` | Sentences judged supported by document. |
 | `ungrounded_sentences` | string[] | Hallucination checker | `["..."]` | Sentences judged unsupported. |
-| `total_sentences` | integer | Hallucination checker | `4` | Number of answer sentences considered. |
-| `grounded_count` | integer | Hallucination checker | `3` | Count of grounded sentences. |
-| `ungrounded_count` | integer | Hallucination checker | `1` | Count of ungrounded sentences. |
 | `llm_verdict` | object (optional) | LLM/hybrid checker | `{"verdict":"NOT_SUPPORTED","confidence":0.62,"reason":"..."}` | Present for `llm`/`hybrid` paths. Use this when semantic and final verdict differ. |
-| `semantic_ungrounded_overridden` | string[] (optional) | Hybrid checker | `["..."]` | Sentences semantic flagged, but LLM overruled as supported. |
+| `semantic_flags_overridden_by_llm` | string[] (optional) | Hybrid checker | `["..."]` | Sentences semantic flagged, but LLM overruled as supported. |
 | `note` | string (optional) | Semantic fallback path | `"sentence-transformers not installed, using keyword-based method"` | Signals semantic model fallback to keyword mode. |
 
 #### 5.4.4 `question_generation` fields
@@ -720,7 +852,7 @@ This section is the field-by-field reference for daily debugging and interpretat
 | `provider` | string | Question generator | `"vllm"` | Question generation provider. |
 | `timestamp` | string (ISO datetime) | Question generator | `"2026-02-13T14:30:25+08:00"` | Time question generation finished for this document. |
 | `timezone` | string | Question generator | `"Asia/Singapore"` | Timezone for timestamp field. |
-| `num_questions` | integer | Question generator | `3` | Number of final questions emitted. |
+| `num_questions` | integer | Question generator | `3` | Final count of saved `qa_pairs` for this document. |
 | `complexity` | string | Question generator config | `"advanced"` | Complexity preset used by prompt builder. |
 | `question_types` | string[] | Question generator config/preset | `["analysis","aggregation","inference"]` | Target reasoning types requested in prompts. |
 | `question_validation` | object[] \| null | Question validation stage | `[{...}]` | Per-question validation/comprehensiveness audit. Null if validation disabled. |
@@ -769,10 +901,10 @@ This section is the field-by-field reference for daily debugging and interpretat
 
 | Field | Type | Produced by | Example | Meaning / troubleshooting |
 |------|------|-------------|---------|---------------------------|
-| `overall_grade` | string (`A`-`F`) | `grade_qa_results()` | `"B"` | Grade mapped from mean confidence thresholds. |
-| `overall_confidence` | number (0.0-1.0) | `grade_qa_results()` | `0.84` | Average confidence across QA pairs in the document. |
-| `grading_method` | string | `grade_qa_results()` | `"hybrid"` | Grading mode used for the document. |
-| `judge_model` | string | `grade_qa_results()` | `"Qwen/Qwen2.5-7B-Instruct"` | Judge model used for llm/hybrid mode; `"N/A (semantic only)"` for semantic mode. |
+| `overall_grade` | string (`A`-`F`) \| null | `grade_qa_results()` or `build_grading_summary_block()` in `run_qa_pipeline.py` | `"B"` | Letter from mean confidence. Null only when no usable per-slot confidence exists. |
+| `overall_confidence` | number (0.0-1.0) \| null | same as `overall_grade` | `0.84` | Mean confidence over final saved QA pairs (failing slots contribute low scores when the full last round is saved). Null if nothing to average. |
+| `grading_method` | string | primary judge path or roll-up label | `"hybrid"` | Verifier mode when batch judge returned a full summary. **`average_of_each_qa_pair`** when the document summary is the average of each saved QA pair (no usable batch summary). Older runs may still show `recomputed_from_qa_pairs` (same meaning). |
+| `judge_model` | string \| null | `grade_qa_results()` / fallback | `"Qwen/Qwen2.5-7B-Instruct"` | Judge model for llm/hybrid mode; semantic/fallback paths may store non-judge labels. |
 
 ### 5.5 Output Field Reference (`run_summary.json`)
 
@@ -790,6 +922,7 @@ Generated by: `bash scripts/utils/summarize_run.sh --json`
 | `generator_model` | string \| null | `"meta-llama/Meta-Llama-3.1-8B-Instruct"` | Primary generation model from first document summary. |
 | `judge_model` | string \| null | `"Qwen/Qwen2.5-7B-Instruct"` | Judge model for run summaries. |
 | `provider` | string \| null | `"vllm"` | Provider used for generation. |
+| `run_metrics` | object | `{"timings_seconds":{...},"quality_counters":{...}}` | Run-level timing and retry/rewrite counters aggregated by `summarize_run.sh`. |
 | `ungrounded_highlights` | object[] | `[{...}]` | Flat list of all ungrounded QA items with reasons. Fast triage view. |
 | `documents` | object[] | `[{...}]` | Per-document summary entries (see below). |
 
@@ -806,11 +939,13 @@ Generated by: `bash scripts/utils/summarize_run.sh --json`
 | `avg_confidence` | number \| null | `0.81` | Mean confidence across this document's QA pairs. |
 | `overall_grade` | string | `"B"` | Copied from document `grading_summary`. |
 | `overall_confidence` | number \| null | `0.81` | Copied from document `grading_summary`. |
-| `grading_method` | string | `"hybrid"` | Copied from document `grading_summary`. |
+| `grading_method` | string | `"hybrid"` or `"average_of_each_qa_pair"` | Copied from document `grading_summary`. |
 | `model` | string | `"meta-llama/Meta-Llama-3.1-8B-Instruct"` | Generator model for this document. |
 | `judge_model` | string | `"Qwen/Qwen2.5-7B-Instruct"` | Judge model for this document summary. |
 | `provider` | string | `"vllm"` | Provider used for this document. |
 | `timestamp` | string | `"2026-02-13T14:30:25+08:00"` | Generation timestamp (question or answer metadata fallback). |
+| `timings_seconds` | object | `{"question_generation":2.41,"answer_generation":4.02,"grading":1.33}` | Per-document stage timings emitted by `run_qa_pipeline.py`. |
+| `quality_counters` | object | `{"question_grounding_retries":1,"answer_grounding_retries":2,"coverage_rewrites":1}` | Per-document retry/rewrite counters emitted by `run_qa_pipeline.py`. |
 | `qa_details` | object[] | `[{...}]` | Per-QA condensed debugging entries. |
 
 #### 5.5.2 `run_summary.json.documents[].qa_details[]` fields
@@ -840,7 +975,8 @@ Generated by: `bash scripts/utils/summarize_run.sh --json`
 #### 5.5.4 Fast debugging path (recommended)
 
 1. Start at `run_summary.json -> ungrounded_highlights` to quickly see what failed.
-2. Open the corresponding `*_analysis.json` and inspect `qa_pairs[].grading`.
+2. Open the corresponding `*_analysis.json` and inspect
+   `qa_pairs[].hallucination_check`.
 3. If question quality seems weak, inspect `question_generation.question_validation[].comprehensiveness_check`.
 4. If `is_comprehensive` is false repeatedly, tune:
    - `question_generation.validation.comprehensiveness_min_score`
@@ -858,21 +994,24 @@ Host machine (offline server)
 |
 +-- qagredo_host/ (bind-mounted to all containers)
     |
-    +-- vllm container (GPU 0, port 7100)
+    +-- vllm container (GPU 0, internal 7100; host `${VLLM_HOST_PORT}`)
     |   - Llama-3.1-8B: question & answer generation
     |   - Mounts: models_llm (ro), hf_cache (rw)
     |   - Runs as root (vLLM image requirement)
     |
-    +-- vllm-judge container (GPU 1, port 7101)
+    +-- vllm-judge container (GPU 1, internal 7101; host `${VLLM_JUDGE_HOST_PORT}`)
     |   - Qwen2.5-7B: independent LLM-as-judge for hallucination checking
     |   - Separate model avoids self-evaluation bias
     |   - Mounts: models_llm (ro), hf_cache (rw)
     |
     +-- qagredo container (CPU)
         - Pipeline orchestration + MiniLM for semantic similarity
+        - Python: /opt/conda/bin/python (packages from image build: requirements.txt)
         - Mounts: code (rw), config (rw), data (rw),
                   output (rw), hf_cache (rw), models_embed (rw)
         - Entrypoint maps container user to host UID/GID
+        - Offline: keep qagredo-v1.tar in sync with bundle requirements.txt;
+          verify with bash verify_offline_deployment.sh (see OFFLINE_SETUP_GUIDE.md)
 ```
 
 **GPU assignment:** GPU assignment is handled entirely by Docker's
@@ -941,7 +1080,7 @@ All volumes in `docker-compose.yml`:
 ## 7. End-to-end flow for one document
 
 ```
-1. LOAD document from JSONL
+1. LOAD document from normalized JSONL (auto-converted from supported formats when needed)
 
 2. GENERATE QUESTIONS (utils/question_generator.py)
    +-- Build complexity-aware prompt (advanced: 10 question types)
@@ -964,6 +1103,9 @@ All volumes in `docker-compose.yml`:
        +-- If ungrounded: regenerate (up to 3 attempts)
 
 4. GRADE (utils/hallucination_checker.py)
+   +-- Resolve document body from merged QA payload: `_document_text_for_grading()`
+       (same field order as question generation: content, text, body, document,
+       article, passage; list paragraphs joined)
    +-- Split answer into sentences (abbreviation/decimal/list-safe)
    +-- For each Q&A pair:
    |   +-- Pass 1: Semantic similarity with sliding window (MiniLM)
@@ -972,7 +1114,7 @@ All volumes in `docker-compose.yml`:
    |   +-- Pass 2: LLM-as-judge (if ungrounded sentences found)
    |       +-- Override or confirm semantic verdict
    +-- Compute per-Q&A confidence
-   +-- Average -> overall_confidence
+   +-- Average (final saved pairs) -> overall_confidence
    +-- Map to grade (A/B/C/D/F)
 
 5. SAVE output JSON to timestamped folder:
@@ -988,12 +1130,23 @@ All volumes in `docker-compose.yml`:
 
 ## 8. Summary of design decisions
 
+### Failure localization protocol
+
+When a run looks bad, localize in this order:
+
+1. **Input stage**: malformed/short documents, wrong **file for the loader** (extension), converter mis-configuration, over-filtering.
+2. **Question stage**: repetitive/trivial questions, low comprehensiveness scores.
+3. **Answer stage**: retries high, weak evidence sections, low coverage.
+4. **Grading stage**: semantic/LLM disagreement, key/auth/model mismatch.
+
+Change one layer at a time, rerun, and compare `run_metrics` and `ungrounded_highlights`.
+
 | # | Design decision | Rationale |
 |---|----------------|-----------|
 | 1 | **10 question types** including synthesis, evaluation, counterfactual | Simple fact-lookup questions don't test comprehension. Complex multi-step questions reveal real understanding gaps |
 | 2 | **Few-shot examples** (good + bad) in question prompt | In-context learning produces correctly-typed questions; "bad" examples prevent common mistakes |
 | 3 | **Complexity rules** in prompt ("must reason across 2+ parts") | Explicitly prevents the LLM from generating trivial questions |
-| 4 | **Structured answer format** with supporting evidence | Forces document grounding; "list then count" improves aggregation accuracy by ~30% |
+| 4 | **Structured answer format** with supporting evidence | Forces document grounding and makes aggregation answers easier to verify |
 | 5 | **Separate temperatures** (0.7 questions, 0.3 answers) | Questions need diversity; answers need factual accuracy |
 | 6 | **3 answer retries** (was 2) | Gives the LLM enough attempts for complex answers without excessive runtime |
 | 7 | **Hybrid grading** (semantic + LLM fallback) | Fast for clearly-grounded answers (no LLM call), accurate for edge cases (counting, inference) |
@@ -1013,8 +1166,8 @@ All volumes in `docker-compose.yml`:
 
 | Model | Purpose | Size | Runs on |
 |-------|---------|------|---------|
-| **Llama-3.1-8B** | Question & answer generation | ~16 GB | GPU 0 (vllm, port 7100) |
-| **Qwen2.5-7B** | LLM-as-judge for hallucination checking | ~14 GB | GPU 1 (vllm-judge, port 7101) |
+| **Llama-3.1-8B** | Question & answer generation | ~16 GB | GPU 0 (vllm, host `${VLLM_HOST_PORT}` / internal 7100) |
+| **Qwen2.5-7B** | LLM-as-judge for hallucination checking | ~14 GB | GPU 1 (vllm-judge, host `${VLLM_JUDGE_HOST_PORT}` / internal 7101) |
 | **all-MiniLM-L6-v2** | Semantic similarity (grounding check, dedup) | ~80 MB | CPU (qagredo) |
 
 ---
@@ -1025,13 +1178,16 @@ All volumes in `docker-compose.yml`:
 # config/config.yaml -- full settings
 
 run:
-  input_folder: /home/user/offline20260209/qagredo_host/data
-  input_file: dev-data.jsonl        # used when input_folder is empty
-  input_type: auto                  # auto/jsonl/json/txt/pdf/docx/xlsx/csv
-  max_files: 10                     # folder mode only
-  num_documents: 2
-  min_content_words: 20             # skip short docs
+  input_folder: ""                  # pipeline uses input_file only; leave empty
+  input_file: dev-data.jsonl        # .json or .jsonl — extension selects parser in run_qa_pipeline
+  input_type: auto                  # not wired to converter CLI; use --input-type there
+  max_files: 10                     # not read by run_qa_pipeline or converter
+  num_documents: 2                  # 0 = all loaded records
+  min_content_words: 20             # not enforced by run_qa_pipeline (reserved)
   min_content_chars: 0
+  semantic_normalization:          # not read — use converter --semantic-normalize
+    enable: false
+    max_content_chars: 5000
 
 llm:
   provider: "vllm"
@@ -1041,7 +1197,7 @@ llm:
   max_retries: 3
   retry_delay: 1.0
   api_key: "llama-local"
-  base_url: "http://localhost:7100/v1"
+  base_url: "http://localhost:<VLLM_HOST_PORT>/v1"
   timeout: 60
 
 answer_generation:
@@ -1049,7 +1205,9 @@ answer_generation:
   multi_turn:
     enable_rejection: true
     min_confidence_threshold: 0.7
-    max_regeneration_attempts: 3   # up to 3 retries for answers
+    max_answer_attempts: 3         # total answer trials per question
+    max_regeneration_attempts: 2   # legacy fallback key
+    max_question_regeneration_rounds: 3
   coverage_validation:
     enable: true
     min_score_threshold: 0.7
@@ -1073,7 +1231,7 @@ question_generation:
 judge:
   provider: "vllm"
   model: "Qwen/Qwen2.5-7B-Instruct"
-  base_url: "http://localhost:7101/v1"
+  base_url: "http://localhost:<VLLM_JUDGE_HOST_PORT>/v1"
   api_key: "qwen-local"
   temperature: 0.0               # deterministic for judging
   max_tokens: 200
@@ -1104,7 +1262,7 @@ what it is not.
 | **Self-correction** | Questions undergo two-stage validation: grounding check (regenerated up to 2 times if ungrounded) and comprehensiveness check (regenerated up to 2 times if too simple). Answers use grounding retries (up to 3) plus a targeted coverage rewrite pass with grounding gate. The system evaluates output quality and self-corrects autonomously | 2.6, 2.7, 3.4, 3.5 |
 | **Multi-model tool orchestration** | Coordinates three models (Llama for generation, Qwen as judge, MiniLM for embeddings), selecting which to invoke based on intermediate results | 4.3.4 |
 | **Autonomous multi-step execution** | Once started, the full pipeline (generate questions -> generate answers -> grade -> output) runs end-to-end without human intervention | 7 |
-| **Adaptive routing** | The hybrid grading method makes a runtime decision: ~70-80% of answers take the fast semantic path; only edge cases are routed to the LLM judge | 4.3.4 |
+| **Adaptive routing** | The hybrid grading method makes a runtime decision: semantic first, then route only edge cases to the LLM judge | 4.3.4 |
 
 ### 11.3 Traits QAGRedo does not exhibit
 

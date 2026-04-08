@@ -9,7 +9,7 @@
 
 QAGRedo is an automated pipeline that:
 
-1. **Reads** your input documents (JSONL format)
+1. **Reads** your input documents in supported formats (`json/txt/pdf/doc/docx/xlsx/csv`) and normalizes them to JSONL
 2. **Generates complex questions** using 10 question types (analysis,
    aggregation, comparison, inference, causal, temporal, multi-hop,
    synthesis, evaluation, counterfactual). Every question is individually
@@ -24,6 +24,8 @@ QAGRedo is an automated pipeline that:
 5. **Grades** each document (A/B/C/D/F) based on answer grounding confidence
 6. **Saves** results to timestamped folders with detailed reasons for any
    ungrounded content
+7. **Optionally uses frameworks**: LangChain for prompt templating/structured
+   parsing and LangGraph for per-document orchestration and dynamic routing.
 
 For full algorithm details and design rationale, see `docs/ALGORITHM_REPORT.md`.
 
@@ -38,6 +40,7 @@ qagredo_host/                          <-- YOU ARE HERE
 |-- run.sh                             * Run the pipeline
 |-- jupyter.sh                         * Start Jupyter Lab
 |-- setup_offline.sh                     First-time setup only
+|-- verify_offline_deployment.sh         * Verify Docker image matches requirements.txt
 |
 |-- config/
 |   +-- config.yaml                    * Pipeline configuration (edit this)
@@ -53,10 +56,13 @@ qagredo_host/                          <-- YOU ARE HERE
 |   |-- question_generator.py            10 question types, few-shot examples, comprehensiveness check
 |   |-- answer_generator.py              Structured answers, grounding retries, coverage rewrite
 |   |-- hallucination_checker.py         Hybrid grading (semantic + LLM)
+|   |-- langchain_components.py          LangChain prompt + parsing helpers
+|   |-- langgraph_pipeline.py            LangGraph document workflow graph
 |   |-- output_manager.py                Timestamped output folders
 |   +-- ...
 |
 |-- run_qa_pipeline.py                   Main pipeline script
+|-- requirements.txt                     Python deps (must match qagredo-v1.tar)
 |-- docker-compose.yml           Docker services definition
 |-- scripts/
 |   |-- conversion/
@@ -88,6 +94,16 @@ All commands are run from inside `qagredo_host/`:
 cd /path/to/qagredo_host
 ```
 
+### Verify Docker image vs requirements (recommended)
+
+After loading or updating `qagredo-v1.tar`:
+
+```bash
+bash verify_offline_deployment.sh   # pip check + every line in requirements.txt
+```
+
+See `docs/OFFLINE_SETUP_GUIDE.md` — keep `qagredo_bundle.tar.gz` and `qagredo-v1.tar` in sync when `requirements.txt` changes.
+
 ### Run the pipeline
 
 ```bash
@@ -110,7 +126,7 @@ bash run.sh --summarize --all                 # Summarise all runs
 ### Convert input files
 
 ```bash
-# Convert JSON / JSONL / PDF / TXT / DOCX / XLSX / CSV to JSONL
+# Convert JSON / JSONL / PDF / TXT / DOC / DOCX / XLSX / CSV to JSONL
 python3 scripts/conversion/convert_to_qagredo_jsonl.py \
   --input data/my_input.json \
   --output data/my_input.jsonl
@@ -119,10 +135,19 @@ python3 scripts/conversion/convert_to_qagredo_jsonl.py \
 bash run.sh --convert --input data/my_input.json --output data/my_input.jsonl
 ```
 
-You can also skip manual conversion and let the pipeline auto-prepare inputs
-from `run.input_folder` + `run.input_type` in `config/config.yaml`.
+The **main pipeline** (`bash run.sh`) reads **`run.input_file`** (`.json` / `.jsonl`)
+and ignores **`run.input_type`**. Prepare PDF/TXT/etc. with
+`convert_to_qagredo_jsonl.py` or `bash run.sh --convert`, then set
+`input_file` to the JSONL. Optional semantic enrichment during conversion: add **`--semantic-normalize`**
+to **`convert_to_qagredo_jsonl.py`** (raw `content` stays unchanged). The
+**`run.semantic_normalization`** block in YAML is **not** read by that script.
 
 ### Jupyter Lab
+
+Port changes should be made in `.env` only:
+- `VLLM_HOST_PORT`
+- `VLLM_JUDGE_HOST_PORT`
+- `JUPYTER_PORT`
 
 ```bash
 bash jupyter.sh                     # Start Jupyter + vLLM
@@ -130,11 +155,12 @@ bash jupyter.sh --no-vllm           # Start Jupyter only (no GPU)
 bash jupyter.sh --down              # Stop Jupyter
 ```
 
-Then open: `http://localhost:8899`
+Then open: `http://localhost:${JUPYTER_PORT}`
 
 If connecting remotely:
 ```bash
-ssh -L 8899:localhost:8899 user@offline-server
+source .env
+ssh -L ${JUPYTER_PORT}:localhost:${JUPYTER_PORT} user@offline-server
 ```
 
 ---
@@ -143,7 +169,7 @@ ssh -L 8899:localhost:8899 user@offline-server
 
 ### 1. Put your data in `data/` (or point to any folder)
 
-Copy your input files (JSON/JSONL/TXT/PDF/DOCX/XLSX/CSV) into `data/` or another folder:
+Copy your input files (JSON/JSONL/TXT/PDF/DOC/DOCX/XLSX/CSV) into `data/` or another folder:
 
 ```bash
 cp /path/to/my_documents.jsonl data/
@@ -169,12 +195,16 @@ Key settings to change:
 
 ```yaml
 run:
-  input_folder: /home/user/offline20260209/qagredo_host/data
-  input_type: auto                  # auto/jsonl/json/txt/pdf/docx/xlsx/csv
-  max_files: 10                     # only used for input_folder mode
-  num_documents: 5                  # <-- how many documents to process
-  min_content_words: 20             # skip too-short docs
+  input_folder: ""
+  input_file: data/your-run.jsonl   # or .json — extension selects parser (input_type not used)
+  input_type: auto                  # not wired to converter; use CLI --input-type
+  max_files: 10                     # not read by current scripts
+  num_documents: 5                  # how many records to process (0 = all loaded)
+  min_content_words: 20             # not enforced by run_qa_pipeline (reserved)
   min_content_chars: 0
+  semantic_normalization:          # not read — use converter --semantic-normalize
+    enable: false
+    max_content_chars: 5000
 
 question_generation:
   num_questions: 3                  # <-- questions per document
@@ -200,7 +230,7 @@ This will:
 
 Optional one-off override without editing config:
 ```bash
-bash run.sh -- --input-folder train-data_txt --input-type txt --max-files 10 --num-documents 10 --min-content-words 20
+bash run.sh -- --input-file data/run.jsonl --num-documents 5
 ```
 
 Each run creates a **unique timestamped folder** (date + time), so multiple
@@ -223,6 +253,8 @@ The terminal summary shows Generator, Judge, and Provider. The **run_summary.jso
 - `generator_model` and `judge_model` (separate fields)
 - Per-document statistics (grade, confidence, grounded/ungrounded counts)
 - Per-QA details with grounding method and confidence
+- Run-level timing metrics (question/answer/grading totals + averages)
+- Quality counters (question retries, answer retries, coverage rewrites)
 - **For ungrounded answers**: specific reasons, ungrounded sentences, and
   Qwen judge verdict
 - **Ungrounded highlights**: flat list of all failed QA pairs across documents
@@ -274,7 +306,12 @@ questions survive.
 - **Structured format**: Answer + Supporting Evidence
 - **"List then count"**: improves aggregation accuracy by ~30%
 - **Low temperature** (0.3): suppresses creative hallucination
-- **3 retries**: if an answer fails grounding, it is regenerated up to 3 times
+- **3 answer trials per question**: each slot gets up to 3 total answer
+  attempts (`max_answer_attempts`)
+- **Question regeneration rounds**: if a slot fails all answer trials, that
+  slot gets a replacement question (default max 3 replacement rounds)
+- **Final output size**: exactly `num_questions` final QA pairs per document
+  (default `3`)
 - **Coverage validation**: checks whether the answer addresses all parts of the question
 - **One rewrite pass**: low-coverage answers get one targeted rewrite, accepted only if grounded
 
@@ -307,13 +344,16 @@ questions survive.
 ```yaml
 # What to process
 run:
-  input_folder: /home/user/offline20260209/qagredo_host/data
-  input_file: dev-data.jsonl        # used when input_folder is empty
-  input_type: auto                  # auto/jsonl/json/txt/pdf/docx/xlsx/csv
-  max_files: 10                     # folder mode only
-  num_documents: 2                  # how many to process
-  min_content_words: 20             # skip short docs
+  input_folder: ""
+  input_file: dev-data.jsonl        # .json / .jsonl — pipeline uses extension only
+  input_type: auto                  # not wired to converter; use CLI --input-type
+  max_files: 10                     # not read by current scripts
+  num_documents: 2                  # 0 = all loaded records
+  min_content_words: 20             # not enforced by run_qa_pipeline (reserved)
   min_content_chars: 0
+  semantic_normalization:          # not read — use converter --semantic-normalize
+    enable: false
+    max_content_chars: 5000
 
 # LLM connection (usually don't need to change)
 llm:
@@ -322,7 +362,7 @@ llm:
   temperature: 0.7                  # for question generation
   max_tokens: 500
   api_key: "llama-local"
-  base_url: "http://localhost:7100/v1"
+  base_url: "http://localhost:<VLLM_HOST_PORT>/v1"
 
 # Answer generation
 answer_generation:
@@ -330,7 +370,9 @@ answer_generation:
   multi_turn:
     enable_rejection: true
     min_confidence_threshold: 0.7
-    max_regeneration_attempts: 3    # up to 3 retries for answers
+    max_answer_attempts: 3           # total trials per question (initial + regens)
+    max_regeneration_attempts: 2     # legacy fallback key
+    max_question_regeneration_rounds: 3  # max replacement rounds per slot
   coverage_validation:
     enable: true
     min_score_threshold: 0.7
@@ -371,6 +413,7 @@ Set these in your shell before running, or add to `.env`:
 | `VLLM_JUDGE_MODEL` | `/models/Qwen2.5-7B-Instruct` | Judge model path (vLLM-judge container) |
 | `VLLM_JUDGE_SERVED_NAME` | `Qwen/Qwen2.5-7B-Instruct` | Judge model name for API |
 | `VLLM_JUDGE_API_KEY` | `qwen-local` | Judge API key (must match hallucination config) |
+| `VLLM_JUDGE_TP_SIZE` | `1` | Judge tensor parallelism (GPU count for judge service) |
 
 **Models & hardware**: The system uses **two LLMs** — Llama-3.1-8B (vLLM, GPU 0) for
 question/answer generation, and Qwen2.5-7B (vLLM-judge, GPU 1) for independent
@@ -381,6 +424,44 @@ Example:
 export VLLM_MAX_MODEL_LEN=16384
 bash run.sh
 ```
+
+### On-site swap to Meta-Llama-3.3-70B + Qwen3.5-27B
+
+Use this when model files are on the host at `/mnt/usr/models/...`.
+
+1) `docker-compose.yml` (both `vllm` and `vllm-judge`):
+- comment: `- ./models_llm:/models:ro`
+- uncomment: `- /mnt/usr/models:/models:ro`
+
+2) `.env` (uncomment these):
+
+```bash
+VLLM_MODEL=/models/Meta-Llama-3.3-70B-Instruct
+VLLM_SERVED_MODEL_NAME=meta-llama/Meta-Llama-3.3-70B-Instruct
+VLLM_TP_SIZE=2
+
+VLLM_JUDGE_MODEL=/models/Qwen3.5-27B
+VLLM_JUDGE_SERVED_NAME=Qwen/Qwen3.5-27B
+VLLM_JUDGE_TP_SIZE=2
+```
+
+3) `config/config.yaml` (uncomment the on-site alternatives):
+
+```yaml
+llm:
+  # model: "meta-llama/Meta-Llama-3.1-8B-Instruct"
+  model: "meta-llama/Meta-Llama-3.3-70B-Instruct"
+
+judge:
+  # model: "Qwen/Qwen2.5-7B-Instruct"
+  model: "Qwen/Qwen3.5-27B"
+```
+
+4) GPU rule:
+- `--tensor-parallel-size` must match the count of `device_ids` in each
+  service.
+- Running generator=2 GPUs and judge=2 GPUs at the same time usually requires
+  4 host GPUs total.
 
 ---
 
@@ -398,18 +479,26 @@ You need **three pieces of information** for each model:
 
 | Info | How to get it | Example |
 |------|---------------|---------|
-| **IP address** (or hostname) of Server A | Ask your admin, or run `hostname -I` on Server A | `192.168.1.50` |
-| **Port** the model is running on | Check Server A's vLLM startup command or ask your admin | `7100` (generator), `7101` (judge) |
+| **IP address** (or hostname) of Server A | Ask your admin, or run `hostname -I` on Server A | `${SERVER_A_HOST}` |
+| **Port** the model is running on | Check Server A's vLLM startup command or ask your admin | `${SERVER_A_GEN_PORT}` (generator), `${SERVER_A_JUDGE_PORT}` (judge) |
 | **Served model name** | Run the curl command below against Server A | `meta-llama/Meta-Llama-3.1-8B-Instruct` |
+
+Copy/paste this variable block once in your shell, then reuse all commands below as-is:
+
+```bash
+export SERVER_A_HOST=192.168.1.50
+export SERVER_A_GEN_PORT=7100
+export SERVER_A_JUDGE_PORT=7101
+```
 
 To find the exact model name that Server A is serving:
 
 ```bash
-# Generator model (replace IP and port with Server A's values)
-curl http://192.168.1.50:7100/v1/models
+# Generator model
+curl "http://${SERVER_A_HOST}:${SERVER_A_GEN_PORT}/v1/models"
 
 # Judge model
-curl http://192.168.1.50:7101/v1/models
+curl "http://${SERVER_A_HOST}:${SERVER_A_JUDGE_PORT}/v1/models"
 ```
 
 The response will look like:
@@ -445,7 +534,7 @@ Server A is serving:
 llm:
   provider: "vllm"
   model: "meta-llama/Meta-Llama-3.1-8B-Instruct"   # must match Server A's served name
-  base_url: "http://192.168.1.50:7100/v1"           # Server A's IP and port
+  base_url: "http://<SERVER_A_HOST>:<SERVER_A_GEN_PORT>/v1"
   api_key: "llama-local"                             # must match Server A's API key
   temperature: 0.7
   max_tokens: 500
@@ -460,7 +549,7 @@ llm:
 judge:
   provider: "vllm"
   model: "Qwen/Qwen2.5-7B-Instruct"                # must match Server A's served name
-  base_url: "http://192.168.1.50:7101/v1"           # Server A's IP and port
+  base_url: "http://<SERVER_A_HOST>:<SERVER_A_JUDGE_PORT>/v1"
   api_key: "qwen-local"                              # must match Server A's API key
   temperature: 0.0
   max_tokens: 200
@@ -489,22 +578,22 @@ Always check that you can reach Server A's models before starting the pipeline:
 
 ```bash
 # Check generator health
-curl -i http://192.168.1.50:7100/health
+curl -i "http://${SERVER_A_HOST}:${SERVER_A_GEN_PORT}/health"
 
 # Check judge health
-curl -i http://192.168.1.50:7101/health
+curl -i "http://${SERVER_A_HOST}:${SERVER_A_JUDGE_PORT}/health"
 
 # List available generator models
-curl -s http://192.168.1.50:7100/v1/models | python3 -m json.tool
+curl -s "http://${SERVER_A_HOST}:${SERVER_A_GEN_PORT}/v1/models" | python3 -m json.tool
 
 # List available judge models
-curl -s http://192.168.1.50:7101/v1/models | python3 -m json.tool
+curl -s "http://${SERVER_A_HOST}:${SERVER_A_JUDGE_PORT}/v1/models" | python3 -m json.tool
 ```
 
 All four should succeed before you run the pipeline. If any fail, check:
 - Is Server A's vLLM actually running? (`bash run.sh --status` on Server A)
-- Is there a firewall blocking the port? (`telnet 192.168.1.50 7100`)
-- Is the IP correct? (`ping 192.168.1.50`)
+- Is there a firewall blocking the port? (`telnet ${SERVER_A_HOST} ${SERVER_A_GEN_PORT}`)
+- Is the IP correct? (`ping ${SERVER_A_HOST}`)
 
 ### Swapping to completely different models (Model B and Model C)
 
@@ -516,10 +605,13 @@ the same -- you only need to change the `model` and possibly `base_url` fields.
 **Step 1.** Find the exact served model names:
 
 ```bash
-curl -s http://192.168.1.50:9000/v1/models | python3 -m json.tool
+export SERVER_A_MODEL_B_PORT=9000
+export SERVER_A_MODEL_C_PORT=9001
+
+curl -s "http://${SERVER_A_HOST}:${SERVER_A_MODEL_B_PORT}/v1/models" | python3 -m json.tool
 # Returns:  "id": "org/Model-B-70B-Instruct"
 
-curl -s http://192.168.1.50:9001/v1/models | python3 -m json.tool
+curl -s "http://${SERVER_A_HOST}:${SERVER_A_MODEL_C_PORT}/v1/models" | python3 -m json.tool
 # Returns:  "id": "org/Model-C-32B-Instruct"
 ```
 
@@ -529,7 +621,7 @@ curl -s http://192.168.1.50:9001/v1/models | python3 -m json.tool
 llm:
   provider: "vllm"
   model: "org/Model-B-70B-Instruct"                 # <-- from /v1/models
-  base_url: "http://192.168.1.50:9000/v1"           # <-- Server A IP + port
+  base_url: "http://<SERVER_A_HOST>:<SERVER_A_MODEL_B_PORT>/v1"
   api_key: "server-a-api-key"                        # <-- whatever Server A expects
   temperature: 0.7
   max_tokens: 500
@@ -540,7 +632,7 @@ llm:
 judge:
   provider: "vllm"
   model: "org/Model-C-32B-Instruct"                  # <-- from /v1/models
-  base_url: "http://192.168.1.50:9001/v1"            # <-- Server A IP + port
+  base_url: "http://<SERVER_A_HOST>:<SERVER_A_MODEL_C_PORT>/v1"
   api_key: "server-a-api-key"                         # <-- whatever Server A expects
   temperature: 0.0
   max_tokens: 200
@@ -577,7 +669,7 @@ Output will be saved to `output/vllm/org-model-b-70b-instruct/YYYY-MM-DD_HHMMSS/
 
 | Scenario | What to change |
 |----------|----------------|
-| Models on Server A, same ports (7100/7101) | Change `base_url` IP only (keep ports) |
+| Models on Server A, same ports as your defaults | Change `base_url` host only (keep ports) |
 | Models on Server A, different ports | Change `base_url` IP and ports |
 | Different model names | Change `model` to match `/v1/models` output |
 | Different API key on Server A | Change `api_key` to match Server A's key |
@@ -596,6 +688,39 @@ Output will be saved to `output/vllm/org-model-b-70b-instruct/YYYY-MM-DD_HHMMSS/
 | `timeout` errors | Model is overloaded or very large | Increase `timeout` to `120` or `300` |
 | Grading always uses semantic (never LLM judge) | Judge `base_url` is unreachable | Check `judge.base_url` separately from `llm.base_url` |
 | Output folder has wrong model name | Config was not saved before running | Re-check `config/config.yaml` and re-run |
+
+---
+
+## Output mode quick guide
+
+Set under `run:` in `config/config.yaml`:
+
+```yaml
+# Full output (default)
+save_grounded_qa_pairs_only: false
+minimal_qa_output: false
+```
+
+```yaml
+# Full schema, grounded rows only
+save_grounded_qa_pairs_only: true
+minimal_qa_output: false
+```
+
+```yaml
+# Minimal export (document content + QA only)
+save_grounded_qa_pairs_only: false   # or true
+minimal_qa_output: true
+```
+
+Minimal output shape:
+
+```json
+{
+  "document": {"content": "..."},
+  "qa_pairs": [{"question": "...", "answer": "..."}]
+}
+```
 
 ---
 
@@ -618,14 +743,15 @@ Each file contains:
 
 | Section | Content |
 |---------|---------|
-| `document` | Source document metadata (id, title, content) |
+| `document` | Source document snapshot (`id`, `title`, `source`, `type`, `content`) |
 | `qa_pairs` | Generated questions + answers with per-pair grounding and comprehensiveness metadata |
 | `qa_pairs[].grading` | `is_grounded`, `confidence`, `method`, `issues`, `ungrounded_sentences` |
 | `qa_pairs[].grading.llm_verdict` | Qwen judge verdict and reason (if hybrid/LLM was used) |
 | `supporting_evidence` | Quotes from the document supporting each answer |
-| `grading_summary` | Overall grade (A-F), confidence, method, `judge_model` |
+| `grading_summary` | Overall grade (A-F), confidence, method, `judge_model`; if the batch judge step does not produce a summary, values are averaged from each saved QA pair (`grading_method` `average_of_each_qa_pair`) |
 | `question_generation` | Model, timestamp, generation metadata |
 | `answer_generation` | Model, timestamp, generation metadata |
+| `run_metrics` | Per-document timings + quality counters (retries/rewrites) |
 
 ### Run summary (for analysts)
 
@@ -640,6 +766,8 @@ bash scripts/utils/summarize_run.sh --latest --json
 The JSON summary includes:
 - **`generator_model` and `judge_model`** (separate fields)
 - **Per-document statistics** and per-QA details
+- **Run-level metrics**: timing totals/averages for question, answer, grading
+- **Quality counters**: question retries, answer retries, coverage rewrites
 - **Ungrounded reasons**: for each ungrounded answer, the specific issues,
   ungrounded sentences, and Qwen verdict with explanation
 - **Ungrounded highlights**: quick-scan list of all problems across all documents
@@ -720,18 +848,19 @@ echo $VLLM_SERVED_MODEL_NAME
 bash run.sh --status
 
 # Check if vLLM is healthy
-curl http://localhost:7100/health
+source .env
+curl "http://localhost:${VLLM_HOST_PORT}/health"
 ```
 
 ---
 
 ## Updating code from the dev machine
 
-When you receive a new `qagredo_bundle.tar.gz`:
+When you receive a new `qagredo_bundle.tar.gz` (recommended archive location: `/data/tyewhong/qagredo/`):
 
 ```bash
 # Go to the parent directory (staging area)
-cd /path/to/staging
+cd /home/tyewhong/agredo
 
 # Back up your current config and data
 cp qagredo_host/config/config.yaml ./config_backup.yaml
@@ -741,7 +870,7 @@ cp -r qagredo_host/data ./data_backup
 cd qagredo_host && bash run.sh --down && cd ..
 
 # Extract new bundle (overwrites qagredo_host/)
-tar xzf qagredo_bundle.tar.gz
+tar xzf /data/tyewhong/qagredo/qagredo_bundle.tar.gz
 
 # Restore your config and data
 cp ./config_backup.yaml qagredo_host/config/config.yaml

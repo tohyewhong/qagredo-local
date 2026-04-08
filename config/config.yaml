@@ -6,30 +6,83 @@
 
 offline_mode: true  # or env: OFFLINE_MODE=1
 
+framework:
+  # Required framework switches.
+  # Both must stay true; pipeline startup will fail otherwise.
+  use_langchain: true
+  use_langgraph: true
+  langchain:
+    # When true, answer prompts request strict JSON and parser enforces schema.
+    structured_json_output: true
+  langgraph:
+    # If primary grading runs in semantic mode and confidence is low,
+    # route to LLM judge as fallback.
+    enable_dynamic_routing: true
+    semantic_fallback_threshold: 0.7
+
 run:
-  # Choose ONE source mode:
-  #   - input_folder mode (recommended for batches, supports auto conversion)
-  #   - input_file mode   (single file; auto converts txt/pdf/docx/xlsx/csv to JSONL)
-  #
-  # If input_folder is set, input_file is ignored.
-  input_folder: /home/tyewhong/qagredo/data/pdf
-  input_file: dev-data.jsonl
+  # Single file: set input_file to .json / .jsonl (or pdf/etc. with
+  # auto_convert). Many files: set input_file to "" and set input_folder
+  # (e.g. data/txt); every file matching input_glob (default *.txt) is merged
+  # into one JSONL, then the pipeline runs all of them in one process.
+  # If both input_file and input_folder are set, input_file wins.
+  input_folder: "data/txt"
+  # Batch example: input_file: ""  +  input_folder: data/txt
+  input_file: ""
 
-  # Source type:
-  #   auto | jsonl | json | txt | pdf | docx | xlsx | csv
-  # auto = infer by file extension.
-  input_type: pdf
+  # Used only when input_file is empty: glob under input_folder (*.txt default).
+  input_glob: "*.txt"
 
-  # Number of files to load when using input_folder.
-  max_files: 10
+  # output/<provider>/<model>/<folder>/ — folder name for this run:
+  #   input_basename — sanitized stem of run.input_file (default).
+  #   timestamp | time | ts | dated — YYYY-MM-DD_HHMMSS (old layout).
+  output_folder: timestamp
 
-  # Number of documents to process after loading/conversion.
+  # Per-document *.json name inside that folder:
+  #   document_id — each record's id (sanitized); multi-doc adds _0001, _0002, …
+  #   input_file — input path stem (e.g. dev-data_analysis.json); multi-doc
+  #     adds _0001, _0002 (use document_id if you need one file per record id).
+  output_analysis_stem: document_id
+
+  # Convert non-JSON sources before the pipeline (see run.input_file above).
+  auto_convert: false
+
+  # With auto_convert or the converter CLI: optional type override; otherwise
+  # the file extension selects the parser (auto = infer).
+  # auto | jsonl | json | txt | pdf | doc | docx | pptx | xlsx | csv
+  input_type: auto
+
+  # When using input_folder: max files to merge (after sorting by name).
+  # 0 = no limit (process every match). Ignored for single input_file runs.
+  max_files: 0
+
+  # How many normalized records to process after load.
+  # 0 (or negative) = process all loaded records.
   num_documents: 10
 
-  # Skip documents that are too short (helps reduce hallucinations on tiny texts).
-  # Set to 0 to disable a threshold.
+  # When true: each saved *_analysis.json lists only QA slots that pass the
+  # grounding gate (is_grounded + answer_generation.multi_turn
+  # .min_confidence_threshold). Ungrounded rows are omitted; no placeholder
+  # rows. Documents with zero grounded pairs are not written. Use for
+  # fine-tuning-style exports; default false keeps full diagnostic output.
+  save_grounded_qa_pairs_only: true
+
+  # When true: each saved *_analysis.json has only
+  #   document: { content: "..." }  (same plain text as full-output snapshot)
+  #   qa_pairs: [ { question, answer }, ... ]
+  # No id/title/source/type on document; no hallucination_check, citations, or
+  # run metadata. Pair with save_grounded_qa_pairs_only for FT-style extracts.
+  minimal_qa_output: true
+
+  # Not enforced by run_qa_pipeline.py (reserved / documentation).
   min_content_words: 20
   min_content_chars: 0
+
+  # Converter: CLI uses --semantic-normalize / --semantic-max-content-chars.
+  # When run.auto_convert is true, enable/max_content_chars are passed through.
+  semantic_normalization:
+    enable: false
+    max_content_chars: 5000
 
 llm:
   # provider: "vllm" (offline/local) or "openai" (cloud)
@@ -39,23 +92,26 @@ llm:
   # - vLLM: a local model name/path served by your vLLM server
   # - OpenAI: e.g. "gpt-4o-mini"
   model: "meta-llama/Meta-Llama-3.1-8B-Instruct"
+  # On-site offline swap (uncomment to use Meta-Llama-3.3-70B-Instruct):
+  # model: "meta-llama/Meta-Llama-3.3-70B-Instruct"
 
-  # Common generation knobs
+  # Default generation settings for this model.
   temperature: 0.7
   max_tokens: 500
 
-  # Retry behavior
+  # Retry API calls when request fails (network/timeout/server busy).
   max_retries: 3
   retry_delay: 1.0
 
-  # API key for the chosen provider.
-  # - For openai: your real OpenAI API key
-  # - For vllm: can be any string; vLLM typically doesn't validate it
+  # API key:
+  # - openai: use your real OpenAI key
+  # - vllm: usually any non-empty string is fine
   api_key: "llama-local"
 
-  # Provider-specific settings
-  # vLLM: OpenAI-compatible endpoint
+  # Endpoint of your model server (OpenAI-compatible API).
+  # For local vLLM, this is usually http://localhost:<port>/v1
   base_url: "http://localhost:7100/v1"
+  # Request timeout in seconds.
   timeout: 60
 
 # Answer generation settings
@@ -63,6 +119,18 @@ answer_generation:
   # Lower temperature for answers (more deterministic = fewer hallucinations)
   # If not set, defaults to 0.3 (lower than question generation's 0.7)
   temperature: 0.3
+  # Multi-turn answer validation + regeneration.
+  # If grounding confidence is below threshold, regenerate within the total
+  # answer attempt budget.
+  multi_turn:
+    enable_rejection: true
+    min_confidence_threshold: 0.7
+    # Total answer trials per question (initial + regenerations).
+    max_answer_attempts: 3
+    # Legacy fallback key (regeneration-only count); keep for compatibility.
+    max_regeneration_attempts: 2
+    # If all answer trials fail, replace that question up to this many times.
+    max_question_regeneration_rounds: 3
   coverage_validation:
     enable: true
     min_score_threshold: 0.7
@@ -95,16 +163,19 @@ question_generation:
     comprehensiveness_min_score: 0.6
     comprehensiveness_max_attempts: 2
 
-# ---- Judge LLM (separate model for independent grading) ----
-# A DIFFERENT model from the generator to avoid self-evaluation bias.
-# Qwen judges whether Llama's answers are grounded in the document.
-# If not configured, falls back to the main "llm" settings above.
+# Judge model configuration (used for independent grounding checks).
+# Use a different model from `llm` to avoid self-evaluation bias.
+# If this section is removed, QAGRedo falls back to `llm` settings.
 judge:
+  # Provider/model endpoint for the judge service.
   provider: "vllm"
   model: "Qwen/Qwen2.5-7B-Instruct"
+  # On-site offline swap (uncomment to use Qwen3.5-27B):
+  # model: "Qwen/Qwen3.5-27B"
   base_url: "http://localhost:7101/v1"
   api_key: "qwen-local"
-  temperature: 0.0       # deterministic for judging
+  # Keep judge deterministic for stable grading.
+  temperature: 0.0
   max_tokens: 200
   timeout: 60
   max_retries: 3
@@ -118,4 +189,18 @@ judge:
 #   "hybrid"    - semantic first, LLM fallback for low-confidence (recommended)
 hallucination:
   method: "hybrid"
+  # Optional: combine grader is_grounded with verbatim citation resolution.
+  # off — default; only semantic/keyword/llm/hybrid grading (unchanged).
+  # annotate — set grading.citation_alignment + append issues when evidence
+  #   does not resolve to document.content (citation_notes or no spans).
+  # Evidence is split in run_qa_pipeline: strip - * • and 1. / 1) prefixes,
+  # then dedupe identical fragments so repeated model lines do not inflate
+  # citation_spans / citation_notes.
+  # strict — same as annotate and force is_grounded false if misaligned.
+  citation_alignment: "off"
+  # When is_grounded and citation_spans/citation_notes are both empty:
+  # off — do not add grounding_why.
+  # reuse_llm_only — copy llm_verdict.reason when present (hybrid/llm only).
+  # always — reuse reason if present, else one extra judge LLM call (latency).
+  grounding_explanation_when_no_citations: "off"
 

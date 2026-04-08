@@ -6,6 +6,10 @@ QAGRedo is an automated pipeline that reads documents, generates complex
 questions and grounded answers using an LLM, and verifies that every answer
 is factually supported by the source document.
 
+The pipeline now supports an incremental framework upgrade:
+- **LangChain** for prompt templating and structured answer parsing
+- **LangGraph** for per-document workflow orchestration with conditional routing
+
 ## Documentation
 
 | Document | Description |
@@ -14,14 +18,14 @@ is factually supported by the source document.
 | `docs/ONLINE_SETUP_GUIDE.md` | Step-by-step guide for running on the online/dev machine and creating offline bundles |
 | `docs/VISUAL_REPORT.html` | **Visual report** with diagrams -- open in any browser |
 | `docs/ALGORITHM_REPORT.md` | Full algorithm details, design decisions, and rationale |
-| `docs/OFFLINE_SETUP_GUIDE.md` | 6-file offline deployment (recommended) |
+| `docs/OFFLINE_SETUP_GUIDE.md` | 6-file offline deployment; **keep `qagredo-v1.tar` and bundle `requirements.txt` in sync**; run `verify_offline_deployment.sh` on the offline host |
 | `docs/architecture/NETWORK_DIAGRAM.md` | Container networking, ports, URLs |
 
 ---
 
 ## Purpose
 
-QAGRedo reads your documents (JSON/JSONL), generates **questions + answers**
+QAGRedo reads your documents in supported formats (`json/txt/pdf/doc/docx/xlsx/csv/jsonl`) and normalizes them to JSONL, then generates **questions + answers**
 using **Llama** (vLLM), then checks whether answers are grounded in the source
 document (using **MiniLM** for semantic similarity and **Qwen** as LLM-as-judge
 for complex reasoning — a separate model avoids self-evaluation bias).
@@ -48,8 +52,10 @@ for complex reasoning — a separate model avoids self-evaluation bias).
    Questions that are too simple (single-sentence lookup) are automatically
    regenerated with targeted feedback.
 3. **Grounded answers** -- structured prompts force the LLM to cite supporting
-   evidence, with up to 3 retries for ungrounded answers plus a targeted
-   rewrite pass when question coverage is weak.
+   evidence, with per-slot policy: up to 3 total answer trials per question,
+   then replacement question for that slot (bounded by
+   `max_question_regeneration_rounds`), plus a targeted rewrite pass when
+   question coverage is weak.
 4. **Hybrid verification** -- fast semantic similarity for clear cases, LLM
    fallback for counting, aggregation, and inference.
 5. **Audit trail** -- every answer includes supporting evidence quotes and
@@ -67,7 +73,15 @@ for complex reasoning — a separate model avoids self-evaluation bias).
 Input documents (JSONL)
         |
         v
+ +-- LangGraph Orchestration -----+
+ |   per-document state graph      |
+ |   conditional routing            |
+ |   fallback to legacy loop        |
+ +-------------------------------+
+        |
+        v
   +-- Question Generation ------+
+  |   LangChain prompt templates |
   |   10 question types          |
   |   Few-shot examples          |    LLM (vLLM, temp=0.7)
   |   Deduplication (MiniLM)     |
@@ -78,6 +92,7 @@ Input documents (JSONL)
         |
         v
   +-- Answer Generation ---------+
+  |   LangChain structured parse  |
   |   Structured format           |
   |   "List then count"           |    LLM (vLLM, temp=0.3)
   |   Supporting evidence         |
@@ -116,10 +131,16 @@ See `docs/ALGORITHM_REPORT.md` for the full algorithm details and design rationa
 
 ## Architecture: three containers
 
+Port configuration is centralized in `.env` (single source of truth).  
+Change only:
+- `VLLM_HOST_PORT`
+- `VLLM_JUDGE_HOST_PORT`
+- `JUPYTER_PORT`
+
 | Container | Role | Resource | Port |
 |-----------|------|----------|------|
-| **vLLM** (`qagredo-vllm`) | Llama-3.1-8B — generates questions & answers | GPU 0 | 7100 |
-| **vLLM-judge** (`qagredo-vllm-judge`) | Qwen2.5-7B — independent LLM-as-judge for hallucination checking | GPU 1 | 7101 |
+| **vLLM** (`qagredo-vllm`) | Llama-3.1-8B — generates questions & answers | GPU 0 | `${VLLM_HOST_PORT}` |
+| **vLLM-judge** (`qagredo-vllm-judge`) | Qwen2.5-7B — independent LLM-as-judge for hallucination checking | GPU 1 | `${VLLM_JUDGE_HOST_PORT}` |
 | **QAGRedo** (`qagredo-runner`) | Pipeline orchestration + MiniLM for semantic similarity | CPU | (none) |
 
 Judging uses a **separate model** (Qwen) from generation (Llama) to avoid self-evaluation bias. To start both vLLM services: `docker compose -f docker-compose.yml up -d vllm vllm-judge`
@@ -131,9 +152,11 @@ from it directly. Any edit you make persists across container restarts.
 qagredo_host/
 ├── run.sh                             # start vLLM + vLLM-judge + run pipeline
 ├── setup_offline.sh                   # one-time setup (load images, link models)
+├── verify_offline_deployment.sh       # confirm qagredo-v1 image matches requirements.txt
 ├── jupyter.sh                         # start Jupyter Lab
 ├── docker-compose.yml         # Docker Compose (mounts from ./)
 ├── run_qa_pipeline.py                 # main entry point
+├── requirements.txt                   # Python deps (must match qagredo-v1.tar)
 ├── config/config.yaml                 # pipeline configuration
 ├── utils/                             # Python source code
 │   ├── question_generator.py          #   question generation (10 types) + comprehensiveness check
@@ -194,8 +217,9 @@ Output folders are timestamped: `output/vllm/<model>/YYYY-MM-DD_HHMMSS/`
 You still need an LLM server. Verify vLLM is running on the host:
 
 ```bash
-curl -i http://localhost:7100/health   # generator (Llama)
-curl -i http://localhost:7101/health   # judge (Qwen)
+source .env
+curl -i "http://localhost:${VLLM_HOST_PORT}/health"         # generator (Llama)
+curl -i "http://localhost:${VLLM_JUDGE_HOST_PORT}/health"   # judge (Qwen)
 ```
 
 If not running, start both via Docker Compose:
@@ -205,7 +229,7 @@ cd /home/tyewhong/qagredo
 docker compose -f docker-compose.yml up -d vllm vllm-judge
 ```
 
-Ensure `config/config.yaml` has `llm.base_url: "http://localhost:7100/v1"`, then:
+Ensure `config/config.yaml` points to your selected host ports, then:
 
 ```bash
 cd /home/tyewhong/qagredo
@@ -216,11 +240,12 @@ cd /home/tyewhong/qagredo
 
 ## Convert your files into QAGRedo input
 
-QAGRedo reads **JSONL** (one JSON object per line).
+QAGRedo ingests a normalized **JSONL** stream (one JSON object per line), or **JSON** arrays/objects via **`run.input_file`**. **`run_qa_pipeline.py`** does **not** auto-convert PDF/TXT at runtime: run **`convert_to_qagredo_jsonl.py`** or **`bash run.sh --convert`** first, then set **`input_file`** to the JSONL.
 
 Important:
 - Conversion is parser-based (not LLM-based) via `scripts/conversion/convert_to_qagredo_jsonl.py`.
-- The pipeline can now **auto-prepare** non-JSONL inputs (`txt/pdf/docx/xlsx/csv/json`) at runtime from `run` config.
+- **`run.input_type`** in YAML is **not** read for **`run.input_file`** loading (extension selects JSON vs JSONL) and is **not** passed to the converter; use **`--input-type`** on **`convert_to_qagredo_jsonl.py`** when needed.
+- Optional semantic enrichment: pass **`--semantic-normalize`** to **`convert_to_qagredo_jsonl.py`** to add `metadata.semantic_enrichment` (raw `content` unchanged).
 - Manual conversion is still available when you want explicit control over the generated JSONL.
 
 ### Quickstart (3 steps)
@@ -232,16 +257,22 @@ cd /home/tyewhong/qagredo
 python3 -m pip install -r requirements.txt
 ```
 
-2) Configure input source in `config/config.yaml`:
+2) Configure the pipeline input in `config/config.yaml`:
+
+`run_qa_pipeline.py` (used by `bash run.sh`) reads **`run.input_file`** only. It loads **`.json`** or **`.jsonl`** based on the **file extension**. It does **not** read **`run.input_type`**. Leave **`run.input_folder`** as `""`. Use **`convert_to_qagredo_jsonl.py`** with **`--input-type`** when converting PDF/TXT/etc.; YAML **`run.input_type`** is not passed to that script.
 
 ```yaml
 run:
-  input_folder: /home/tyewhong/qagredo/train-data_txt   # folder mode
-  input_type: txt                                        # or auto/jsonl/json/pdf/docx/xlsx/csv
-  max_files: 10                                          # only for folder mode
-  num_documents: 10
-  min_content_words: 20                                  # skip too-short docs
+  input_folder: ""
+  input_file: data/dev-data.jsonl                        # or data/run.json — extension picks parser
+  input_type: auto                                       # not used for pipeline load; not wired to converter
+  max_files: 10                                          # not read by current scripts
+  num_documents: 10                                      # 0 = all loaded records
+  min_content_words: 20                                  # not enforced by run_qa_pipeline (reserved)
   min_content_chars: 0
+  semantic_normalization:                                # use converter --semantic-normalize instead
+    enable: false                                        # YAML block not read by converter CLI
+    max_content_chars: 5000                              # truncation bound for enrichment prompt
 ```
 
 3) Run pipeline:
@@ -268,6 +299,7 @@ python3 scripts/conversion/convert_to_qagredo_jsonl.py \
 | **JSONL** | `.jsonl` | One JSON object per line |
 | **PDF** | `.pdf` | Requires `pypdf` |
 | **Plain text** | `.txt` | Entire file becomes one document |
+| **Word document (legacy)** | `.doc` | Requires `antiword` in runtime environment |
 | **Word document** | `.docx` | Paragraphs are joined into one document text (`python-docx`) |
 | **Excel** | `.xlsx` | Requires `openpyxl` |
 | **CSV** | `.csv` | Each row becomes one document record |
@@ -290,10 +322,81 @@ run:
   input_file: your-file.jsonl
 ```
 
-Runtime overrides are also supported:
+Runtime overrides (passed through to `run_qa_pipeline.py`):
 
 ```bash
-bash run.sh -- --input-folder train-data_txt --input-type txt --max-files 10 --num-documents 10 --min-content-words 20
+bash run.sh -- --input-file data/run.jsonl --num-documents 5
+```
+
+Convert non-JSONL inputs with the converter (then set `run.input_file` to the JSONL):
+
+```bash
+bash run.sh --convert data/report.pdf data/report.jsonl
+# Optional: python3 scripts/conversion/convert_to_qagredo_jsonl.py --input ... --output ... --semantic-normalize
+```
+
+### Offline on-site model swap (70B + Qwen3.5)
+
+Use this when model weights are outside the repo (example host path:
+`/mnt/usr/models/...`) and mounted into containers as `/models`.
+
+1) In `docker-compose.yml`, for both `vllm` and `vllm-judge`:
+- comment: `- ./models_llm:/models:ro`
+- uncomment: `- /mnt/usr/models:/models:ro`
+
+2) In `.env`, uncomment:
+
+```bash
+VLLM_MODEL=/models/Meta-Llama-3.3-70B-Instruct
+VLLM_SERVED_MODEL_NAME=meta-llama/Meta-Llama-3.3-70B-Instruct
+VLLM_TP_SIZE=2
+
+VLLM_JUDGE_MODEL=/models/Qwen3.5-27B
+VLLM_JUDGE_SERVED_NAME=Qwen/Qwen3.5-27B
+VLLM_JUDGE_TP_SIZE=2
+```
+
+3) In `config/config.yaml`, keep model names aligned with served names:
+
+```yaml
+llm:
+  # model: "meta-llama/Meta-Llama-3.1-8B-Instruct"
+  model: "meta-llama/Meta-Llama-3.3-70B-Instruct"
+
+judge:
+  # model: "Qwen/Qwen2.5-7B-Instruct"
+  model: "Qwen/Qwen3.5-27B"
+```
+
+4) GPU reminder: for each service, `--tensor-parallel-size` must equal the
+count of `device_ids`. If both services run with 2 GPUs each, you usually need
+4 physical GPUs total.
+
+### Output modes (full vs minimal)
+
+In `config/config.yaml` under `run:`:
+
+```yaml
+# Default full diagnostic JSON output
+save_grounded_qa_pairs_only: false
+minimal_qa_output: false
+```
+
+```yaml
+# Keep full schema, but only grounded QA rows
+save_grounded_qa_pairs_only: true
+minimal_qa_output: false
+```
+
+```yaml
+# Minimal export
+save_grounded_qa_pairs_only: false   # or true
+minimal_qa_output: true
+# Output shape:
+# {
+#   "document": { "content": "..." },
+#   "qa_pairs": [ {"question": "...", "answer": "..."}, ... ]
+# }
 ```
 
 ---
@@ -349,6 +452,12 @@ and a **lower temperature** (0.3 by default) to minimise hallucination:
 ```yaml
 answer_generation:
   temperature: 0.3    # lower = more factual, less creative
+  multi_turn:
+    enable_rejection: true
+    min_confidence_threshold: 0.7
+    max_answer_attempts: 3
+    max_regeneration_attempts: 2   # legacy fallback key
+    max_question_regeneration_rounds: 3
   coverage_validation:
     enable: true
     min_score_threshold: 0.7
@@ -358,7 +467,12 @@ answer_generation:
 Key design choices:
 - The LLM is asked to **list items before counting** (improves aggregation accuracy by ~30%)
 - The LLM must **quote supporting evidence** from the document
-- Answers that fail grounding checks are **retried up to 3 times**
+- Answers that fail grounding checks are handled **per question slot**:
+  each question gets up to **3 total answer trials** (`max_answer_attempts`),
+  then that slot gets a replacement question if all trials fail (bounded by
+  `max_question_regeneration_rounds`).
+- Saved output keeps **exactly `num_questions` final QA pairs** (for example,
+  `3`), and grading summary is computed from those final saved pairs.
 - Answers are checked for **question coverage** (whether all parts of the question are addressed); low-coverage answers get **one targeted rewrite pass**
 - The evidence is saved alongside answers in the output JSON for auditability
 
@@ -406,7 +520,21 @@ Each processed document produces an analysis JSON file containing:
 - **answers** -- document-grounded answers
 - **supporting_evidence** -- quotes from the document supporting each answer
 - **grading** -- per-QA grounding status, confidence, method, and reasons
-- **grading_summary** -- overall grade (A/B/C/D/F), confidence, and `judge_model`
+- **grading_summary** -- overall grade (A/B/C/D/F), confidence, method, and
+  `judge_model`
+- **run_metrics** -- per-document timings and quality counters (retries/rewrites)
+
+Notes:
+- `document.content` uses the same resolver as question generation (`content`,
+  `text`, `body`, `document`, `article`, `passage`; lists joined). Hallucination
+  grading uses that same ordered field list on the merged QA dict
+  (`_document_text_for_grading`), so records with prose only under e.g.
+  `document` still grade against the real source text.
+- `document.source` and `document.type` may be null when the input record does
+  not provide those fields.
+- If grading fails for a document, `grading_summary` can contain nulls; the
+  pipeline retries semantic grading and, when needed, builds the summary from
+  the average of each saved QA pair (`grading_method` `average_of_each_qa_pair`).
 
 ### Run summary
 
@@ -425,6 +553,8 @@ The `run_summary.json` includes:
 - `generator_model` and `judge_model` (separate fields)
 - Per-document statistics (grade, confidence, grounded/ungrounded counts)
 - Per-QA details with grounding reasons for failed answers
+- **Run-level metrics**: stage timings (question/answer/grading totals + averages)
+- **Quality counters**: question/answer retries and coverage rewrites
 - **Ungrounded highlights** -- flat list of all ungrounded QA pairs with
   collected reasons, for quick scanning
 
@@ -457,6 +587,8 @@ only re-transfer file #6 (~few MB), not everything (~50+ GB).
 **Full step-by-step guide** (creating, transferring, deploying, and running):
 `docs/OFFLINE_SETUP_GUIDE.md`
 
+**Keep file #2 (`qagredo-v1.tar`) and file #6 (`qagredo_bundle.tar.gz`) in sync whenever `requirements.txt` changes.** The bundle build verifies the local `qagredo-v1:latest` image against the bundle’s `requirements.txt` when that image exists. On the offline server, run `bash verify_offline_deployment.sh` after `docker load`.
+
 ---
 
 ## Day-to-day workflow
@@ -467,10 +599,11 @@ Once files 1-5 are on the server:
 2. **Transfer** just `qagredo_bundle.tar.gz` (~few MB)
 3. **On offline server**:
    ```bash
-   cd /home/user/offline20260209
+   cd /home/tyewhong/qagredo
    tar xzf qagredo_bundle.tar.gz
    cd qagredo_host
    bash setup_offline.sh --skip-images
+   bash verify_offline_deployment.sh   # recommended: image vs requirements.txt
    bash run.sh
    ```
 
@@ -502,8 +635,8 @@ and host user to read, write, and delete files.
 
 | Model | Purpose | Size | Runs on |
 |-------|---------|------|---------|
-| **Meta-Llama-3.1-8B-Instruct** | Question & answer generation | ~16 GB | GPU 0 (vLLM, port 7100) |
-| **Qwen2.5-7B-Instruct** | LLM-as-judge for hallucination checking (separate model avoids self-eval bias) | ~14 GB | GPU 1 (vLLM-judge, port 7101) |
+| **Meta-Llama-3.1-8B-Instruct** | Question & answer generation | ~16 GB | GPU 0 (vLLM, host published port `${VLLM_HOST_PORT}`) |
+| **Qwen2.5-7B-Instruct** | LLM-as-judge for hallucination checking (separate model avoids self-eval bias) | ~14 GB | GPU 1 (vLLM-judge, host published port `${VLLM_JUDGE_HOST_PORT}`) |
 | **all-MiniLM-L6-v2** | Semantic similarity (grounding check, dedup) | ~80 MB | CPU |
 
 ---
@@ -512,8 +645,9 @@ and host user to read, write, and delete files.
 
 ### vLLM health
 ```bash
-curl -i http://localhost:7100/health   # generator (Llama)
-curl -i http://localhost:7101/health   # judge (Qwen)
+source .env
+curl -i "http://localhost:${VLLM_HOST_PORT}/health"         # generator (Llama)
+curl -i "http://localhost:${VLLM_JUDGE_HOST_PORT}/health"   # judge (Qwen)
 bash run.sh --logs
 ```
 
@@ -527,12 +661,13 @@ bash run.sh --logs
 | `pynvml.NVMLError_InvalidArgument` | Do **not** set `CUDA_VISIBLE_DEVICES` in docker-compose. GPU assignment is handled by Docker's `deploy.resources.reservations.devices.device_ids` — Docker maps the reserved GPU as device 0 inside the container, so `CUDA_VISIBLE_DEVICES: "1"` would try to find a non-existent second GPU |
 | 401 Unauthorized | `export VLLM_API_KEY=llama-local` |
 | Permission denied | `bash setup_offline.sh --force` |
+| `ModuleNotFoundError: langchain_core` (or similar) | Stale `qagredo-v1` image: `docker rmi qagredo-v1:latest`, `docker load -i qagredo-v1.tar`, then `bash verify_offline_deployment.sh` |
 | Config not found | Make sure you're running from inside `qagredo_host/` |
 | Model name mismatch | `grep model config/config.yaml` must match `$VLLM_SERVED_MODEL_NAME` |
 | Cannot delete hf_cache files | `docker run --rm --privileged --userns=host -u 0 --entrypoint bash -v "$(pwd)/hf_cache:/hf" vllm/vllm-openai:v0.5.3.post1 -c "rm -rf /hf/*"` |
 
 ### Useful URLs
 
-- Generator (Llama): `http://localhost:7100/health` | Judge (Qwen): `http://localhost:7101/health`
-- API docs: `http://localhost:7100/docs` (generator), `http://localhost:7101/docs` (judge)
-- Models: `curl -H "Authorization: Bearer llama-local" http://localhost:7100/v1/models`
+- Generator (Llama): `http://localhost:${VLLM_HOST_PORT}/health` | Judge (Qwen): `http://localhost:${VLLM_JUDGE_HOST_PORT}/health`
+- API docs: `http://localhost:${VLLM_HOST_PORT}/docs` (generator), `http://localhost:${VLLM_JUDGE_HOST_PORT}/docs` (judge)
+- Models: `curl -H "Authorization: Bearer llama-local" "http://localhost:${VLLM_HOST_PORT}/v1/models"`
