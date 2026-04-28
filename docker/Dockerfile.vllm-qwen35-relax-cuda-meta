@@ -1,0 +1,18 @@
+# Relax NVIDIA_REQUIRE_CUDA from the upstream vLLM image (often cuda>=12.9) so
+# nvidia-container-cli accepts hosts whose driver reports CUDA 12.2 (e.g. 535.x).
+# Does not change CUDA libraries inside the image — only OCI env metadata for the hook.
+#
+# Important: PyTorch inside the image still targets CUDA 12.9. On drivers that only
+# support up to ~12.2 (common with 535.x), GPU init can fail at runtime with
+# "Error 804: forward compatibility was attempted on non supported HW". For a full
+# Qwen3.5 vLLM serve, upgrade to a driver that supports this CUDA user-space (often 550+),
+# or use a machine that already meets that requirement.
+#
+# Build after qwen35-compat:
+#   docker build -f docker/Dockerfile.vllm-qwen35-relax-cuda-meta -t qagredo-vllm:qwen35-localcuda .
+#
+# In .env: VLLM_IMAGE=qagredo-vllm:qwen35-localcuda
+
+ARG BASE=qagredo-vllm:qwen35-compat-v1
+FROM ${BASE}
+ENV NVIDIA_REQUIRE_CUDA=cuda>=12.2

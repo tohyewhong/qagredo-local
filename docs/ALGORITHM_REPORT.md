@@ -1,9 +1,14 @@
 # QAGRedo Algorithm Report
 
+Maintainer documentation index: **`docs/HANDOVER.md`**.
+
 This document provides a comprehensive description of the algorithms, design
 rationale, and architectural decisions in the QAGRedo pipeline. It covers
 question generation, answer generation, hallucination grading, output
 management, and the Docker permission model.
+
+> **Current default policy (final):** strict `llm` judge mode.
+> Any references to `semantic` or `hybrid` in this report describe legacy or compatibility-only paths and are **not** the production default.
 
 ---
 
@@ -46,7 +51,7 @@ Document (JSONL)
 |     - LangChain prompt template|
 |     - Multi-type prompt         |
 |     - Few-shot examples         |
-|     - Deduplication (MiniLM)    |
+|     - Deduplication (LLM default) |
 |     - Grounding validation      |
 |     - Comprehensiveness check   |
 +---------------+---------------+
@@ -63,10 +68,10 @@ Document (JSONL)
                 |  answers + evidence
                 v
 +-------------------------------+
-|  3. Hallucination Grader       |  <-- MiniLM (semantic) + LLM (judge)
-|     - Hybrid: semantic first    |
-|     - LLM fallback for edge     |
-|       cases (counting, etc.)    |
+|  3. Hallucination Grader       |  <-- strict LLM judge (required)
+|     - LLM verdict required      |
+|     - Fail-fast on invalid      |
+|       judge response            |
 +---------------+---------------+
                 |  graded results + reasons
                 v
@@ -204,7 +209,7 @@ for each document:
         2. Call LLM (temperature=0.7 for diversity)
         3. Parse response into individual questions
         4. Remove ALL trailing type tags (e.g. "(analysis) (comparison)")
-        5. Deduplicate against existing questions (MiniLM, threshold=0.85)
+        5. Deduplicate against existing questions (LLM semantic judge, threshold=0.85)
         6. Add unique questions to all_questions
 
     for each question:
@@ -230,7 +235,7 @@ Each generated question is checked for grounding in the document:
    - Re-check grounding after each regeneration
    - If regeneration returns empty, keep the previous question
 
-**Validation method**: Uses `"semantic"` by default (not `"hybrid"`).
+**Validation method**: Uses `"llm"` by default in strict mode.
 
 **Why semantic for question validation (not hybrid):**
 - Question validation runs for every question during generation. Using hybrid
@@ -287,14 +292,14 @@ question_generation:
 
 ### 2.8 Deduplication
 
-Uses MiniLM cosine similarity to detect near-duplicate questions.
-- **Threshold**: 0.85 (configurable)
-- Questions with similarity above the threshold to any existing question are
-  filtered out, and the generation loop retries.
+Default dedup uses an LLM semantic judge (`deduplication_method: "llm"`).
+- **Threshold**: 0.85 (provided to the judge prompt as strictness guidance)
+- Each candidate question is compared against existing questions.
+- The judge returns JSON verdict `{"duplicate": true|false}`.
+- In strict mode, malformed verdicts fail fast to avoid silent quality drift.
 
-**Why 0.85:** Lower thresholds (e.g. 0.7) are too aggressive and reject
-legitimately different questions about the same topic. Higher thresholds
-(e.g. 0.95) miss near-duplicates with minor rephrasing.
+**Why this design:** Jaccard catches lexical overlap but misses paraphrases.
+LLM dedup is slower but aligns better with quality-first operation.
 
 ### 2.9 Configuration
 
@@ -304,12 +309,16 @@ question_generation:
   complexity: "advanced"              # "basic", "moderate", "advanced"
   # question_types: [...]             # optional: override which types
   duplicate_similarity_threshold: 0.85
-  deduplication_method: "semantic"
+  deduplication_method: "llm"
+  dedup_llm:
+    use_judge_model: true
+    strict: true
+    max_tokens: 80
   validation:
     enable_rejection: true
     min_confidence_threshold: 0.7
     max_regeneration_attempts: 2
-    method: "semantic"
+    method: "llm"
     enable_comprehensiveness_check: true  # check each question for depth/complexity
     comprehensiveness_min_score: 0.6     # minimum score to pass (0.0-1.0)
     comprehensiveness_max_attempts: 2    # max regeneration attempts if too simple
@@ -436,6 +445,10 @@ Each answer goes through a validate-and-regenerate cycle, then a coverage check:
   `document: {"content": "..."}` (plain text aligned with the full-output
   snapshot) and `{"qa_pairs": [{"question", "answer"}, ...]}` only (no
   `hallucination_check`, citations, or timings / other run metadata).
+- The same minimal shape can be produced **after the fact** from full
+  `*_analysis.json` files (no LLM rerun) via
+  `scripts/utils/export_analysis_minimal.py` — see `README.md` and
+  `OFFLINE_GUIDE.md`.
 
 ### 3.5 Coverage validation and targeted rewrite
 
@@ -602,7 +615,7 @@ its own outputs.
 **Strengths:** Handles counting, aggregation, inference, multi-hop, negation.
 **Weaknesses:** Slower (requires LLM call), uses GPU time.
 
-#### 4.3.4 Hybrid (`method="hybrid"`) -- **Recommended**
+#### 4.3.4 Hybrid (`method="hybrid"`) -- Optional compatibility mode
 
 ```
 PASS 1 -- Semantic with sliding window (fast, free):
@@ -678,7 +691,10 @@ carry no factual claims that could be hallucinated.
 
 ```yaml
 hallucination:
-  method: "hybrid"    # "semantic", "keyword", "llm", "hybrid"
+  method: "llm"       # strict default
+  judge_required: true
+  judge_strict_verdict: true
+  allow_semantic_fallback: false
 ```
 
 ### 4.7 Testing grading (flow)
@@ -725,10 +741,11 @@ saved pairs (batch judge when available, otherwise mean of each slot with
 Each pipeline run creates a unique output folder:
 
 ```
-output/vllm/meta-llama-3.1-8b-instruct/2026-02-13_143025/
-output/vllm/meta-llama-3.1-8b-instruct/2026-02-13_160512/
-output/vllm/meta-llama-3.1-8b-instruct/2026-02-13_181730/
+output/ollama/qwen3.5-9b/2026-02-13_143025/
+output/ollama/qwen3.5-9b/2026-02-13_160512/
 ```
+
+(`<provider>` is `ollama`, `vllm`, `openai`, etc., from effective config; `<model>` is sanitized for paths.)
 
 Format: `YYYY-MM-DD_HHMMSS` (date + time to the second).
 
@@ -848,8 +865,8 @@ flowchart LR
 
 | Field | Type | Produced by | Example | Meaning / troubleshooting |
 |------|------|-------------|---------|---------------------------|
-| `model` | string | `utils/question_generator.py` | `"meta-llama/Meta-Llama-3.1-8B-Instruct"` | Generator model used for questions. |
-| `provider` | string | Question generator | `"vllm"` | Question generation provider. |
+| `model` | string | `utils/question_generator.py` | `"qwen3.5:9b"` or HF served name | Generator model / tag. |
+| `provider` | string | Question generator | `"ollama"` or `"vllm"` | Question generation provider. |
 | `timestamp` | string (ISO datetime) | Question generator | `"2026-02-13T14:30:25+08:00"` | Time question generation finished for this document. |
 | `timezone` | string | Question generator | `"Asia/Singapore"` | Timezone for timestamp field. |
 | `num_questions` | integer | Question generator | `3` | Final count of saved `qa_pairs` for this document. |
@@ -891,8 +908,8 @@ flowchart LR
 
 | Field | Type | Produced by | Example | Meaning / troubleshooting |
 |------|------|-------------|---------|---------------------------|
-| `model` | string | `run_qa_pipeline.py` from `answer_metadata` | `"meta-llama/Meta-Llama-3.1-8B-Instruct"` | Model used for final answers. |
-| `provider` | string | Answer generation metadata | `"vllm"` | Answer provider used. |
+| `model` | string | `run_qa_pipeline.py` from `answer_metadata` | `"qwen3.5:9b"` (example) | Model used for final answers. |
+| `provider` | string | Answer generation metadata | `"ollama"` / `"vllm"` | Answer provider used. |
 | `timestamp` | string (ISO datetime) | Answer metadata | `"2026-02-13T14:31:02+08:00"` | Answer generation timestamp. |
 | `timezone` | string | Answer metadata | `"Asia/Singapore"` | Timezone for answer timestamp. |
 | `num_answers` | integer | Answer metadata | `3` | Number of answers emitted. Should match number of questions. |
@@ -904,7 +921,7 @@ flowchart LR
 | `overall_grade` | string (`A`-`F`) \| null | `grade_qa_results()` or `build_grading_summary_block()` in `run_qa_pipeline.py` | `"B"` | Letter from mean confidence. Null only when no usable per-slot confidence exists. |
 | `overall_confidence` | number (0.0-1.0) \| null | same as `overall_grade` | `0.84` | Mean confidence over final saved QA pairs (failing slots contribute low scores when the full last round is saved). Null if nothing to average. |
 | `grading_method` | string | primary judge path or roll-up label | `"hybrid"` | Verifier mode when batch judge returned a full summary. **`average_of_each_qa_pair`** when the document summary is the average of each saved QA pair (no usable batch summary). Older runs may still show `recomputed_from_qa_pairs` (same meaning). |
-| `judge_model` | string \| null | `grade_qa_results()` / fallback | `"Qwen/Qwen2.5-7B-Instruct"` | Judge model for llm/hybrid mode; semantic/fallback paths may store non-judge labels. |
+| `judge_model` | string \| null | `grade_qa_results()` / fallback | `"llama3.1:8b"` (example) | Judge model for llm/hybrid mode; semantic/fallback paths may store non-judge labels. |
 
 ### 5.5 Output Field Reference (`run_summary.json`)
 
@@ -919,9 +936,9 @@ Generated by: `bash scripts/utils/summarize_run.sh --json`
 | `ungrounded_answers` | integer | `5` | Count of ungrounded QA answers across run. |
 | `avg_confidence` | number \| null | `0.83` | Mean of per-document `overall_confidence`. |
 | `grade_distribution` | object | `{"A":4,"B":6,"C":2}` | Grade histogram across documents. |
-| `generator_model` | string \| null | `"meta-llama/Meta-Llama-3.1-8B-Instruct"` | Primary generation model from first document summary. |
-| `judge_model` | string \| null | `"Qwen/Qwen2.5-7B-Instruct"` | Judge model for run summaries. |
-| `provider` | string \| null | `"vllm"` | Provider used for generation. |
+| `generator_model` | string \| null | `"qwen3.5:9b"` (example) | Primary generation model from first document summary. |
+| `judge_model` | string \| null | `"llama3.1:8b"` (example) | Judge model for run summaries. |
+| `provider` | string \| null | `"ollama"` | Provider used for generation. |
 | `run_metrics` | object | `{"timings_seconds":{...},"quality_counters":{...}}` | Run-level timing and retry/rewrite counters aggregated by `summarize_run.sh`. |
 | `ungrounded_highlights` | object[] | `[{...}]` | Flat list of all ungrounded QA items with reasons. Fast triage view. |
 | `documents` | object[] | `[{...}]` | Per-document summary entries (see below). |
@@ -940,9 +957,9 @@ Generated by: `bash scripts/utils/summarize_run.sh --json`
 | `overall_grade` | string | `"B"` | Copied from document `grading_summary`. |
 | `overall_confidence` | number \| null | `0.81` | Copied from document `grading_summary`. |
 | `grading_method` | string | `"hybrid"` or `"average_of_each_qa_pair"` | Copied from document `grading_summary`. |
-| `model` | string | `"meta-llama/Meta-Llama-3.1-8B-Instruct"` | Generator model for this document. |
-| `judge_model` | string | `"Qwen/Qwen2.5-7B-Instruct"` | Judge model for this document summary. |
-| `provider` | string | `"vllm"` | Provider used for this document. |
+| `model` | string | `"qwen3.5:9b"` (example) | Generator model for this document. |
+| `judge_model` | string | `"llama3.1:8b"` (example) | Judge model for this document summary. |
+| `provider` | string | `"ollama"` | Provider used for this document. |
 | `timestamp` | string | `"2026-02-13T14:30:25+08:00"` | Generation timestamp (question or answer metadata fallback). |
 | `timings_seconds` | object | `{"question_generation":2.41,"answer_generation":4.02,"grading":1.33}` | Per-document stage timings emitted by `run_qa_pipeline.py`. |
 | `quality_counters` | object | `{"question_grounding_retries":1,"answer_grounding_retries":2,"coverage_rewrites":1}` | Per-document retry/rewrite counters emitted by `run_qa_pipeline.py`. |
@@ -987,47 +1004,21 @@ Generated by: `bash scripts/utils/summarize_run.sh --json`
 
 ## 6. Docker Architecture & Permission Model
 
-### 6.1 Three-container design
+### 6.1 Docker layout (default: Ollama on host)
+
+**Default (`docker-compose.yml`):** one service, **`qagredo-runner`**. **Ollama** runs on the **host** (not in Compose). The runner uses **`host.docker.internal:11434`** to call **`/v1/*`** and, when the URL is Ollama, native **`/api/chat`** with `think: false` for models that use “thinking” tokens.
 
 ```
-Host machine (offline server)
+Host machine
 |
-+-- qagredo_host/ (bind-mounted to all containers)
-    |
-    +-- vllm container (GPU 0, internal 7100; host `${VLLM_HOST_PORT}`)
-    |   - Llama-3.1-8B: question & answer generation
-    |   - Mounts: models_llm (ro), hf_cache (rw)
-    |   - Runs as root (vLLM image requirement)
-    |
-    +-- vllm-judge container (GPU 1, internal 7101; host `${VLLM_JUDGE_HOST_PORT}`)
-    |   - Qwen2.5-7B: independent LLM-as-judge for hallucination checking
-    |   - Separate model avoids self-evaluation bias
-    |   - Mounts: models_llm (ro), hf_cache (rw)
-    |
-    +-- qagredo container (CPU)
-        - Pipeline orchestration + MiniLM for semantic similarity
-        - Python: /opt/conda/bin/python (packages from image build: requirements.txt)
-        - Mounts: code (rw), config (rw), data (rw),
-                  output (rw), hf_cache (rw), models_embed (rw)
-        - Entrypoint maps container user to host UID/GID
-        - Offline: keep qagredo-v1.tar in sync with bundle requirements.txt;
-          verify with bash verify_offline_deployment.sh (see OFFLINE_SETUP_GUIDE.md)
++-- Ollama :11434 (generator + judge model tags)
+|
++-- qagredo_host/ bind-mounted into qagredo-runner - Pipeline (strict llm judge); output/, data/, config/, hf_cache (optional)
 ```
 
-**GPU assignment:** GPU assignment is handled entirely by Docker's
-`deploy.resources.reservations.devices.device_ids`. Do **not** set
-`CUDA_VISIBLE_DEVICES` in the environment — Docker maps the reserved GPU as
-device 0 inside the container, so `CUDA_VISIBLE_DEVICES: "1"` would cause
-`pynvml.NVMLError_InvalidArgument` (trying to find a non-existent second GPU).
+**Legacy (`docker-compose.vllm-stack.yml` + GPU overlays):** two **vLLM** containers (generator + judge) plus **`qagredo-runner`**. GPU assignment uses `deploy.resources.reservations.devices.device_ids`. Do **not** set `CUDA_VISIBLE_DEVICES` in compose for vLLM — wrong mappings cause `pynvml.NVMLError_InvalidArgument`.
 
-**Why three containers:**
-- **Separation of concerns**: vLLM containers are GPU-intensive model servers;
-  QAGRedo is a CPU-bound pipeline. They have different resource requirements
-  and failure modes.
-- **Independent lifecycle**: vLLM containers start once and stay running;
-  QAGRedo runs per pipeline invocation and exits.
-- **Portability**: The same vLLM image can serve different models without
-  rebuilding.
+**Why split LLM roles:** a **different judge model** than the generator reduces self-evaluation bias (same whether using Ollama tags or vLLM served names).
 
 ### 6.2 Permission model (entrypoint pattern)
 
@@ -1073,7 +1064,7 @@ All volumes in `docker-compose.yml`:
 | `./data/` | `/workspace/data/` | rw | Input documents |
 | `./output/` | `/workspace/output/` | rw | Pipeline results |
 | `./hf_cache/` | `/opt/hf_cache` | rw | HuggingFace model cache |
-| `./models_embed/` | `/opt/models_embed` | rw | MiniLM embedding model |
+| `./models_embed/` | `/opt/models_embed` | rw | Optional semantic embedding model |
 
 ---
 
@@ -1086,9 +1077,9 @@ All volumes in `docker-compose.yml`:
    +-- Build complexity-aware prompt (advanced: 10 question types)
    +-- Include few-shot examples (8 good + 4 bad patterns)
    +-- Enforce complexity rules (must reason across 2+ parts)
-   +-- Call LLM via vLLM API (temperature=0.7 for diversity)
+   +-- Call LLM via configured provider API (default: Ollama OpenAI-compatible; legacy: vLLM) (temperature=0.7 for diversity)
    +-- Parse response, strip ALL trailing type tags
-   +-- Deduplicate (MiniLM semantic, threshold=0.85)
+   +-- Deduplicate (LLM judge default, threshold=0.85 guidance)
    +-- Validate each question (semantic grounding check)
    |   +-- If ungrounded: regenerate (up to 2 attempts)
    +-- Comprehensiveness check (LLM evaluates depth/complexity)
@@ -1097,7 +1088,7 @@ All volumes in `docker-compose.yml`:
 3. GENERATE ANSWERS (utils/answer_generator.py)
    +-- For each question, build structured answer prompt
    |   (includes "list items before counting" instruction)
-   +-- Call LLM via vLLM API (temperature=0.3 for accuracy)
+   +-- Call LLM via configured provider API (default: Ollama; legacy: vLLM) (temperature=0.3 for accuracy)
    +-- Parse structured response into answer + supporting evidence
    +-- Validate each answer (hybrid grounding check)
        +-- If ungrounded: regenerate (up to 3 attempts)
@@ -1108,7 +1099,7 @@ All volumes in `docker-compose.yml`:
        article, passage; list paragraphs joined)
    +-- Split answer into sentences (abbreviation/decimal/list-safe)
    +-- For each Q&A pair:
-   |   +-- Pass 1: Semantic similarity with sliding window (MiniLM)
+   |   +-- LLM judge verdict (strict required)
    |   |   +-- Compare against 1/2/3-sentence document chunks
    |   |   +-- If all grounded -> done (fast path)
    |   +-- Pass 2: LLM-as-judge (if ungrounded sentences found)
@@ -1118,7 +1109,7 @@ All volumes in `docker-compose.yml`:
    +-- Map to grade (A/B/C/D/F)
 
 5. SAVE output JSON to timestamped folder:
-   output/vllm/<model>/YYYY-MM-DD_HHMMSS/
+   output/<provider>/<model>/YYYY-MM-DD_HHMMSS/
    - Document metadata
    - Q&A pairs with per-pair grounding status and reasons
    - Supporting evidence (quoted from document)
@@ -1149,12 +1140,12 @@ Change one layer at a time, rerun, and compare `run_metrics` and `ungrounded_hig
 | 4 | **Structured answer format** with supporting evidence | Forces document grounding and makes aggregation answers easier to verify |
 | 5 | **Separate temperatures** (0.7 questions, 0.3 answers) | Questions need diversity; answers need factual accuracy |
 | 6 | **3 answer retries** (was 2) | Gives the LLM enough attempts for complex answers without excessive runtime |
-| 7 | **Hybrid grading** (semantic + LLM fallback) | Fast for clearly-grounded answers (no LLM call), accurate for edge cases (counting, inference) |
+| 7 | **Strict LLM judge grading** | Fail-fast reliability and consistent judge-only behavior in production |
 | 8 | **Sliding window** (1/2/3-sentence chunks) | Captures cross-sentence information that single-sentence comparison misses |
 | 9 | **Sentence splitting** with abbreviation/decimal/list protection | Prevents "Dr.", "3.5", "1." from creating false ungrounded fragments |
 | 10 | **Per-run timestamped folders** (YYYY-MM-DD_HHMMSS) | Multiple runs per day get separate folders; no overwrites |
 | 11 | **Ungrounded reasons** in run_summary.json | Analyst can quickly see WHY something is ungrounded without opening each file |
-| 12 | **Separate judge model** (Qwen2.5-7B vs Llama-3.1-8B) | Avoids self-evaluation bias — the generator does not grade its own outputs |
+| 12 | **Separate judge model** (second tag or endpoint) | Avoids self-evaluation bias — the generator does not grade its own outputs |
 | 13 | **Three-layer permission model** (entrypoint + trap + post-run chown) | Ensures files are always owned by the host user regardless of Docker configuration |
 | 14 | **All mounts `:rw`** | Prevents container failures and allows host user to edit/delete freely |
 | 15 | **`--privileged --userns=host`** for permission fixes | Bypasses Docker user namespace remapping that blocks `chown` |
@@ -1164,11 +1155,12 @@ Change one layer at a time, rerun, and compare `run_metrics` and `ungrounded_hig
 
 ## 9. Models used
 
-| Model | Purpose | Size | Runs on |
-|-------|---------|------|---------|
-| **Llama-3.1-8B** | Question & answer generation | ~16 GB | GPU 0 (vllm, host `${VLLM_HOST_PORT}` / internal 7100) |
-| **Qwen2.5-7B** | LLM-as-judge for hallucination checking | ~14 GB | GPU 1 (vllm-judge, host `${VLLM_JUDGE_HOST_PORT}` / internal 7101) |
-| **all-MiniLM-L6-v2** | Semantic similarity (grounding check, dedup) | ~80 MB | CPU (qagredo) |
+| Model (examples) | Purpose | Runs on |
+|-------|---------|---------|
+| **Ollama tag e.g. `qwen3.5:9b`** | Question & answer generation | Host Ollama (GPU) |
+| **Ollama tag e.g. `llama3.1:8b`** | LLM-as-judge | Same Ollama process, different tag |
+| **Legacy HF + vLLM** | Same roles via two containers | See `docker-compose.vllm-stack.yml` |
+| **all-MiniLM-L6-v2** | Optional semantic similarity (non-strict paths) | CPU (inside runner; `models_embed/`) |
 
 ---
 
@@ -1190,14 +1182,14 @@ run:
     max_content_chars: 5000
 
 llm:
-  provider: "vllm"
-  model: "meta-llama/Meta-Llama-3.1-8B-Instruct"
+  provider: "ollama"
+  model: "qwen3.5:9b"
   temperature: 0.7               # used for question generation
   max_tokens: 500
   max_retries: 3
   retry_delay: 1.0
-  api_key: "llama-local"
-  base_url: "http://localhost:<VLLM_HOST_PORT>/v1"
+  api_key: "ollama-local"
+  base_url: "http://localhost:11434/v1"
   timeout: 60
 
 answer_generation:
@@ -1218,21 +1210,25 @@ question_generation:
   complexity: "advanced"         # "basic", "moderate", "advanced"
   # question_types: [...]        # optional: override which types to use
   duplicate_similarity_threshold: 0.85
-  deduplication_method: "semantic"
+  deduplication_method: "llm"
+  dedup_llm:
+    use_judge_model: true
+    strict: true
+    max_tokens: 80
   validation:
     enable_rejection: true
     min_confidence_threshold: 0.7
     max_regeneration_attempts: 2
-    method: "semantic"
+    method: "llm"
     enable_comprehensiveness_check: true  # check depth/complexity of each question
     comprehensiveness_min_score: 0.6     # minimum score to pass (0.0-1.0)
     comprehensiveness_max_attempts: 2    # max regen attempts if too simple
 
 judge:
-  provider: "vllm"
-  model: "Qwen/Qwen2.5-7B-Instruct"
-  base_url: "http://localhost:<VLLM_JUDGE_HOST_PORT>/v1"
-  api_key: "qwen-local"
+  provider: "ollama"
+  model: "llama3.1:8b"
+  base_url: "http://localhost:11434/v1"
+  api_key: "ollama-local"
   temperature: 0.0               # deterministic for judging
   max_tokens: 200
   timeout: 60
@@ -1240,7 +1236,10 @@ judge:
   retry_delay: 1.0
 
 hallucination:
-  method: "hybrid"               # "semantic", "keyword", "llm", "hybrid"
+  method: "llm"                  # strict default
+  judge_required: true
+  judge_strict_verdict: true
+  allow_semantic_fallback: false
 ```
 
 ---
@@ -1260,9 +1259,9 @@ what it is not.
 | Trait | Where in QAGRedo | Section |
 |-------|-----------------|---------|
 | **Self-correction** | Questions undergo two-stage validation: grounding check (regenerated up to 2 times if ungrounded) and comprehensiveness check (regenerated up to 2 times if too simple). Answers use grounding retries (up to 3) plus a targeted coverage rewrite pass with grounding gate. The system evaluates output quality and self-corrects autonomously | 2.6, 2.7, 3.4, 3.5 |
-| **Multi-model tool orchestration** | Coordinates three models (Llama for generation, Qwen as judge, MiniLM for embeddings), selecting which to invoke based on intermediate results | 4.3.4 |
+| **Multi-model tool orchestration** | Coordinates two runtime LLM roles (generator + judge). MiniLM is optional for semantic-only paths | 4.3.4 |
 | **Autonomous multi-step execution** | Once started, the full pipeline (generate questions -> generate answers -> grade -> output) runs end-to-end without human intervention | 7 |
-| **Adaptive routing** | The hybrid grading method makes a runtime decision: semantic first, then route only edge cases to the LLM judge | 4.3.4 |
+| **Adaptive routing (legacy compatibility)** | Optional compatibility routing can delegate edge cases through an alternate grading path; strict llm mode keeps routing disabled by default | 4.3.4 |
 
 ### 11.3 Traits QAGRedo does not exhibit
 

@@ -1,0 +1,53 @@
+digraph NetworkDockerComposeOllama {
+  graph [
+    rankdir=LR,
+    splines=true,
+    bgcolor="#ffffff",
+    pad="0.3",
+    nodesep="0.6",
+    ranksep="0.8",
+    fontname="Arial"
+  ];
+
+  node [
+    shape=box,
+    style="rounded,filled",
+    fillcolor="#f8fafc",
+    color="#94a3b8",
+    fontcolor="#1e293b",
+    fontsize=12,
+    fontname="Arial",
+    margin="0.12,0.08"
+  ];
+
+  edge [
+    color="#334155",
+    penwidth=1.1,
+    arrowsize=0.7,
+    fontsize=10,
+    fontname="Arial",
+    fontcolor="#334155"
+  ];
+
+  laptop [label="Laptop / operator\n(SSH, scp, or copy output)"];
+  host [label="Offline server (host)\nDocker Engine + Ollama :11434\n(ollama serve)", fillcolor="#ecfdf5", color="#16a34a"];
+
+  subgraph cluster_net {
+    label="Docker network: compose project (qagredo_offline)\nSingle service: qagredo (qagredo-runner)\nextra_hosts: host.docker.internal -> host-gateway";
+    color="#cbd5e1";
+    style="rounded";
+
+    runner [label="Container: qagredo-runner\nQAGRedo pipeline\nrun_qa_pipeline.py\n(CLI; no service port on qagredo)\nQAGREDO_USE_OLLAMA=1"];
+    framework [label="Inside runner:\nLangChain (+ optional LangGraph in tree)", fillcolor="#e0f2fe", color="#0ea5e9"];
+ }
+
+  ollama [label="Host process: Ollama\nlisten: 127.0.0.1:11434 (typical)\n/api/tags, /v1/*, /api/chat\nModels: $OLLAMA_MODEL + $OLLAMA_JUDGE_MODEL", fillcolor="#ecfdf5", color="#16a34a"];
+
+  laptop -> host [label="e.g. SSH to host"];
+  host -> runner [label="docker compose run qagredo\n(no published LLM port)"];
+  host -> ollama [label="TCP localhost:11434\n(not inside compose)"];
+
+  runner -> framework [label="orchestration / parsing"];
+  framework -> ollama [label="From container:\nHTTP http://host.docker.internal:11434/v1/*\n(OpenAI shim)\n+ native POST .../api/chat\n(think:false for Qwen3.5)\nGenerator: model=$OLLAMA_MODEL"];
+  framework -> ollama [label="Judge calls:\nsame base URL\nmodel=$OLLAMA_JUDGE_MODEL\n(env: OLLAMA_JUDGE_* in hallucination_checker)"];
+}

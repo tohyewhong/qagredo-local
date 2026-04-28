@@ -1,6 +1,12 @@
 """CLI tool to surface quality issues in generated Q&A outputs."""
 
 from __future__ import annotations
+from utils.result_analyzer import (
+    DEFAULT_THRESHOLDS,
+    evaluate_document_quality,
+    summarize_documents,
+)
+from utils import list_available_results
 
 import argparse
 import json
@@ -11,13 +17,6 @@ from typing import Any, Dict, List, Optional
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from utils import list_available_results
-from utils.result_analyzer import (
-    DEFAULT_THRESHOLDS,
-    evaluate_document_quality,
-    summarize_documents,
-)
-
 
 def _filter_analysis_files(
     base_dir: Optional[str],
@@ -26,14 +25,18 @@ def _filter_analysis_files(
     date: Optional[str],
     limit: Optional[int],
 ) -> List[Path]:
-    results = list_available_results(base_dir=Path(base_dir) if base_dir else None,
-                                     provider=provider,
-                                     model=model)
+    results = list_available_results(
+        base_dir=Path(base_dir) if base_dir else None,
+        provider=provider,
+        model=model,
+    )
     filtered: List[Path] = []
     for entry in results:
         if date and entry["date"] != date:
             continue
-        if not entry["file"].startswith("doc_") or not entry["file"].endswith("_analysis.json"):
+        if not entry["file"].startswith("doc_") or not entry["file"].endswith(
+            "_analysis.json"
+        ):
             continue
         filtered.append(entry["path"])
         if limit and len(filtered) >= limit:
@@ -71,7 +74,7 @@ def _print_summary(reports: List[Dict[str, Any]], verbose: bool) -> None:
                 notes = ", ".join(detail["notes"]) if detail["notes"] else ""
                 print(
                     f"    Q: {detail['question']}\n"
-                    f"       status={detail['status']} confidence={detail['confidence']} {notes}"
+                    f"       status={detail['status']} confidence={detail['confidence']} {notes}"  # noqa: E501
                 )
         print()
 
@@ -82,7 +85,10 @@ def _write_markdown(reports: List[Dict[str, Any]], summary_path: Path) -> None:
         "# Q&A Quality Summary",
         "",
         f"- **Documents analyzed**: {aggregate['total_documents']}",
-        *(f"- **{band.title()}**: {count}" for band, count in aggregate["quality_breakdown"].items()),
+        *(
+            f"- **{band.title()}**: {count}"
+            for band, count in aggregate["quality_breakdown"].items()
+        ),
         "",
         "## Per-Document Details",
         "",
@@ -102,18 +108,66 @@ def _write_markdown(reports: List[Dict[str, Any]], summary_path: Path) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Analyze quality of Q&A pipeline outputs.")
-    parser.add_argument("--base-dir", type=str, default=None, help="Base output directory (default: ./output)")
-    parser.add_argument("--provider", type=str, default=None, help="Filter by provider (openai, anthropic, etc.)")
-    parser.add_argument("--model", type=str, default=None, help="Filter by model name")
-    parser.add_argument("--date", type=str, default=None, help="Filter by date (YYYY-MM-DD)")
-    parser.add_argument("--limit", type=int, default=None, help="Limit number of documents analyzed")
-    parser.add_argument("--summary-file", type=Path, default=None, help="Optional Markdown summary output path")
-    parser.add_argument("--verbose", action="store_true", help="Include per-question details")
-    parser.add_argument("--min-questions", type=int, default=None, help="Override minimum questions threshold")
-    parser.add_argument("--low-confidence", type=float, default=None, help="Override low confidence threshold")
-    parser.add_argument("--review-confidence", type=float, default=None, help="Override review band threshold")
-    parser.add_argument("--attention-confidence", type=float, default=None, help="Override needs-attention threshold")
+    parser = argparse.ArgumentParser(
+        description="Analyze quality of Q&A pipeline outputs."
+    )
+    parser.add_argument(
+        "--base-dir",
+        type=str,
+        default=None,
+        help="Base output directory (default: ./output)",
+    )
+    parser.add_argument(
+        "--provider",
+        type=str,
+        default=None,
+        help="Filter by provider (openai, anthropic, etc.)",
+    )
+    parser.add_argument(
+        "--model", type=str, default=None, help="Filter by model name"
+    )
+    parser.add_argument(
+        "--date", type=str, default=None, help="Filter by date (YYYY-MM-DD)"
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Limit number of documents analyzed",
+    )
+    parser.add_argument(
+        "--summary-file",
+        type=Path,
+        default=None,
+        help="Optional Markdown summary output path",
+    )
+    parser.add_argument(
+        "--verbose", action="store_true", help="Include per-question details"
+    )
+    parser.add_argument(
+        "--min-questions",
+        type=int,
+        default=None,
+        help="Override minimum questions threshold",
+    )
+    parser.add_argument(
+        "--low-confidence",
+        type=float,
+        default=None,
+        help="Override low confidence threshold",
+    )
+    parser.add_argument(
+        "--review-confidence",
+        type=float,
+        default=None,
+        help="Override review band threshold",
+    )
+    parser.add_argument(
+        "--attention-confidence",
+        type=float,
+        default=None,
+        help="Override needs-attention threshold",
+    )
 
     args = parser.parse_args()
 
@@ -143,7 +197,9 @@ def main() -> None:
     reports: List[Dict[str, Any]] = []
     for path in files:
         document = _load_document(path)
-        report = evaluate_document_quality(document, thresholds=custom_thresholds)
+        report = evaluate_document_quality(
+            document, thresholds=custom_thresholds
+        )
         report["path"] = str(path)
         reports.append(report)
 
@@ -155,4 +211,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

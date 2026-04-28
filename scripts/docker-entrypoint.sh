@@ -2,47 +2,90 @@
 set -e
 
 # =============================================================================
-# docker-entrypoint.sh
+# docker-entrypoint.sh — make files on your PC belong to you, not root
 # =============================================================================
-# Proper UID/GID mapping for Docker containers.
+# Docker often creates files as root on shared folders. This script switches
+# the in-container user to your Linux UID/GID (from HOST_UID / HOST_GID in
+# run.sh / compose), runs the real command as that user, then on exit fixes
+# ownership again so you can open or delete outputs on the host.
 #
-# Problem:  Docker containers run as root by default.  Files created in
-#           bind-mounted volumes (output/, hf_cache/, config/, data/) are
-#           owned by root, making them unreadable/undeletable by the host user.
-#
-# Solution: This entrypoint runs as root, adjusts the container user's
-#           UID/GID to match the host user, ensures all writable directories
-#           are owned correctly, then drops privileges with `gosu` to run
-#           the actual command as that user.
-#
-#           On EXIT, it re-chowns everything so the host user always owns
-#           all files — even those created during the run.
-#
-# IMPORTANT: We do NOT use `exec gosu ...` because exec replaces the bash
-#            process and the EXIT trap would never fire.  Instead, gosu runs
-#            as a child process; bash waits for it and then runs the trap.
-#
-# Environment variables (set by run.sh / docker-compose):
-#   HOST_UID   — host user's UID  (default: 1000)
-#   HOST_GID   — host user's GID  (default: 1000)
-#
-# This script is set as the ENTRYPOINT in the Dockerfile.
-# The CMD (e.g. python pipeline, jupyter lab) is passed as "$@".
+# We avoid `exec gosu` so an EXIT trap can run the final chown.
 # =============================================================================
 
 TARGET_UID="${HOST_UID:-1000}"
 TARGET_GID="${HOST_GID:-1000}"
 USERNAME="qagredo"
 
-# All bind-mounted writable directories.
-# These MUST match the volume mounts in docker-compose.yml and jupyter.sh.
+# Must match folders mounted in docker-compose.yml.
+# /workspace/data = your input folder (DATA_DIR from .env / run.sh).
 WRITABLE_DIRS=(
     /workspace/output
     /workspace/config
     /workspace/data
-    /workspace/.jupyter
     /opt/hf_cache
 )
+
+# ---------------------------------------------------------------------------
+#  Optional: serve Ollama inside the container (Kubeflow / K2-B pattern).
+#
+#  Enabled when QAGREDO_SERVE_OLLAMA=1. Models are read from $OLLAMA_MODELS
+#  (default /opt/ollama/models) — typically a host volume mount such as
+#  /home/jovyan/models on Kubeflow, or ./models on the dev server.
+# ---------------------------------------------------------------------------
+OLLAMA_PID=""
+
+start_inproc_ollama() {
+    local host_port bind_addr
+    bind_addr="${OLLAMA_HOST:-127.0.0.1:11434}"
+    host_port="${bind_addr##*:}"
+
+    mkdir -p "${OLLAMA_MODELS:-/opt/ollama/models}" 2>/dev/null || true
+    chown -R "$TARGET_UID:$TARGET_GID" "${OLLAMA_MODELS:-/opt/ollama/models}" 2>/dev/null || true
+
+    if ! command -v ollama >/dev/null 2>&1; then
+        echo "[entrypoint][ERROR] QAGREDO_SERVE_OLLAMA=1 but 'ollama' is not installed in the image." >&2
+        echo "[entrypoint][ERROR] Rebuild with Dockerfile.kubeflow or mount the ollama binary." >&2
+        exit 2
+    fi
+
+    echo "[entrypoint] Starting in-container ollama serve on ${bind_addr} (models: ${OLLAMA_MODELS:-/opt/ollama/models})"
+    OLLAMA_HOST="${bind_addr}" OLLAMA_MODELS="${OLLAMA_MODELS:-/opt/ollama/models}" \
+        gosu "$USERNAME" ollama serve >/workspace/output/ollama.log 2>&1 &
+    OLLAMA_PID=$!
+
+    local elapsed=0 timeout="${QAGREDO_OLLAMA_WAIT_TIMEOUT:-180}"
+    while true; do
+        if curl -sf "http://${bind_addr}/api/tags" >/dev/null 2>&1; then
+            echo "[entrypoint] Ollama is ready after ${elapsed}s"
+            break
+        fi
+        if ! kill -0 "$OLLAMA_PID" 2>/dev/null; then
+            echo "[entrypoint][ERROR] ollama serve exited early; see /workspace/output/ollama.log" >&2
+            exit 3
+        fi
+        if [ "$elapsed" -ge "$timeout" ]; then
+            echo "[entrypoint][ERROR] Ollama did not become ready within ${timeout}s" >&2
+            exit 4
+        fi
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+
+    for model in "${OLLAMA_MODEL:-}" "${OLLAMA_JUDGE_MODEL:-}"; do
+        [ -z "$model" ] && continue
+        if ! curl -sf "http://${bind_addr}/api/tags" | grep -q "\"name\":\"${model}\""; then
+            echo "[entrypoint][WARN] Model '${model}' not reported by /api/tags (store: ${OLLAMA_MODELS:-/opt/ollama/models})."
+            echo "[entrypoint][WARN] Seed blobs/manifests for this tag, or set OLLAMA_MODEL / OLLAMA_JUDGE_MODEL to match tags from your offline tar / ollama list."
+        fi
+    done
+}
+
+stop_inproc_ollama() {
+    if [ -n "$OLLAMA_PID" ] && kill -0 "$OLLAMA_PID" 2>/dev/null; then
+        kill "$OLLAMA_PID" 2>/dev/null || true
+        wait "$OLLAMA_PID" 2>/dev/null || true
+    fi
+}
 
 # ---------------------------------------------------------------------------
 #  fix_ownership — chown all writable dirs to the host user
@@ -97,11 +140,16 @@ if [ "$(id -u)" = "0" ]; then
 
     # --- On EXIT: re-chown everything so the host user can always clean up ---
     # This catches files created DURING the run (e.g. new output, hf_cache files).
-    trap fix_ownership EXIT
+    trap 'stop_inproc_ollama; fix_ownership' EXIT
 
     # --- Forward SIGINT and SIGTERM to the child process ---
     trap 'forward_signal TERM' TERM
     trap 'forward_signal INT'  INT
+
+    # --- Optional: serve Ollama inside the container (Kubeflow profile) ---
+    if [ "${QAGREDO_SERVE_OLLAMA:-0}" = "1" ]; then
+        start_inproc_ollama
+    fi
 
     # --- Drop privileges and run the command ---
     # NOTE: We intentionally do NOT use `exec gosu ...` here.

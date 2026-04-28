@@ -40,7 +40,7 @@ for arg in "$@"; do
       echo ""
       echo "Examples:"
       echo "  bash scripts/utils/summarize_run.sh"
-      echo "  bash scripts/utils/summarize_run.sh output/vllm/meta-llama-meta-llama-3.1-8b-instruct/2026-02-11/"
+      echo "  bash scripts/utils/summarize_run.sh output/ollama/qwen3.5-9b/2026-02-11/"
       echo "  bash scripts/utils/summarize_run.sh --latest --json"
       exit 0
       ;;
@@ -78,6 +78,89 @@ host_dir = sys.argv[3]
 save_json = sys.argv[4] == "1"
 
 base_output = Path(host_dir) / "output"
+
+
+def _as_dict(obj):
+    """JSON null or wrong type must not become .get on None."""
+    return obj if isinstance(obj, dict) else {}
+
+
+def _as_list(obj):
+    return obj if isinstance(obj, list) else []
+
+
+def _str_field(val, default):
+    """JSON null must not reach f-string :>N / :.2f (None.__format__ errors)."""
+    return default if val is None else val
+
+
+def _first_non_null_str(*vals, default="unknown"):
+    for v in vals:
+        if v is not None:
+            return v
+    return default
+
+
+def _coerce_grounded(val):
+    """Normalize is_grounded for JSON bool / string / missing."""
+    if val is True or val is False:
+        return val
+    if isinstance(val, str):
+        low = val.strip().lower()
+        if low in ("true", "1", "yes"):
+            return True
+        if low in ("false", "0", "no"):
+            return False
+    return None
+
+
+def _parse_conf(val):
+    """Parse confidence for display; JSON may use str or null."""
+    if val is None:
+        return None
+    if isinstance(val, bool):
+        return None
+    if isinstance(val, (int, float)):
+        return float(val)
+    try:
+        return float(str(val).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_float(val, default=0.0):
+    if val is None:
+        return default
+    if isinstance(val, bool):
+        return default
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(val, default=0):
+    if val is None:
+        return default
+    if isinstance(val, bool):
+        return default
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return default
+
+
+def _letter_grade(conf: float) -> str:
+    """Same thresholds as utils/hallucination_checker grade_qa_results."""
+    if conf >= 0.9:
+        return "A"
+    if conf >= 0.8:
+        return "B"
+    if conf >= 0.7:
+        return "C"
+    if conf >= 0.6:
+        return "D"
+    return "F"
 
 # ---- find analysis files ----
 def find_analysis_files(search_dir):
@@ -122,33 +205,51 @@ for f in analysis_files:
         print(f"[WARN] Skipping {f.name}: {e}")
         continue
 
-    doc_info = data.get("document", {})
-    qa_pairs = data.get("qa_pairs", [])
-    grading_summary = data.get("grading_summary", {})
-    q_gen = data.get("question_generation", {})
-    a_gen = data.get("answer_generation", {})
+    if not isinstance(data, dict):
+        print(f"[WARN] Skipping {f.name}: root JSON must be an object")
+        continue
+
+    doc_info = _as_dict(data.get("document"))
+    qa_pairs = _as_list(data.get("qa_pairs"))
+    root_hallucination_checks = _as_list(data.get("hallucination_checks"))
+    grading_summary = _as_dict(data.get("grading_summary"))
+    q_gen = _as_dict(data.get("question_generation"))
+    a_gen = _as_dict(data.get("answer_generation"))
+    run_metrics = _as_dict(data.get("run_metrics"))
+    timings = _as_dict(run_metrics.get("timings_seconds"))
+    quality_counters = _as_dict(run_metrics.get("quality_counters"))
 
     # Per-QA stats
     grounded_count = 0
     ungrounded_count = 0
     confidences = []
     qa_details = []
-    for pair in qa_pairs:
-        grading = pair.get("grading", {})
-        question = pair.get("question", "")
-        answer = pair.get("answer", "")
-        is_grounded = grading.get("is_grounded")
-        conf = grading.get("confidence")
-        issues = grading.get("issues", [])
-        method = grading.get("method", "")
-        ungrounded_sentences = grading.get("ungrounded_sentences", [])
+    for qi, pair in enumerate(qa_pairs):
+        if not isinstance(pair, dict):
+            continue
+        grading = _as_dict(pair.get("hallucination_check"))
+        if not grading:
+            grading = _as_dict(pair.get("grading"))
+        if not grading and qi < len(root_hallucination_checks):
+            chk = root_hallucination_checks[qi]
+            if isinstance(chk, dict):
+                grading = _as_dict(chk.get("check_result"))
+        question = pair.get("question") or ""
+        answer = pair.get("answer") or ""
+        is_grounded = _coerce_grounded(grading.get("is_grounded"))
+        conf = _parse_conf(grading.get("confidence"))
+        issues = _as_list(grading.get("issues"))
+        method = grading.get("method") or ""
+        ungrounded_sentences = _as_list(
+            grading.get("ungrounded_sentences")
+        )
 
         if is_grounded is True:
             grounded_count += 1
         elif is_grounded is False:
             ungrounded_count += 1
         if conf is not None:
-            confidences.append(conf)
+            confidences.append(float(conf))
 
         # Build per-QA detail entry
         qa_entry = {
@@ -158,14 +259,14 @@ for f in analysis_files:
             "confidence": conf,
             "method": method,
         }
-        # Include reasons for ungrounded answers
-        if not is_grounded:
+        # Include reasons only when explicitly ungrounded
+        if is_grounded is False:
             if issues:
                 qa_entry["issues"] = issues
             if ungrounded_sentences:
                 qa_entry["ungrounded_sentences"] = ungrounded_sentences
             # Include LLM verdict if available (from hybrid/llm method)
-            llm_verdict = grading.get("llm_verdict", {})
+            llm_verdict = _as_dict(grading.get("llm_verdict"))
             if llm_verdict:
                 qa_entry["llm_verdict"] = llm_verdict
 
@@ -173,22 +274,71 @@ for f in analysis_files:
 
     avg_conf = sum(confidences) / len(confidences) if confidences else None
 
+    # Doc-level grade/conf come from grading_summary; if missing (e.g. older
+    # runs or failed persist), fall back to mean per-QA confidence + letter.
+    ov_conf = _parse_conf(grading_summary.get("overall_confidence"))
+    if ov_conf is None and avg_conf is not None:
+        ov_conf = float(avg_conf)
+    og_raw = grading_summary.get("overall_grade")
+    if og_raw is not None and str(og_raw).strip() != "":
+        overall_grade = str(og_raw).strip()
+    elif ov_conf is not None:
+        overall_grade = _letter_grade(ov_conf)
+    else:
+        overall_grade = "N/A"
+
     documents.append({
         "file": f.name,
-        "document_id": doc_info.get("id", "unknown"),
-        "title": doc_info.get("title", "untitled"),
+        "document_id": _str_field(doc_info.get("id"), "unknown"),
+        "title": _str_field(doc_info.get("title"), "untitled"),
         "num_qa_pairs": len(qa_pairs),
         "grounded": grounded_count,
         "ungrounded": ungrounded_count,
         "avg_confidence": avg_conf,
-        "overall_grade": grading_summary.get("overall_grade", "N/A"),
-        "overall_confidence": grading_summary.get("overall_confidence"),
-        "grading_method": grading_summary.get("grading_method", "N/A"),
-        "model": q_gen.get("model", a_gen.get("model", "unknown")),
-        "judge_model": grading_summary.get("judge_model", "unknown"),
-        "provider": q_gen.get("provider", a_gen.get("provider", "unknown")),
-        "timestamp": q_gen.get("timestamp", a_gen.get("timestamp", "")),
+        "overall_grade": overall_grade,
+        "overall_confidence": ov_conf,
+        "grading_method": _str_field(
+            grading_summary.get("grading_method"), "N/A"
+        ),
+        "model": _first_non_null_str(
+            q_gen.get("model"), a_gen.get("model")
+        ),
+        "judge_model": _str_field(
+            grading_summary.get("judge_model"), "unknown"
+        ),
+        "provider": _first_non_null_str(
+            q_gen.get("provider"), a_gen.get("provider")
+        ),
+        "timestamp": _first_non_null_str(
+            q_gen.get("timestamp"), a_gen.get("timestamp"), default=""
+        ),
         "qa_details": qa_details,
+        "timings_seconds": {
+            "question_generation": _safe_float(
+                timings.get("question_generation"), 0.0
+            ),
+            "answer_generation": _safe_float(
+                timings.get("answer_generation"), 0.0
+            ),
+            "grading": _safe_float(timings.get("grading"), 0.0),
+        },
+        "quality_counters": {
+            "question_grounding_retries": _safe_int(
+                quality_counters.get("question_grounding_retries"), 0
+            ),
+            "question_comprehensiveness_retries": _safe_int(
+                quality_counters.get(
+                    "question_comprehensiveness_retries"
+                ),
+                0,
+            ),
+            "answer_grounding_retries": _safe_int(
+                quality_counters.get("answer_grounding_retries"), 0
+            ),
+            "coverage_rewrites": _safe_int(
+                quality_counters.get("coverage_rewrites"), 0
+            ),
+        },
     })
 
 # ---- compute run-level stats ----
@@ -198,6 +348,18 @@ total_grounded = sum(d["grounded"] for d in documents)
 total_ungrounded = sum(d["ungrounded"] for d in documents)
 all_confidences = [d["overall_confidence"] for d in documents if d["overall_confidence"] is not None]
 avg_overall_conf = sum(all_confidences) / len(all_confidences) if all_confidences else None
+
+total_qgen_secs = sum((d.get("timings_seconds") or {}).get("question_generation", 0.0) for d in documents)
+total_agen_secs = sum((d.get("timings_seconds") or {}).get("answer_generation", 0.0) for d in documents)
+total_grade_secs = sum((d.get("timings_seconds") or {}).get("grading", 0.0) for d in documents)
+avg_qgen_secs = (total_qgen_secs / total_docs) if total_docs else 0.0
+avg_agen_secs = (total_agen_secs / total_docs) if total_docs else 0.0
+avg_grade_secs = (total_grade_secs / total_docs) if total_docs else 0.0
+
+total_q_ground_retries = sum((d.get("quality_counters") or {}).get("question_grounding_retries", 0) for d in documents)
+total_q_comp_retries = sum((d.get("quality_counters") or {}).get("question_comprehensiveness_retries", 0) for d in documents)
+total_a_ground_retries = sum((d.get("quality_counters") or {}).get("answer_grounding_retries", 0) for d in documents)
+total_coverage_rewrites = sum((d.get("quality_counters") or {}).get("coverage_rewrites", 0) for d in documents)
 
 grade_counts = {}
 for d in documents:
@@ -229,11 +391,22 @@ print(f"  {'#':<4} {'Doc ID':<20} {'Title':<25} {'QAs':>4} {'Grounded':>9} {'Con
 print(f"  {THIN}")
 
 for i, d in enumerate(documents, 1):
-    title = d["title"][:24] if d["title"] else "untitled"
-    doc_id = d["document_id"][:19] if d["document_id"] else "unknown"
-    conf_str = f"{d['overall_confidence']:.2f}" if d["overall_confidence"] is not None else "N/A"
+    title_s = str(d["title"] or "untitled")
+    title = title_s[:24] if title_s else "untitled"
+    doc_id_s = str(d["document_id"] or "unknown")
+    doc_id = doc_id_s[:19] if doc_id_s else "unknown"
+    oc = d["overall_confidence"]
+    conf_str = (
+        f"{float(oc):.2f}"
+        if oc is not None and isinstance(oc, (int, float))
+        else "N/A"
+    )
     grounded_str = f"{d['grounded']}/{d['num_qa_pairs']}"
-    print(f"  {i:<4} {doc_id:<20} {title:<25} {d['num_qa_pairs']:>4} {grounded_str:>9} {conf_str:>6} {d['overall_grade']:>6}")
+    gr_disp = str(d["overall_grade"] if d["overall_grade"] is not None else "N/A")
+    print(
+        f"  {i:<4} {doc_id:<20} {title:<25} {d['num_qa_pairs']:>4} "
+        f"{grounded_str:>9} {conf_str:>6} {gr_disp:>6}"
+    )
 
 print()
 print(THIN)
@@ -244,8 +417,29 @@ print(f"  Total Q&A pairs     : {total_qa}")
 print(f"  Avg QAs per document: {total_qa / total_docs:.1f}" if total_docs else "  Avg QAs per document: N/A")
 print(f"  Grounded answers    : {total_grounded}/{total_qa} ({100 * total_grounded / total_qa:.0f}%)" if total_qa else "  Grounded answers    : N/A")
 print(f"  Ungrounded answers  : {total_ungrounded}/{total_qa} ({100 * total_ungrounded / total_qa:.0f}%)" if total_qa else "  Ungrounded answers  : N/A")
-print(f"  Avg confidence      : {avg_overall_conf:.2f}" if avg_overall_conf is not None else "  Avg confidence      : N/A")
+_aoc = avg_overall_conf
+print(
+    f"  Avg confidence      : {float(_aoc):.2f}"
+    if _aoc is not None and isinstance(_aoc, (int, float))
+    else "  Avg confidence      : N/A"
+)
 print(f"  Grade distribution  : {', '.join(f'{g}: {c}' for g, c in sorted(grade_counts.items()))}")
+print(THIN)
+print("  PIPELINE TIMINGS")
+print(THIN)
+print(f"  Q generation total  : {total_qgen_secs:.2f}s")
+print(f"  A generation total  : {total_agen_secs:.2f}s")
+print(f"  Grading total       : {total_grade_secs:.2f}s")
+print(f"  Avg Q gen / doc     : {avg_qgen_secs:.2f}s")
+print(f"  Avg A gen / doc     : {avg_agen_secs:.2f}s")
+print(f"  Avg grading / doc   : {avg_grade_secs:.2f}s")
+print(THIN)
+print("  QUALITY COUNTERS")
+print(THIN)
+print(f"  Q grounding retries : {total_q_ground_retries}")
+print(f"  Q comp retries      : {total_q_comp_retries}")
+print(f"  A grounding retries : {total_a_ground_retries}")
+print(f"  Coverage rewrites   : {total_coverage_rewrites}")
 print(SEP)
 
 # ---- Ungrounded highlights (text) ----
@@ -264,9 +458,9 @@ for d in documents:
                 "reasons": [],
             }
             # Collect reasons
-            for issue in qa.get("issues", []):
+            for issue in _as_list(qa.get("issues")):
                 highlight["reasons"].append(issue)
-            llm = qa.get("llm_verdict", {})
+            llm = _as_dict(qa.get("llm_verdict"))
             if llm and llm.get("reason"):
                 highlight["reasons"].append(f"LLM verdict ({llm.get('verdict', '?')}): {llm['reason']}")
             ungrounded_highlights.append(highlight)
@@ -277,15 +471,25 @@ if has_ungrounded:
     print("  UNGROUNDED ANSWERS — WHY?")
     print(SEP)
     for idx, h in enumerate(ungrounded_highlights, 1):
-        conf_str = f"{h['confidence']:.2f}" if h["confidence"] is not None else "N/A"
-        print(f"\n  [{idx}] Document: {h['document']} — {h['title']}")
-        print(f"      Question : {h['question'][:120]}")
-        print(f"      Answer   : {h['answer'][:200]}")
+        hc = h["confidence"]
+        conf_str = (
+            f"{float(hc):.2f}"
+            if hc is not None and isinstance(hc, (int, float))
+            else "N/A"
+        )
+        doc_h = str(h["document"] or "")
+        title_h = str(h["title"] or "")
+        qtxt = str(h["question"] or "")
+        atxt = str(h["answer"] or "")
+        print(f"\n  [{idx}] Document: {doc_h} — {title_h}")
+        print(f"      Question : {qtxt[:120]}")
+        print(f"      Answer   : {atxt[:200]}")
         print(f"      Confidence: {conf_str}")
         if h["reasons"]:
             print("      Reasons:")
             for r in h["reasons"]:
-                print(f"        - {r[:200]}")
+                rs = r if isinstance(r, str) else str(r)
+                print(f"        - {rs[:200]}")
         else:
             print("      Reasons: (none recorded)")
     print()
@@ -304,6 +508,22 @@ if save_json:
         "generator_model": documents[0]["model"] if documents else None,
         "judge_model": documents[0].get("judge_model", "unknown") if documents else None,
         "provider": documents[0]["provider"] if documents else None,
+        "run_metrics": {
+            "timings_seconds": {
+                "question_generation_total": round(total_qgen_secs, 3),
+                "answer_generation_total": round(total_agen_secs, 3),
+                "grading_total": round(total_grade_secs, 3),
+                "question_generation_avg_per_doc": round(avg_qgen_secs, 3),
+                "answer_generation_avg_per_doc": round(avg_agen_secs, 3),
+                "grading_avg_per_doc": round(avg_grade_secs, 3),
+            },
+            "quality_counters": {
+                "question_grounding_retries": total_q_ground_retries,
+                "question_comprehensiveness_retries": total_q_comp_retries,
+                "answer_grounding_retries": total_a_ground_retries,
+                "coverage_rewrites": total_coverage_rewrites,
+            },
+        },
         "ungrounded_highlights": ungrounded_highlights,
         "documents": documents,
     }

@@ -205,7 +205,7 @@ def _build_slide_core(prs: Presentation) -> None:
     )
     save = _proc(
         slide, x_m - Inches(0.02), y0 + Inches(5.55), Inches(1.78),
-        Inches(0.4), "save_results\n(per config)",
+        Inches(0.4), "save_results +\nGitHub publish",
     )
 
     def mb(sh):
@@ -380,11 +380,11 @@ def _build_slide_save(prs: Presentation) -> None:
     )
     save_min = _proc(
         slide, Inches(3.25), y0 + Inches(2.85), Inches(1.5), Inches(0.38),
-        "save_results\nminimal JSON",
+        "save minimal JSON\n(+ GitHub)",
     )
     save_full = _proc(
         slide, Inches(6.75), y0 + Inches(2.85), Inches(1.5), Inches(0.38),
-        "save_results\nfull JSON",
+        "save full JSON\n(+ GitHub)",
     )
 
     def mb(sh):

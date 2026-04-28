@@ -1,0 +1,15 @@
+---
+description: Store transferable tar archives in /data path
+alwaysApply: true
+---
+
+# Archive Output Location
+
+- Place all generated or moved archive artifacts in `/data/tyewhong/qagredo/`.
+- This applies to:
+  - `*.tar`
+  - `*.tar.gz`
+  - `*.tar.gz.sha256`
+- Do not keep these archive artifacts in `/home/tyewhong/qagredo/` after creation.
+- When providing commands, default output paths should target `/data/tyewhong/qagredo/`.
+- When the same archive filename exists in both locations, replace the `/data/tyewhong/qagredo/` copy only if the source in `/home/tyewhong/qagredo/offline_out/` is newer.

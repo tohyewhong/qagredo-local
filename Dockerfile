@@ -1,16 +1,15 @@
-# Boss-proposed pattern:
-# - Jupyter base image (already includes user `jovyan`)
+# CLI-first image:
+# - Official Python 3.10 (Debian bookworm) base
 # - Install OS deps as root
 # - Copy code + requirements
 # - (Optional) Install corporate CA bundle and set pip to use it
 # - Install Python requirements
 #
 # Notes for this repo:
-# - Docker Compose overrides the command to run the CLI pipeline.
+# - Default CMD runs the pipeline; Docker Compose can override the command.
 # - We keep offline/cache env vars because the runner is designed for airgapped use.
-FROM jupyter/base-notebook:python-3.10
+FROM python:3.10-bookworm
 
-# change to install stuff
 USER root
 
 # Synchronize container runtime user/group with host (so mounted folders are writable).
@@ -24,6 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     ca-certificates \
+    antiword \
     sudo \
     gosu \
     libffi-dev \
@@ -42,13 +42,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     HF_HUB_OFFLINE=1 \
     TRANSFORMERS_OFFLINE=1 \
     HF_HOME=/opt/hf_cache \
-    HUGGINGFACE_HUB_CACHE=/opt/hf_cache/hub \
-    SENTENCE_TRANSFORMERS_HOME=/opt/hf_cache/sentence-transformers \
-    SENTENCE_TRANSFORMERS_MODEL_PATH=/opt/models_embed/all-MiniLM-L6-v2 \
-    JUPYTER_DATA_DIR=/workspace/.jupyter/data \
-    JUPYTER_RUNTIME_DIR=/workspace/.jupyter/runtime
+    HUGGINGFACE_HUB_CACHE=/opt/hf_cache/hub
 
-# copy the files (not optimised but did not want to break anything)
 WORKDIR /workspace/
 
 COPY certbundle /workspace/certbundle
@@ -81,7 +76,7 @@ RUN if [ -f /workspace/certbundle/certbundle.crt ]; then \
     fi
 
 # ensure runtime mountpoints exist
-RUN mkdir -p /opt/hf_cache /opt/models_embed /workspace/.jupyter/data /workspace/.jupyter/runtime
+RUN mkdir -p /opt/hf_cache /opt/models_embed
 
 # Create or update the runtime user to match the requested UID/GID, then set ownership.
 RUN set -eux; \
@@ -94,8 +89,6 @@ RUN set -eux; \
     mkdir -p "/home/${USERNAME}" /workspace /opt/hf_cache /opt/models_embed; \
     chown -R "${UID}:${GID}" "/home/${USERNAME}" /workspace /opt/hf_cache /opt/models_embed
 
-# Run pip as root so it doesn't depend on /opt/conda write permissions.
-
 # install the requirements
 #
 # If your network blocks TLS inspection fixes, but you cannot install a corporate CA,
@@ -107,23 +100,10 @@ RUN set -eux; \
     if [ -n "${PIP_TRUSTED_HOSTS}" ]; then \
       for h in ${PIP_TRUSTED_HOSTS}; do trusted_args="${trusted_args} --trusted-host ${h}"; done; \
     fi; \
-    pip install ${trusted_args} --no-cache-dir -r requirements.txt
+    python -m pip install ${trusted_args} --no-cache-dir -r requirements.txt
 
-# Bake `all-MiniLM-L6-v2` into the image at build time (DEFAULT).
-# This requires internet access on the build machine.
-#
-# If you ever need to skip this (faster build, or no internet), build with:
-#   docker build --build-arg BAKE_MINILM=0 -t qagredo-v1:latest .
-ARG BAKE_MINILM=1
-RUN if [ "$BAKE_MINILM" = "1" ]; then \
-      # NOTE: The image defaults to offline mode (HF_HUB_OFFLINE=1) for runtime.\n\
-      # During build we temporarily allow downloads to bake MiniLM into the image.\n\
-      HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 python -c "from pathlib import Path; from sentence_transformers import SentenceTransformer; dst=Path('/opt/models_embed/all-MiniLM-L6-v2'); dst.parent.mkdir(parents=True, exist_ok=True); model=SentenceTransformer('all-MiniLM-L6-v2', device='cpu'); model.save(str(dst)); print(f'[OK] Saved all-MiniLM-L6-v2 to: {dst}')" \
-    ; else \
-      echo "[INFO] Skipping BAKE_MINILM=0 (will rely on mounting host/models_embed at runtime)"; \
-    fi
-
-EXPOSE 8888
+# Fail the build if any requirement is missing, wrong version, or pip check fails.
+RUN python /workspace/scripts/docker_verify_requirements.py /workspace/requirements.txt
 
 # Copy the entrypoint script that adjusts UID/GID at runtime.
 # This is the proper Docker pattern: the container starts as root,
@@ -133,11 +113,9 @@ EXPOSE 8888
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# Set HOME so bash -l doesn't try to read /home/jovyan/.bash_profile
 ENV HOME=/home/${USERNAME}
 
 # The entrypoint runs as root, adjusts UID/GID, then drops to ${USERNAME}.
 # CMD is passed as arguments to the entrypoint.
 ENTRYPOINT ["docker-entrypoint.sh"]
-CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--ServerApp.token=", "--ServerApp.password="]
-
+CMD ["python", "/workspace/run_qa_pipeline.py"]

@@ -1,0 +1,134 @@
+# ============================================================================
+#  QAGRedo — KUBEFLOW profile  (Ollama running inside one container)
+# ============================================================================
+#
+#  WHEN IS THIS FILE USED?
+#    Whenever .env has  QAGREDO_PROFILE=kubeflow.
+#    One single container runs Ollama + QAGRedo together. The URLs below
+#    point at 127.0.0.1 INSIDE that container (not your host).
+#
+#  LAYMAN CHEAT SHEET — the only 4 things you will ever want to change:
+#
+#    1) run.num_documents              → how many documents to process
+#    2) question_generation.num_questions → how many questions per document
+#    3) llm.model                      → Ollama tag for the generator
+#    4) judge.model                    → Ollama tag for the judge
+#
+#  IMPORTANT: the tags in (3) and (4) must live inside a proper Ollama GGUF
+#  store (a folder containing `blobs/` and `manifests/`) — NOT a folder of
+#  HuggingFace weight directories. Point QAGREDO_MODELS_DIR in .env at
+#  such a store — for example:
+#      /home/jovyan/models/             (on Kubeflow)
+#      /home/tyewhong/qagredo/models/   (on the dev server)
+#  That folder gets mounted into the container at /opt/ollama/models.
+#  If the store is empty, the container will try `ollama pull <tag>` on the
+#  first run; on an offline server that pull will fail and you must seed
+#  the folder by rsync'ing an existing Ollama store into it.
+#
+#  SWITCH NOTE:
+#    If you are coming from vLLM and want in-container Ollama, set in .env:
+#      QAGREDO_PROFILE=kubeflow
+#      QAGREDO_MODELS_DIR=<path-to-ollama-store-with-blobs-and-manifests>
+#    then change ONLY llm.model and judge.model below.
+#
+#  Everything else in this file: LEAVE ALONE unless something tells you
+#  otherwise.
+# ============================================================================
+
+offline_mode: true
+
+framework:
+  use_langchain: true
+  use_langgraph: true
+  langchain:
+    structured_json_output: true
+  langgraph:
+    enable_dynamic_routing: true
+    semantic_fallback_threshold: 0.7
+
+run:
+  input_folder: "txt"
+  input_file: ""
+  input_glob: "*.txt"
+  auto_convert: false
+  output_folder: timestamp
+  output_analysis_stem: document_id
+  input_type: auto
+  max_files: 0
+  num_documents: 10             # CHANGE ME — how many documents to process
+  save_grounded_qa_pairs_only: false
+  minimal_qa_output: false
+  min_content_words: 20
+  min_content_chars: 0
+  semantic_normalization:
+    enable: false
+    max_content_chars: 5000
+
+# -------------------------------------------------------------------------
+# GENERATOR — in-container Ollama.
+# The container listens on 127.0.0.1:11434 (same as dev profile, since
+# `network_mode: host` isn't used here — the Ollama binary runs side-by-
+# side inside the same container via docker-entrypoint.sh).
+# -------------------------------------------------------------------------
+llm:
+  provider: "ollama"
+  model: "qwen3.5:9b"           # CHANGE ME — Ollama tag for the GENERATOR
+  base_url: "http://127.0.0.1:11434/v1"
+  api_key: "EMPTY"
+  temperature: 0.7
+  max_tokens: 500
+  max_retries: 3
+  retry_delay: 1.0
+  timeout: 240
+
+answer_generation:
+  temperature: 0.3
+  multi_turn:
+    enable_rejection: true
+    min_confidence_threshold: 0.7
+    max_answer_attempts: 3
+    max_regeneration_attempts: 2
+    max_question_regeneration_rounds: 3
+  coverage_validation:
+    enable: true
+    min_score_threshold: 0.7
+    max_doc_chars: 5000
+
+question_generation:
+  num_questions: 3              # CHANGE ME — how many questions per document
+  complexity: "advanced"
+  deduplication_method: "llm"
+  dedup_llm:
+    use_judge_model: true
+    strict: true
+    max_tokens: 80
+  validation:
+    enable_rejection: true
+    method: "llm"
+    min_confidence_threshold: 0.7
+    max_regeneration_attempts: 2
+    enable_comprehensiveness_check: true
+    comprehensiveness_min_score: 0.6
+    comprehensiveness_max_attempts: 2
+
+# -------------------------------------------------------------------------
+# JUDGE — second model (must be a different Ollama tag to avoid self-grade).
+# -------------------------------------------------------------------------
+judge:
+  provider: "ollama"
+  model: "llama3.1:8b-instruct-fp16"  # CHANGE ME — Ollama tag for the JUDGE
+  base_url: "http://127.0.0.1:11434/v1"
+  api_key: "EMPTY"
+  temperature: 0.0
+  max_tokens: 200
+  timeout: 240
+  max_retries: 3
+  retry_delay: 1.0
+
+hallucination:
+  method: "llm"
+  judge_required: true
+  judge_strict_verdict: true
+  allow_semantic_fallback: false
+  citation_alignment: "off"
+  grounding_explanation_when_no_citations: "off"

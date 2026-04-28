@@ -21,7 +21,7 @@ docs_archive/
 tests/
 
 # Local data (if not required at runtime)
-# Note: models/ directory IS included for offline builds (sentence-transformers + LLM models)
+# Note: models/ directory may be included for offline builds (LLM weight trees).
 
 # Environment files
 .env

@@ -1,0 +1,13 @@
+---
+description: Prioritize pictorial communication in docs and explanations
+alwaysApply: true
+---
+
+# Pictorial-First Communication
+
+- Prefer diagram-first explanations for workflows, architecture, and setup steps.
+- When updating documentation, add or refresh a relevant visual (`.png`, Mermaid, or source diagram file) before expanding prose.
+- Keep text around visuals short and scannable: what it shows, when to use it, and failure path.
+- For multi-step processes, include decision points and retry/fallback paths visually.
+- Maintain one source-of-truth for generated diagrams (for example `.dot`/`.puml`) when possible, then regenerate image outputs.
+- If a visual and prose conflict, update the visual to match the current implementation and then align the prose.

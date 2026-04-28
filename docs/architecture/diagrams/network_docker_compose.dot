@@ -1,0 +1,56 @@
+/* Legacy: two vLLM containers + runner. Default: Ollama — see
+   network_docker_compose_ollama.dot and NETWORK_DIAGRAM.md. */
+digraph NetworkDockerCompose {
+  graph [
+    rankdir=LR,
+    splines=true,
+    bgcolor="#ffffff",
+    pad="0.3",
+    nodesep="0.6",
+    ranksep="0.8",
+    fontname="Arial"
+  ];
+
+  node [
+    shape=box,
+    style="rounded,filled",
+    fillcolor="#f8fafc",
+    color="#94a3b8",
+    fontcolor="#1e293b",
+    fontsize=12,
+    fontname="Arial",
+    margin="0.12,0.08"
+  ];
+
+  edge [
+    color="#334155",
+    penwidth=1.1,
+    arrowsize=0.7,
+    fontsize=10,
+    fontname="Arial",
+    fontcolor="#334155"
+  ];
+
+  laptop [label="Laptop / browser\n(SSH tunnel or IDE port-forward)"];
+  host [label="Offline server (host)\nDocker Engine + docker compose", fillcolor="#f1f5f9"];
+
+  subgraph cluster_net {
+    label="Docker network: compose project (qagredo_offline)\nDNS: vllm, vllm-judge, qagredo";
+    color="#cbd5e1";
+    style="rounded";
+
+    runner [label="Container: qagredo-runner\nQAGRedo pipeline\n(CLI; internal calls to vLLM)\nCalls internal APIs"];
+    framework [label="Inside runner:\nRequired LangGraph + LangChain", fillcolor="#e0f2fe", color="#0ea5e9"];
+    vllm [label="Container: qagredo-vllm\n(typical: Qwen3.5-9B generator)\nlistens: 0.0.0.0:7100\n/health, /docs, /openapi.json, /v1/*"];
+    judge [label="Container: qagredo-vllm-judge\n(typical: Llama 3.1 judge)\nlistens: 0.0.0.0:7101\n/health, /v1/*"];
+  }
+
+  laptop -> host [label="Tunnel to server localhost:${VLLM_HOST_PORT}"];
+  host -> vllm [label="TCP ${VLLM_HOST_PORT} -> ${VLLM_PORT}\n(published)"];
+  host -> judge [label="TCP ${VLLM_JUDGE_HOST_PORT} -> ${VLLM_JUDGE_PORT}\n(published)"];
+
+  runner -> framework [label="orchestration/parsing"];
+  framework -> vllm [label="HTTP GET http://vllm:7100/health"];
+  framework -> vllm [label="HTTP POST http://vllm:7100/v1/*\nAuth: Bearer $VLLM_API_KEY"];
+  framework -> judge [label="HTTP POST http://vllm-judge:7101/v1/*\nAuth: Bearer $VLLM_JUDGE_API_KEY"];
+}

@@ -184,11 +184,16 @@ def _merge_input_folder_to_jsonl(
     """
     folder_s = str(run_cfg.get("input_folder") or "").strip()
     resolved_dir = resolve_data_folder_path(folder_s)
-    glob_pat = str(run_cfg.get("input_glob") or "*.txt").strip() or "*.txt"
-    paths = sorted(
-        [p for p in resolved_dir.glob(glob_pat) if p.is_file()],
-        key=lambda p: p.name,
-    )
+    glob_raw = str(run_cfg.get("input_glob") or "*.txt").strip() or "*.txt"
+    patterns = [p.strip() for p in glob_raw.split(",") if p.strip()]
+    seen: set[Path] = set()
+    paths: list[Path] = []
+    for pat in patterns:
+        for p in resolved_dir.glob(pat):
+            if p.is_file() and p not in seen:
+                seen.add(p)
+                paths.append(p)
+    paths.sort(key=lambda p: p.name)
     mf = run_cfg.get("max_files")
     mf_i = 0
     if mf is not None:
@@ -201,7 +206,7 @@ def _merge_input_folder_to_jsonl(
 
     if not paths:
         raise ValueError(
-            f"No files matched run.input_glob={glob_pat!r} under "
+            f"No files matched run.input_glob={glob_raw!r} under "
             f"{resolved_dir}"
         )
 
@@ -216,11 +221,10 @@ def _merge_input_folder_to_jsonl(
         if ext == ".txt":
             records.append(_record_from_txt_path(p))
             continue
-        if ext in (".json", ".jsonl"):
+        if ext in (".json", ".jsonl") and not auto_cv:
             raise ValueError(
-                "Folder batch mode does not ingest .json/.jsonl per file; "
-                "set run.input_file to one JSON/JSONL, or narrow "
-                "run.input_glob (e.g. *.txt)."
+                "Folder batch needs run.auto_convert: true for .json/.jsonl "
+                "per file, or set run.input_file to one JSON/JSONL."
             )
         if not auto_cv:
             print(
@@ -289,6 +293,8 @@ def _infer_numeric_output_profile(provider: str, model: str) -> str:
 
     if provider_l == "openai":
         return "3"
+    if provider_l == "ollama":
+        return "ollama"
     if "llama" in model_l or "meta-llama" in model_l:
         return "1"
     # Fallback: keep provider name to avoid collisions.
@@ -893,6 +899,63 @@ def build_grading_summary_block(
     }
 
 
+def _is_valid_judge_verdict(verdict: Any) -> bool:
+    if not isinstance(verdict, dict):
+        return False
+    value = str(verdict.get("verdict", "")).strip().upper()
+    if value not in ("SUPPORTED", "NOT_SUPPORTED"):
+        return False
+    try:
+        conf = float(verdict.get("confidence", 0.0))
+    except (TypeError, ValueError):
+        return False
+    return 0.0 <= conf <= 1.0
+
+
+def _preflight_llm_judge(config: Dict[str, Any]) -> None:
+    """
+    Validate judge endpoint/model before processing input documents.
+
+    Strict mode requires a parseable judge verdict. This catches endpoint,
+    model-name, and parser issues early so the run fails fast.
+    """
+    probe = {
+        "id": "__judge_preflight__",
+        "title": "judge_preflight",
+        "content": (
+            "Alpha appears in the source text. Beta is not mentioned "
+            "in the source text."
+        ),
+        "questions": ["Does the source mention alpha?"],
+        "answers": ["The source mentions alpha."],
+    }
+    graded = grade_qa_results([probe], method="llm")
+    if not graded:
+        raise RuntimeError("Judge preflight failed: no grading result returned.")
+    checks = graded[0].get("hallucination_checks")
+    if not isinstance(checks, list) or not checks:
+        raise RuntimeError(
+            "Judge preflight failed: hallucination checks missing."
+        )
+    first = checks[0] if isinstance(checks[0], dict) else {}
+    check_result = first.get("check_result")
+    if not isinstance(check_result, dict):
+        raise RuntimeError(
+            "Judge preflight failed: check_result missing from grading output."
+        )
+    verdict = check_result.get("llm_verdict")
+    if not _is_valid_judge_verdict(verdict):
+        detail = (
+            verdict
+            if isinstance(verdict, dict)
+            else {"verdict": "UNKNOWN", "reason": "no llm_verdict present"}
+        )
+        raise RuntimeError(
+            "Judge preflight failed: invalid llm_verdict "
+            f"payload ({detail})."
+        )
+
+
 def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
     input_path = settings["input_file"]
     run_cfg = config.get("run") if isinstance(config.get("run"), dict) else {}
@@ -947,8 +1010,20 @@ def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
         else {}
     )
     halluc_method = str(halluc_cfg.get("method") or "hybrid").strip().lower()
+    judge_required = _config_bool(halluc_cfg.get("judge_required"))
+    allow_raw = halluc_cfg.get("allow_semantic_fallback")
+    if allow_raw is None:
+        allow_semantic_fallback = halluc_method == "hybrid"
+    else:
+        allow_semantic_fallback = _config_bool(allow_raw)
+    if judge_required:
+        allow_semantic_fallback = False
     if halluc_method in ("llm", "hybrid"):
         set_llm_config(config)
+    if halluc_method == "llm" and judge_required:
+        print("Judge preflight: checking LLM judge availability...")
+        _preflight_llm_judge(config)
+        print("[OK] Judge preflight passed.\n")
     print(f"Halluc. method : {halluc_method}")
     print()
 
@@ -1101,19 +1176,24 @@ def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
                         f"[WARN] Could not grade {doc_id} "
                         f"({halluc_method}): {exc}"
                     )
+                    if not allow_semantic_fallback:
+                        raise RuntimeError(
+                            "Grading failed and semantic fallback is disabled "
+                            f"(method={halluc_method}): {exc}"
+                        ) from exc
                     if halluc_method in ("hybrid", "llm"):
                         try:
                             t_grade = time.time()
                             grading_payload = {**document, **qa_result}
                             graded_results = grade_qa_results(
-                                [grading_payload], method="semantic"
+                                [grading_payload], method="keyword"
                             )
                             if graded_results:
                                 analysis_info = graded_results[0]
                                 gtime = time.time() - t_grade
                         except Exception as exc2:
                             print(
-                                "[WARN] Semantic fallback grading failed: "
+                                "[WARN] Keyword fallback grading failed: "
                                 f"{exc2}"
                             )
                 total_gtime += gtime
@@ -1433,6 +1513,14 @@ def parse_args() -> argparse.Namespace:
             "0 = all loaded)."
         ),
     )
+    parser.add_argument(
+        "--minimal-qa-output",
+        action="store_true",
+        help=(
+            "Set run.minimal_qa_output true: saved JSON is only "
+            "document.content plus qa_pairs (question/answer per row)."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -1498,6 +1586,12 @@ def main() -> None:
             provider_override=provider_override,
             model_override=model_override,
         )
+    if args.minimal_qa_output:
+        run_block = effective_config.get("run")
+        if not isinstance(run_block, dict):
+            effective_config["run"] = {"minimal_qa_output": True}
+        else:
+            run_block["minimal_qa_output"] = True
     run_pipeline(effective_config, settings)
 
 

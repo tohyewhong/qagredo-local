@@ -1,7 +1,232 @@
-# QAGRedo Offline Server Guide
+# Legacy Pointer
 
-> **This is your single reference for working on the offline server.**
-> Everything you need is inside this `qagredo_host/` directory.
+The canonical offline documentation has moved to:
+
+- `docs/OFFLINE_SETUP_GUIDE.md`
+
+Please update bookmarks and scripts to use the `docs/` path.
+# Legacy Pointer
+
+The canonical offline documentation has moved to:
+
+- `docs/OFFLINE_SETUP_GUIDE.md`
+
+Please update bookmarks and scripts to use the `docs/` path.
+# QAGRedo Offline Guide
+
+This is the main practical guide for running QAGRedo on an offline server. Maintainer index: **`docs/HANDOVER.md`**.
+
+```mermaid
+flowchart LR
+  Bundle[qagredo_bundle.tar.gz] --> Host[qagredo_host/]
+  Images[Docker image .tar files] --> Load[docker load / setup_offline.sh]
+  Models[Ollama or HF model archives] --> Store[Host model directories]
+  Host --> Run[bash run.sh]
+  Load --> Run
+  Store --> Run
+```
+
+---
+
+## Quick Start (3 steps)
+
+1) Pick profile in `.env`:
+
+```bash
+QAGREDO_PROFILE=dev        # host Ollama
+# QAGREDO_PROFILE=kubeflow # in-container Ollama
+# QAGREDO_PROFILE=vllm     # dual vLLM services
+```
+
+2) Set paths in `.env`:
+
+```bash
+QAGREDO_SHARED_DATA_ROOT=/data/local/tyewhong/Data
+QAGREDO_OFFLINE_INPUT=txt
+QAGREDO_MODELS_DIR=/data/models/models_ollama      # kubeflow only (Ollama store)
+QAGREDO_MODELS_LLM_HOST=/data/models               # vllm only (HF folders)
+```
+
+3) Run:
+
+```bash
+bash run.sh --status
+bash run.sh --num-documents 2
+```
+
+---
+
+## What to edit (and where)
+
+| You want to change | File |
+|---|---|
+| Profile, host paths, UID/GID | `.env` |
+| Question model, judge model, num docs/questions | `config/config.<profile>.yaml` |
+| vLLM GPU IDs (2-GPU default) | `docker-compose.vllm-stack.yml` |
+| 4-GPU vLLM split (optional) | `QAGREDO_VLLM_COMPOSE_EXTRA=docker-compose.vllm-redserver.yml` (see `docs/SERVER_MODEL_PROFILES.md`) |
+
+Do not edit `config/config.yaml` for daily use; use profile files instead.
+
+---
+
+## Profile behavior
+
+### `dev`
+
+- Uses host Ollama at `127.0.0.1:11434`.
+- Requires `ollama` binary on offline host.
+- Model tags come from `config/config.dev.yaml`.
+
+### `kubeflow`
+
+- Uses in-container Ollama.
+- Requires `qagredo-kubeflow.tar`.
+- `QAGREDO_MODELS_DIR` must point to Ollama store with:
+  - `blobs/`
+  - `manifests/`
+- Model tags come from `config/config.kubeflow.yaml`.
+
+### `vllm`
+
+- Uses `vllm` and `vllm-judge` services.
+- Requires HF directories plus vLLM image tar.
+- `config/config.vllm.yaml` must use:
+  - `http://vllm:7100/v1`
+  - `http://vllm-judge:7101/v1`
+
+---
+
+## Offline transfer checklist
+
+### A) `dev` profile
+
+- `qagredo_bundle.tar.gz`
+- `qagredo-v1.tar`
+- `models_ollama.tar.gz` (or split `models_ollama_<tag>.tar.gz`)
+
+### B) `kubeflow` profile
+
+- `qagredo_bundle.tar.gz`
+- `qagredo-kubeflow.tar`
+- `models_ollama.tar.gz` (or split `models_ollama_<tag>.tar.gz`)
+
+### C) `vllm` profile
+
+- `qagredo_bundle.tar.gz`
+- `qagredo-v1.tar`
+- `vllm-openai_*.rootfs.tar`
+- `models_vllm.tar.gz`
+
+---
+
+## Build tarballs (online machine)
+
+```bash
+# all outputs
+bash scripts/make_offline_tarballs.sh --all
+
+# dev
+bash scripts/make_offline_tarballs.sh --bundle --image-dev --models-ollama
+
+# kubeflow
+bash scripts/make_offline_tarballs.sh --bundle --image-kubeflow --models-ollama
+
+# vllm
+bash scripts/make_offline_tarballs.sh --bundle --image-dev --image-vllm --models-vllm
+```
+
+Split Ollama archives for size-limited transfer:
+
+```bash
+bash scripts/make_offline_tarballs.sh \
+  --models-ollama-split=qwen3.5:9b,llama3.1:8b-instruct-fp16
+```
+
+---
+
+## Setup on offline host
+
+```bash
+# 1) extract bundle
+tar xzf qagredo_bundle.tar.gz
+cd qagredo_host
+
+# 2) one-time setup
+bash setup_offline.sh --profile <dev|kubeflow|vllm>
+
+# 3) run
+bash run.sh --show-config
+bash run.sh --num-documents 2
+```
+
+Use `--skip-images` if image tars are already loaded.
+Use `--force` to overwrite existing model links/directories.
+
+---
+
+## Correct model extraction paths
+
+### Ollama split tar files
+
+If your tar contains top-level `models/`, use `--strip-components=1`:
+
+```bash
+mkdir -p /data/models/models_ollama
+tar xzf models_ollama_qwen3.5_9b.tar.gz -C /data/models/models_ollama --strip-components=1
+tar xzf models_ollama_llama3.1_8b-instruct-fp16.tar.gz -C /data/models/models_ollama --strip-components=1
+```
+
+Verify:
+
+```bash
+ls -ld /data/models/models_ollama/blobs /data/models/models_ollama/manifests
+```
+
+### vLLM model archive
+
+Extract HF directories under `/data/models` (or your chosen root), then set:
+
+```bash
+QAGREDO_MODELS_LLM_HOST=/data/models
+```
+
+---
+
+## Switching between vLLM and Ollama later
+
+1) Change `.env` `QAGREDO_PROFILE`.
+2) Make sure corresponding image tar was loaded.
+3) Make sure corresponding model format exists:
+   - Ollama store for `dev`/`kubeflow`
+   - HF folders for `vllm`
+4) Edit the matching config file only.
+5) Run:
+
+```bash
+bash run.sh --status
+bash run.sh
+```
+
+---
+
+## Common errors
+
+### `which ollama` is empty
+
+You cannot run `dev` profile. Use `kubeflow` or install Ollama.
+
+### `Ollama not reachable on port 11434`
+
+`dev` profile selected, but host Ollama API is unavailable.
+
+### vLLM connection errors from runner
+
+Check `config/config.vllm.yaml` base URLs. Must be Docker service names, not localhost.
+
+### `model type qwen3 not recognized` in vLLM
+
+Current vLLM stack cannot load that Qwen3 checkpoint version.
+Use Qwen2.5 in vLLM profile, or use Ollama profile for Qwen3.
 
 ---
 
@@ -17,10 +242,10 @@ QAGRedo is an automated pipeline that:
    questions are automatically regenerated with targeted feedback.
 3. **Generates grounded answers** with supporting evidence, using a
    structured format and low temperature (0.3) for factual accuracy
-4. **Verifies grounding** using a hybrid method: fast semantic similarity
-   (MiniLM) for clear cases, LLM-as-judge fallback for edge cases
-   (counting, aggregation, inference). Judging uses a **separate model**
-   (Qwen) to avoid self-evaluation bias.
+4. **Verifies grounding** with a **strict LLM judge**: a separate judge
+   model (different Ollama tag or vLLM endpoint) evaluates every answer
+   against the source document. Any invalid or missing judge response
+   fails the run — there is no silent semantic fallback.
 5. **Grades** each document (A/B/C/D/F) based on answer grounding confidence
 6. **Saves** results to timestamped folders with detailed reasons for any
    ungrounded content
@@ -38,18 +263,20 @@ qagredo_host/                          <-- YOU ARE HERE
 |
 |-- OFFLINE_GUIDE.md                   * This file
 |-- run.sh                             * Run the pipeline
-|-- jupyter.sh                         * Start Jupyter Lab
 |-- setup_offline.sh                     First-time setup only
 |-- verify_offline_deployment.sh         * Verify Docker image matches requirements.txt
 |
 |-- config/
-|   +-- config.yaml                    * Pipeline configuration (edit this)
+|   |-- config.dev.yaml                * Dev profile (host Ollama) — edit this
+|   |-- config.kubeflow.yaml           * Kubeflow profile (in-container Ollama)
+|   |-- config.vllm.yaml               * vLLM profile (dual GPU)
+|   +-- config.yaml                      Legacy default (kept as a copy of dev)
 |
 |-- data/
 |   +-- *.jsonl                        * Your input documents (put files here)
 |
 |-- output/                            * Results appear here (auto-created)
-|   +-- vllm/<model>/YYYY-MM-DD_HHMMSS/
+|   +-- ollama/<model>/YYYY-MM-DD_HHMMSS/   (or vllm/... if profile=vllm)
 |       +-- *_analysis.json
 |
 |-- utils/                               Python modules (edit to customise)
@@ -63,12 +290,16 @@ qagredo_host/                          <-- YOU ARE HERE
 |
 |-- run_qa_pipeline.py                   Main pipeline script
 |-- requirements.txt                     Python deps (must match qagredo-v1.tar)
-|-- docker-compose.yml           Docker services definition
+|-- docker-compose.yml                   Dev profile: runner + host Ollama
+|-- docker-compose.kubeflow.yml          Kubeflow: single image with in-container Ollama
+|-- docker-compose.vllm-stack.yml        vLLM: vllm + vllm-judge + runner
+|-- Dockerfile, Dockerfile.kubeflow      Source Dockerfiles (for on-site rebuilds)
 |-- scripts/
 |   |-- conversion/
 |   |   +-- convert_to_qagredo_jsonl.py  Convert JSON/PDF/TXT/XLSX -> JSONL
 |   +-- utils/
 |       +-- summarize_run.sh             Summarise results with reasons
+|       +-- export_analysis_minimal.py   Full *_analysis.json → *_analysis_minimal.json (no LLM rerun)
 |
 |-- docs/                                Detailed documentation
 |   |-- ALGORITHM_REPORT.md              Algorithm details & design rationale
@@ -76,15 +307,31 @@ qagredo_host/                          <-- YOU ARE HERE
 |   +-- architecture/
 |
 |-- README.md                            Project overview
-|-- .env                                 Auto-generated by setup (do not edit)
-|-- hf_cache/                            Model cache for vLLM (auto-created)
-|-- hf_cache_judge/                     Model cache for vLLM-judge (auto-created)
-+-- models_llm/ -> (symlink to LLM)     Created by setup_offline.sh
+|-- .env                                 Host-side settings (edit: profile, data paths)
+|-- hf_cache/, hf_cache_judge/           HF cache (used by vLLM profile)
+|-- models/                              Ollama GGUF store (dev / kubeflow — created by setup)
++-- models_llm/                          HuggingFace model dirs (vllm profile — created by setup)
 ```
 
 Files marked with * are the ones you interact with most often.
 
 ---
+
+## Dual vLLM GPU layouts (required for vLLM stack)
+
+**Skip this section if you use Ollama only.** The vLLM stack is always **two services**: `vllm` (question + answer) and `vllm-judge` (separate model). There is no single-vLLM or shared-judge mode in this repo.
+
+```mermaid
+flowchart LR
+  R[run.sh] --> G[vllm generator 7100]
+  R --> J[vllm-judge 7101]
+```
+
+1. **Default 2-GPU host:** `docker-compose.vllm-stack.yml` maps the generator to GPU `0` and the judge to GPU `1`. Use `VLLM_TP_SIZE=1` and `VLLM_JUDGE_TP_SIZE=1` unless you edit `device_ids`.
+2. **4-GPU host (2+2):** set `QAGREDO_VLLM_COMPOSE_EXTRA=docker-compose.vllm-redserver.yml`, with `VLLM_TP_SIZE=2` and `VLLM_JUDGE_TP_SIZE=2` in `.env` (see also `docs/SERVER_MODEL_PROFILES.md`).
+3. If `VLLM_TP_SIZE>1` for the generator, you **must** expose that many GPUs on the `vllm` service. Otherwise you get Ray / “required GPUs > available”. `run.sh` blocks TP>1 unless a matching compose override is selected or `QAGREDO_ALLOW_TP2_WITHOUT_SINGLE=1` is set after editing `device_ids`.
+
+**Failure path:** vLLM / Ray “required GPUs > available” means `device_ids` for that service does not match `VLLM_TP_SIZE` or `VLLM_JUDGE_TP_SIZE`.
 
 ## Quick command reference
 
@@ -107,11 +354,11 @@ See `docs/OFFLINE_SETUP_GUIDE.md` — keep `qagredo_bundle.tar.gz` and `qagredo-
 ### Run the pipeline
 
 ```bash
-bash run.sh                         # Start three containers (vLLM + vLLM-judge + pipeline)
+bash run.sh                         # Start containers for the active profile and run the pipeline
 bash run.sh --down                  # Stop all containers
-bash run.sh --status                # Show container status + vLLM health
-bash run.sh --logs                  # Tail vLLM logs (Ctrl+C to stop)
-bash run.sh --show-config           # Display config, env vars, and data files
+bash run.sh --status                # Show container status + backend health
+bash run.sh --logs                  # Tail container logs (Ctrl+C to stop)
+bash run.sh --show-config           # Display active profile YAML + env vars
 bash run.sh --help                  # Show all options
 ```
 
@@ -142,26 +389,13 @@ and ignores **`run.input_type`**. Prepare PDF/TXT/etc. with
 to **`convert_to_qagredo_jsonl.py`** (raw `content` stays unchanged). The
 **`run.semantic_normalization`** block in YAML is **not** read by that script.
 
-### Jupyter Lab
+### Port configuration
 
-Port changes should be made in `.env` only:
-- `VLLM_HOST_PORT`
-- `VLLM_JUDGE_HOST_PORT`
-- `JUPYTER_PORT`
-
-```bash
-bash jupyter.sh                     # Start Jupyter + vLLM
-bash jupyter.sh --no-vllm           # Start Jupyter only (no GPU)
-bash jupyter.sh --down              # Stop Jupyter
-```
-
-Then open: `http://localhost:${JUPYTER_PORT}`
-
-If connecting remotely:
-```bash
-source .env
-ssh -L ${JUPYTER_PORT}:localhost:${JUPYTER_PORT} user@offline-server
-```
+Use **`.env`** for host port overrides. For the `dev` / `kubeflow` profiles,
+Ollama listens on `OLLAMA_HOST_PORT` (default `11434`). For the `vllm`
+profile, `VLLM_HOST_PORT` (default `7100`) and `VLLM_JUDGE_HOST_PORT`
+(default `7101`) control where the generator and judge services are
+reachable on the host.
 
 ---
 
@@ -182,13 +416,13 @@ python3 scripts/conversion/convert_to_qagredo_jsonl.py \
     --output data/my_input.jsonl
 ```
 
-### 2. Edit `config/config.yaml`
+### 2. Edit the profile config (e.g. `config/config.dev.yaml`)
 
-Open the config file and set input selection + run parameters:
+Open the active profile file and set input selection + run parameters:
 
 ```bash
-vi config/config.yaml
-# or: nano config/config.yaml
+vi config/config.dev.yaml
+# or: config/config.kubeflow.yaml / config/config.vllm.yaml — must match QAGREDO_PROFILE
 ```
 
 Key settings to change:
@@ -214,7 +448,7 @@ answer_generation:
   temperature: 0.3                  # <-- lower = more factual
 
 hallucination:
-  method: "hybrid"                  # <-- semantic, keyword, llm, or hybrid
+  method: "llm"                     # strict default in shipped profiles
 ```
 
 ### 3. Run the pipeline
@@ -226,7 +460,7 @@ bash run.sh
 This will:
 1. Start vLLM (GPU) and wait for it to be ready
 2. Run the QAGRedo pipeline
-3. Save results in `output/vllm/<model>/YYYY-MM-DD_HHMMSS/`
+3. Save results in `output/<provider>/<model>/YYYY-MM-DD_HHMMSS/` (default `provider` is `ollama`)
 
 Optional one-off override without editing config:
 ```bash
@@ -246,7 +480,7 @@ bash scripts/utils/summarize_run.sh --latest
 bash scripts/utils/summarize_run.sh --latest --json
 
 # List output files
-ls -lt output/vllm/*/
+ls -lt output/ollama/*/ 2>/dev/null || ls -lt output/*/*/
 ```
 
 The terminal summary shows Generator, Judge, and Provider. The **run_summary.json** includes:
@@ -262,10 +496,10 @@ The terminal summary shows Generator, Judge, and Provider. The **run_summary.jso
 
 ### 5. Re-run with different settings
 
-Just edit `config/config.yaml` and run again:
+Just edit the same profile YAML and run again:
 
 ```bash
-vi config/config.yaml
+vi config/config.dev.yaml
 bash run.sh
 ```
 
@@ -317,11 +551,11 @@ questions survive.
 
 ### Hallucination grading (hybrid)
 
-1. **Pass 1 (fast)**: Semantic similarity with sliding window (MiniLM, CPU)
+1. **Pass 1 (legacy config)**: Keyword overlap — if ``hallucination.method`` was ``semantic``, it maps to keyword (embeddings removed).
    - Compares each answer sentence against 1/2/3-sentence document chunks
    - If all grounded: done (no LLM call needed)
 2. **Pass 2 (accurate)**: LLM-as-judge (Qwen, only if Pass 1 found ungrounded sentences)
-   - Uses a **separate model** (Qwen2.5-7B) to avoid self-evaluation bias
+   - Uses a **separate judge model** (e.g. Llama vs Qwen generator) to avoid self-evaluation bias
    - Handles counting, aggregation, inference, multi-hop reasoning
    - Can override or confirm the semantic verdict
 
@@ -339,7 +573,7 @@ questions survive.
 
 ## Configuration reference
 
-### `config/config.yaml` -- all settings
+### Profile YAML (`config/config.<profile>.yaml`) — key blocks
 
 ```yaml
 # What to process
@@ -355,14 +589,25 @@ run:
     enable: false
     max_content_chars: 5000
 
-# LLM connection (usually don't need to change)
+# LLM connection (Ollama default — tags from `ollama list`)
 llm:
-  provider: "vllm"
-  model: "meta-llama/Meta-Llama-3.1-8B-Instruct"
+  provider: "ollama"
+  model: "qwen3.5:9b"
   temperature: 0.7                  # for question generation
   max_tokens: 500
-  api_key: "llama-local"
-  base_url: "http://localhost:<VLLM_HOST_PORT>/v1"
+  api_key: "ollama-local"
+  base_url: "http://localhost:11434/v1"
+
+judge:
+  provider: "ollama"
+  model: "llama3.1:8b"
+  base_url: "http://localhost:11434/v1"
+  api_key: "ollama-local"
+  temperature: 0.0
+  max_tokens: 200
+  timeout: 60
+  max_retries: 3
+  retry_delay: 1.0
 
 # Answer generation
 answer_generation:
@@ -398,70 +643,47 @@ hallucination:
   method: "hybrid"                  # semantic | keyword | llm | hybrid
 ```
 
-### Environment variables (optional overrides)
+### What you actually edit
 
-Set these in your shell before running, or add to `.env`:
+All non-host settings (provider, model, temperature, retries, …) are in the
+**profile YAML**, not `.env`. Open the file for the profile you're running:
 
-| Variable | Default | What it does |
-|----------|---------|-------------|
-| `VLLM_MAX_MODEL_LEN` | `8192` | Max context window |
-| `VLLM_TP_SIZE` | `2` | Tensor parallelism (number of GPUs) |
-| `VLLM_GPU_UTIL` | `0.85` | GPU memory fraction to use |
-| `VLLM_MODEL` | `/models/Meta-Llama-3.1-8B-Instruct` | Model path inside container |
-| `VLLM_SERVED_MODEL_NAME` | `meta-llama/Meta-Llama-3.1-8B-Instruct` | Model name for API |
-| `VLLM_API_KEY` | `llama-local` | API key (must match config.yaml) |
-| `VLLM_JUDGE_MODEL` | `/models/Qwen2.5-7B-Instruct` | Judge model path (vLLM-judge container) |
-| `VLLM_JUDGE_SERVED_NAME` | `Qwen/Qwen2.5-7B-Instruct` | Judge model name for API |
-| `VLLM_JUDGE_API_KEY` | `qwen-local` | Judge API key (must match hallucination config) |
-| `VLLM_JUDGE_TP_SIZE` | `1` | Judge tensor parallelism (GPU count for judge service) |
+- `config/config.dev.yaml` — dev profile (host Ollama)
+- `config/config.kubeflow.yaml` — kubeflow profile (in-container Ollama)
+- `config/config.vllm.yaml` — vllm profile (dual GPU)
 
-**Models & hardware**: The system uses **two LLMs** — Llama-3.1-8B (vLLM, GPU 0) for
-question/answer generation, and Qwen2.5-7B (vLLM-judge, GPU 1) for independent
-hallucination grading. Using a separate judge model avoids self-evaluation bias.
+The only env vars that still matter live in `.env`:
 
-Example:
-```bash
-export VLLM_MAX_MODEL_LEN=16384
-bash run.sh
-```
+| Variable | What it does |
+|---|---|
+| `QAGREDO_PROFILE` | Which profile to run (`dev` / `kubeflow` / `vllm`) |
+| `QAGREDO_DATA_DIR` (or `QAGREDO_OFFLINE_HOST` + `QAGREDO_OFFLINE_INPUT`) | Where your input documents live |
+| `QAGREDO_MODELS_DIR` | (kubeflow) host path for the Ollama GGUF store |
+| `QAGREDO_MODELS_LLM_HOST` | (vllm) host path for the HuggingFace model dirs |
+| `HOST_UID`, `HOST_GID` | Owner of files written by the container |
+| `VLLM_*` | (vllm) generator/judge model paths and TP size — see `.env` |
 
-### On-site swap to Meta-Llama-3.3-70B + Qwen3.5-27B
+### Swapping to a bigger vLLM model (e.g. 70B)
 
-Use this when model files are on the host at `/mnt/usr/models/...`.
+1. Put the HuggingFace model dir under `$QAGREDO_MODELS_LLM_HOST`
+   (default: `./models_llm/`), e.g. `models_llm/Meta-Llama-3.3-70B-Instruct/`.
+2. Edit `.env`:
 
-1) `docker-compose.yml` (both `vllm` and `vllm-judge`):
-- comment: `- ./models_llm:/models:ro`
-- uncomment: `- /mnt/usr/models:/models:ro`
+   ```bash
+   VLLM_MODEL=/models/Meta-Llama-3.3-70B-Instruct
+   VLLM_SERVED_MODEL_NAME=meta-llama/Meta-Llama-3.3-70B-Instruct
+   VLLM_TP_SIZE=2
+   QAGREDO_VLLM_COMPOSE_EXTRA=docker-compose.vllm-redserver.yml
+   ```
 
-2) `.env` (uncomment these):
+3. Edit `config/config.vllm.yaml` — set `llm.model` to match
+   `VLLM_SERVED_MODEL_NAME` (and `judge.model` similarly).
+4. Confirm the compose override maps the `vllm` service's `device_ids` to a
+   list with `VLLM_TP_SIZE` entries, e.g. `["0","1"]`.
+5. `bash run.sh --down && bash run.sh`.
 
-```bash
-VLLM_MODEL=/models/Meta-Llama-3.3-70B-Instruct
-VLLM_SERVED_MODEL_NAME=meta-llama/Meta-Llama-3.3-70B-Instruct
-VLLM_TP_SIZE=2
-
-VLLM_JUDGE_MODEL=/models/Qwen3.5-27B
-VLLM_JUDGE_SERVED_NAME=Qwen/Qwen3.5-27B
-VLLM_JUDGE_TP_SIZE=2
-```
-
-3) `config/config.yaml` (uncomment the on-site alternatives):
-
-```yaml
-llm:
-  # model: "meta-llama/Meta-Llama-3.1-8B-Instruct"
-  model: "meta-llama/Meta-Llama-3.3-70B-Instruct"
-
-judge:
-  # model: "Qwen/Qwen2.5-7B-Instruct"
-  model: "Qwen/Qwen3.5-27B"
-```
-
-4) GPU rule:
-- `--tensor-parallel-size` must match the count of `device_ids` in each
-  service.
-- Running generator=2 GPUs and judge=2 GPUs at the same time usually requires
-  4 host GPUs total.
+`--tensor-parallel-size` must equal the number of `device_ids`. Running
+generator=2 GPUs and judge=2 GPUs at the same time requires 4 host GPUs.
 
 ---
 
@@ -471,7 +693,7 @@ If your LLMs (Llama, Qwen, or any other models) are already running on a
 **different machine** (e.g. "Server A"), you do not need to start vLLM locally.
 You only need to tell QAGRedo where to find those models.
 
-Everything is controlled by **one file**: `config/config.yaml`.
+Edit the **active profile file** — `config/config.dev.yaml`, `config/config.kubeflow.yaml`, or `config/config.vllm.yaml` — matching **`QAGREDO_PROFILE`** in `.env`. The same `llm:` / `judge:` keys apply as in the examples below.
 
 ### What you need to know before editing
 
@@ -518,11 +740,11 @@ The `"id"` value is what you put in the `model:` field.
 
 ### Step-by-step: Point QAGRedo at Server A
 
-**1. Open the config file:**
+**1. Open the profile config** (example for `dev`):
 
 ```bash
-vi config/config.yaml
-# or: nano config/config.yaml
+vi config/config.dev.yaml
+# or: config/config.kubeflow.yaml / config/config.vllm.yaml — must match QAGREDO_PROFILE
 ```
 
 **2. Edit the `llm:` section** (generator -- produces questions and answers):
@@ -532,10 +754,10 @@ Server A is serving:
 
 ```yaml
 llm:
-  provider: "vllm"
-  model: "meta-llama/Meta-Llama-3.1-8B-Instruct"   # must match Server A's served name
+  provider: "ollama"                                 # or "vllm" if Server A is vLLM
+  model: "qwen3.5:9b"                                # Ollama tag or vLLM served name
   base_url: "http://<SERVER_A_HOST>:<SERVER_A_GEN_PORT>/v1"
-  api_key: "llama-local"                             # must match Server A's API key
+  api_key: "ollama-local"                            # Ollama often ignores; vLLM: match --api-key
   temperature: 0.7
   max_tokens: 500
   max_retries: 3
@@ -547,10 +769,10 @@ llm:
 
 ```yaml
 judge:
-  provider: "vllm"
-  model: "Qwen/Qwen2.5-7B-Instruct"                # must match Server A's served name
+  provider: "ollama"
+  model: "llama3.1:8b"
   base_url: "http://<SERVER_A_HOST>:<SERVER_A_JUDGE_PORT>/v1"
-  api_key: "qwen-local"                              # must match Server A's API key
+  api_key: "ollama-local"
   temperature: 0.0
   max_tokens: 200
   timeout: 60
@@ -564,12 +786,11 @@ judge:
 bash run.sh
 ```
 
-> **Note:** If Server A's models are already running, you do NOT need to start
-> local vLLM containers. You can run just the pipeline container, or run the
-> pipeline directly on the host:
+> **Note:** If Server A's **Ollama or vLLM** is already running, you do not need
+> local GPU LLM containers. Run just the pipeline container, or run on the host:
 >
 > ```bash
-> .venv/bin/python run_qa_pipeline.py --config config/config.yaml
+> .venv/bin/python run_qa_pipeline.py --config config/config.dev.yaml
 > ```
 
 ### Verify connectivity before running
@@ -615,11 +836,11 @@ curl -s "http://${SERVER_A_HOST}:${SERVER_A_MODEL_C_PORT}/v1/models" | python3 -
 # Returns:  "id": "org/Model-C-32B-Instruct"
 ```
 
-**Step 2.** Edit `config/config.yaml`:
+**Step 2.** Edit the active profile config (example paths as above):
 
 ```yaml
 llm:
-  provider: "vllm"
+  provider: "ollama"                                 # or vllm for OpenAI-compatible servers
   model: "org/Model-B-70B-Instruct"                 # <-- from /v1/models
   base_url: "http://<SERVER_A_HOST>:<SERVER_A_MODEL_B_PORT>/v1"
   api_key: "server-a-api-key"                        # <-- whatever Server A expects
@@ -630,7 +851,7 @@ llm:
   timeout: 60
 
 judge:
-  provider: "vllm"
+  provider: "ollama"
   model: "org/Model-C-32B-Instruct"                  # <-- from /v1/models
   base_url: "http://<SERVER_A_HOST>:<SERVER_A_MODEL_C_PORT>/v1"
   api_key: "server-a-api-key"                         # <-- whatever Server A expects
@@ -647,17 +868,17 @@ judge:
 bash run.sh
 ```
 
-Output will be saved to `output/vllm/org-model-b-70b-instruct/YYYY-MM-DD_HHMMSS/`
-(folder name is derived from the generator model name).
+Output will be saved to `output/<provider>/org-model-b-70b-instruct/YYYY-MM-DD_HHMMSS/`
+(folder name is derived from the generator model name; `provider` is usually `ollama`).
 
 ### What each field means
 
 | Field | Section | Purpose | How to decide the value |
 |-------|---------|---------|------------------------|
-| `provider` | `llm` / `judge` | Which API protocol to use | Always `"vllm"` for local/remote vLLM servers |
-| `model` | `llm` / `judge` | Model name sent in API requests | **Must exactly match** what `/v1/models` returns |
-| `base_url` | `llm` / `judge` | Full URL to the vLLM API | `http://<IP>:<PORT>/v1` |
-| `api_key` | `llm` / `judge` | Authentication token | Must match what vLLM was started with (`--api-key`) |
+| `provider` | `llm` / `judge` | Which API protocol to use | `"ollama"` (default) or `"vllm"` for OpenAI-compatible servers |
+| `model` | `llm` / `judge` | Model name sent in API requests | Ollama **tag** or vLLM **served name** — must match server |
+| `base_url` | `llm` / `judge` | OpenAI-compatible base URL | `http://<IP>:<PORT>/v1` (Ollama exposes this) |
+| `api_key` | `llm` / `judge` | Authentication token | vLLM: match `--api-key`; Ollama: often placeholder |
 | `temperature` | `llm` | Randomness for generation | `0.7` for questions (diverse), `0.3` for answers (factual) |
 | `temperature` | `judge` | Randomness for grading | Always `0.0` (deterministic, reproducible verdicts) |
 | `max_tokens` | `llm` / `judge` | Max output length per request | `500` for generation, `200` for judge |
@@ -687,13 +908,13 @@ Output will be saved to `output/vllm/org-model-b-70b-instruct/YYYY-MM-DD_HHMMSS/
 | `401 Unauthorized` | `api_key` doesn't match Server A's key | Ask admin for the correct key, or check Server A's `--api-key` flag |
 | `timeout` errors | Model is overloaded or very large | Increase `timeout` to `120` or `300` |
 | Grading always uses semantic (never LLM judge) | Judge `base_url` is unreachable | Check `judge.base_url` separately from `llm.base_url` |
-| Output folder has wrong model name | Config was not saved before running | Re-check `config/config.yaml` and re-run |
+| Output folder has wrong model name | Config was not saved before running | Re-check `config/config.<profile>.yaml` and re-run |
 
 ---
 
 ## Output mode quick guide
 
-Set under `run:` in `config/config.yaml`:
+Set under `run:` in `config/config.<profile>.yaml`:
 
 ```yaml
 # Full output (default)
@@ -722,6 +943,27 @@ Minimal output shape:
 }
 ```
 
+### Post-hoc minimal files (no pipeline rerun)
+
+Use **`scripts/utils/export_analysis_minimal.py`** when full `*_analysis.json` files already exist (on-site archive, handoff, or a run made with `minimal_qa_output: false`) and you want the **minimal** JSON next to them **without** re-running `run.sh` or the LLM stack. Each source `foo_analysis.json` produces **`foo_analysis_minimal.json`** in the same directory.
+
+From the bundle root on the host (Python 3 with the repo on the path, same as running other `scripts/utils` tools):
+
+```bash
+python3 scripts/utils/export_analysis_minimal.py output/ollama/qwen3.5-9b/2026-02-13_143025/
+python3 scripts/utils/export_analysis_minimal.py path/to/one_doc_analysis.json
+python3 scripts/utils/export_analysis_minimal.py --dry-run output/ollama/qwen3.5-9b/2026-02-13_143025/
+python3 scripts/utils/export_analysis_minimal.py --force output/ollama/qwen3.5-9b/2026-02-13_143025/
+```
+
+**Recommended on the offline host** (uses the same image and `/workspace` mounts as the pipeline):
+
+```bash
+docker compose run --rm qagredo python /workspace/scripts/utils/export_analysis_minimal.py /workspace/output/ollama/qwen3.5-9b/2026-02-13_143025/
+```
+
+Replace `ollama/qwen3.5-9b/…` with your actual `output/<provider>/<model>/<timestamp>/` path.
+
 ---
 
 ## Understanding the output
@@ -731,7 +973,7 @@ Minimal output shape:
 Each run creates a unique timestamped folder:
 
 ```
-output/vllm/meta-llama-meta-llama-3.1-8b-instruct/2026-02-13_143025/
+output/ollama/qwen3.5-9b/2026-02-13_143025/
 |-- 20260213_143025_doc_abc_1_doc1_analysis.json
 |-- 20260213_143210_doc_abc_2_doc2_analysis.json
 +-- ...
@@ -762,6 +1004,8 @@ bash scripts/utils/summarize_run.sh --latest
 # Save as JSON for detailed analysis
 bash scripts/utils/summarize_run.sh --latest --json
 ```
+
+Minimal per-document JSON only (no LLM rerun) — see **Post-hoc minimal files** under *Output mode quick guide* above: `scripts/utils/export_analysis_minimal.py`.
 
 The JSON summary includes:
 - **`generator_model` and `judge_model`** (separate fields)
@@ -831,13 +1075,34 @@ docker-compose. GPU assignment is handled entirely by Docker's
 as device 0 inside the container, so `CUDA_VISIBLE_DEVICES: "1"` would try to
 find a non-existent second GPU.
 
+**`nvidia-container-cli: mount error: ... nvidia-persistenced/socket: no such device or address`**:
+often **not** a broken daemon — Docker Compose can **merge** two GPU reservation
+blocks for the same service (e.g. base `device_ids: ["0"]` plus an overlay
+`["0","1"]`), which breaks the hook. This repo keeps **one** `vllm` GPU stanza
+directly inside `docker-compose.vllm-stack.yml` (generator `vllm` GPU list only);
+use `docker compose config` and confirm `vllm.deploy...devices` has a **single**
+list.
+
+If the merged model is already correct, treat it as a toolkit/driver issue on
+the host: ensure the stack is healthy (`nvidia-smi`), **`nvidia-persistenced`**
+is running, restart Docker, then smoke-test:
+
+```bash
+sudo systemctl status nvidia-persistenced
+docker run --rm --gpus all nvidia/cuda:12.0.0-base-ubuntu22.04 nvidia-smi
+```
+
+If that `docker run` fails with the same error, upgrade or reinstall
+`nvidia-container-toolkit` and reboot once; this is a **host** issue, not
+`docker-compose.yml`.
+
 ### Wrong model or 404 errors
 
-Make sure `VLLM_SERVED_MODEL_NAME` matches `llm.model` in `config/config.yaml`:
+Make sure `VLLM_SERVED_MODEL_NAME` matches `llm.model` in `config/config.vllm.yaml`:
 
 ```bash
 # Check current values
-grep "model:" config/config.yaml
+grep "model:" config/config.vllm.yaml
 echo $VLLM_SERVED_MODEL_NAME
 ```
 
@@ -860,10 +1125,12 @@ When you receive a new `qagredo_bundle.tar.gz` (recommended archive location: `/
 
 ```bash
 # Go to the parent directory (staging area)
-cd /home/tyewhong/agredo
+cd /home/tyewhong/qagredo_staging
 
-# Back up your current config and data
-cp qagredo_host/config/config.yaml ./config_backup.yaml
+# Back up your current config and data (profile YAMLs + .env)
+mkdir -p ./config_backup
+cp qagredo_host/config/config.*.yaml ./config_backup/ 2>/dev/null || true
+cp qagredo_host/.env ./config_backup/.env 2>/dev/null || true
 cp -r qagredo_host/data ./data_backup
 
 # Stop running containers
@@ -873,7 +1140,8 @@ cd qagredo_host && bash run.sh --down && cd ..
 tar xzf /data/tyewhong/qagredo/qagredo_bundle.tar.gz
 
 # Restore your config and data
-cp ./config_backup.yaml qagredo_host/config/config.yaml
+cp ./config_backup/config.*.yaml qagredo_host/config/ 2>/dev/null || true
+cp ./config_backup/.env qagredo_host/.env 2>/dev/null || true
 cp ./data_backup/* qagredo_host/data/
 
 # Re-run setup (skip image loading if images haven't changed)
@@ -888,12 +1156,12 @@ bash run.sh
 
 ## Further reading
 
-These docs are also in this directory:
-
 | Document | Description |
 |----------|-------------|
-| `docs/ONLINE_SETUP_GUIDE.md` | Step-by-step guide for the online/dev machine and creating offline bundles |
-| `docs/VISUAL_REPORT.html` | **Visual report** with diagrams -- open in any browser |
-| `docs/ALGORITHM_REPORT.md` | Full algorithm details, design decisions, and rationale for question generation (10 types), answer generation (structured + retries + coverage rewrite), and grading (hybrid semantic + LLM-as-judge with Qwen) |
-| `docs/OFFLINE_SETUP_GUIDE.md` | Full 6-file offline deployment guide |
-| `README.md` | Project overview and architecture |
+| `docs/HANDOVER.md` | Maintainer onboarding: doc map, code map, profiles, artifacts. |
+| `docs/SERVER_MODEL_PROFILES.md` | greenserver / Opserver / redserver → profile mapping. |
+| `docs/ONLINE_SETUP_GUIDE.md` | Build machine: bundles, checksums, tarball workflow. |
+| `docs/OFFLINE_SETUP_GUIDE.md` | Offline host setup steps and checklist. |
+| `docs/ALGORITHM_REPORT.md` | Algorithm details: question types, answers, grading. |
+| `docs/architecture/NETWORK_DIAGRAM.md` | Ports, URLs, Docker networking. |
+| `README.md` | Quick start and profile summary. |

@@ -1,0 +1,153 @@
+# =============================================================================
+# Dockerfile.kubeflow — single all-in-one image for Kubeflow (K2-B pattern)
+# =============================================================================
+#
+# Design:
+#   * One image that Kubeflow (or any "1 image" environment) can run as a pod.
+#   * Contains: Python 3.10 + QAGRedo code + Ollama binary.
+#   * Does NOT bake model weights; models are mounted at /opt/ollama/models
+#     (default) from a host directory such as /home/jovyan/models on Kubeflow
+#     or /home/tyewhong/qagredo/models on the dev server.
+#   * Entrypoint starts `ollama serve` in the background (listening on
+#     127.0.0.1:11434) and then runs the QAGRedo pipeline.
+#   * vLLM is NOT removed from the repo — pick it via QAGREDO_PROFILE=vllm
+#     or by running the original docker-compose.vllm-stack.yml. This image is
+#     Ollama-only so it stays small and self-contained.
+#
+# Build:
+#   docker build -f Dockerfile.kubeflow -t qagredo-kubeflow:latest .
+#
+# Typical run (Kubeflow-style):
+#   docker run --rm --gpus all \
+#     -e QAGREDO_SERVE_OLLAMA=1 \
+#     -e OLLAMA_MODEL=qwen3:8b -e OLLAMA_JUDGE_MODEL=llama3.1:8b \
+#     -v /home/jovyan/models:/opt/ollama/models:ro \
+#     -v "$PWD/data":/workspace/data \
+#     -v "$PWD/output":/workspace/output \
+#     qagredo-kubeflow:latest
+#
+# Swap to larger models (e.g. 70B) by dropping new GGUF into the host models
+# directory and updating OLLAMA_MODEL / OLLAMA_JUDGE_MODEL at run time.
+# =============================================================================
+
+FROM python:3.10-bookworm
+
+USER root
+
+ARG UID=10005
+ARG GID=10006
+ARG USERNAME=qagredo
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        git \
+        curl \
+        ca-certificates \
+        antiword \
+        sudo \
+        gosu \
+        zstd \
+        libffi-dev \
+        libssl-dev \
+        tmux \
+        vim \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY certbundle /workspace/certbundle
+RUN if [ -f /workspace/certbundle/certbundle.crt ]; then \
+        echo "[INFO] Installing custom CA from /workspace/certbundle/certbundle.crt before Ollama download"; \
+        mkdir -p /usr/local/share/ca-certificates; \
+        cp /workspace/certbundle/certbundle.crt /usr/local/share/ca-certificates/qagredo-custom.crt; \
+        update-ca-certificates; \
+    else \
+        echo "[INFO] No certbundle/certbundle.crt provided; using default system CAs"; \
+    fi
+
+# -----------------------------------------------------------------------------
+# Install Ollama binary (air-gapped friendly).
+#
+# First try the official install script. Some environments complete the script
+# without leaving an `ollama` binary on PATH, so we enforce a second-step
+# fallback that downloads/extracts the Linux amd64 tarball directly.
+# -----------------------------------------------------------------------------
+ARG OLLAMA_INSTALL_URL=https://ollama.com/install.sh
+ARG OLLAMA_TARBALL_URL=https://github.com/ollama/ollama/releases/latest/download/ollama-linux-amd64.tar.zst
+RUN set -eux; \
+    curl -fsSL "${OLLAMA_INSTALL_URL}" | sh || true; \
+    if ! command -v ollama >/dev/null 2>&1; then \
+      echo "[INFO] install.sh did not provide ollama on PATH; using tarball fallback"; \
+      curl -fL "${OLLAMA_TARBALL_URL}" -o /tmp/ollama-linux-amd64.tar.zst; \
+      tar --zstd -xf /tmp/ollama-linux-amd64.tar.zst -C /tmp; \
+      install -m 0755 /tmp/ollama /usr/local/bin/ollama; \
+      rm -f /tmp/ollama-linux-amd64.tar.zst /tmp/ollama; \
+    fi; \
+    command -v ollama; \
+    ollama --version
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYDANTIC_DISABLE_PLUGIN_LOADING=1 \
+    OFFLINE_MODE=1 \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    HF_HOME=/opt/hf_cache \
+    HUGGINGFACE_HUB_CACHE=/opt/hf_cache/hub \
+    OLLAMA_MODELS=/opt/ollama/models \
+    OLLAMA_HOST=127.0.0.1:11434 \
+    QAGREDO_SERVE_OLLAMA=1 \
+    QAGREDO_USE_OLLAMA=1 \
+    OLLAMA_BASE_URL=http://127.0.0.1:11434/v1 \
+    OLLAMA_JUDGE_BASE_URL=http://127.0.0.1:11434/v1
+
+WORKDIR /workspace/
+
+COPY requirements.txt .
+COPY run_qa_pipeline.py .
+COPY utils ./utils
+COPY scripts ./scripts
+COPY config ./config
+COPY docs ./docs
+COPY README.md .
+COPY docs/OFFLINE_SETUP_GUIDE.md ./OFFLINE_SETUP_GUIDE.md
+
+RUN if [ -f /workspace/certbundle/certbundle.crt ]; then \
+        echo "[INFO] Installing custom CA from /workspace/certbundle/certbundle.crt"; \
+        mkdir -p /usr/local/share/ca-certificates; \
+        cp /workspace/certbundle/certbundle.crt /usr/local/share/ca-certificates/qagredo-custom.crt; \
+        update-ca-certificates; \
+        pip config set global.cert /etc/ssl/certs/ca-certificates.crt; \
+    else \
+        echo "[INFO] No certbundle/certbundle.crt provided; using default system CAs"; \
+    fi
+
+RUN mkdir -p /opt/hf_cache /opt/models_embed /opt/ollama/models
+
+RUN set -eux; \
+    if ! getent group "${GID}" >/dev/null; then groupadd -g "${GID}" "${USERNAME}"; fi; \
+    if id -u "${USERNAME}" >/dev/null 2>&1; then \
+        usermod -u "${UID}" -g "${GID}" "${USERNAME}"; \
+    else \
+        useradd -m -s /bin/bash -u "${UID}" -g "${GID}" "${USERNAME}"; \
+    fi; \
+    mkdir -p "/home/${USERNAME}" /workspace /opt/hf_cache /opt/models_embed /opt/ollama; \
+    chown -R "${UID}:${GID}" "/home/${USERNAME}" /workspace /opt/hf_cache /opt/models_embed /opt/ollama
+
+ARG PIP_TRUSTED_HOSTS=
+RUN set -eux; \
+    trusted_args=""; \
+    if [ -n "${PIP_TRUSTED_HOSTS}" ]; then \
+        for h in ${PIP_TRUSTED_HOSTS}; do trusted_args="${trusted_args} --trusted-host ${h}"; done; \
+    fi; \
+    python -m pip install ${trusted_args} --no-cache-dir -r requirements.txt
+
+RUN python /workspace/scripts/docker_verify_requirements.py /workspace/requirements.txt
+
+COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+ENV HOME=/home/${USERNAME}
+
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["python", "/workspace/run_qa_pipeline.py"]

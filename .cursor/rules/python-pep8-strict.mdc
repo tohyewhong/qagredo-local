@@ -1,0 +1,15 @@
+---
+description: Enforce strict PEP 8 style for Python code
+alwaysApply: true
+---
+
+# Python PEP 8 (Strict)
+
+- Apply PEP 8 formatting and style to all Python files.
+- Keep each line at 79 characters or fewer.
+- Keep imports at the top of the module, grouped and ordered per PEP 8.
+- Use 4 spaces for indentation, never tabs.
+- Preserve exactly one newline at end of file.
+- Remove trailing whitespace and whitespace-only blank lines.
+
+Before finalizing Python edits, ensure `pycodestyle` passes for changed files.

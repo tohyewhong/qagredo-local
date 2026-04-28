@@ -1,0 +1,30 @@
+# Optional redserver override for 4-GPU vLLM comparison runs.
+#
+# Use together with docker-compose.vllm-stack.yml through run.sh:
+#
+#   QAGREDO_PROFILE=vllm \
+#   QAGREDO_VLLM_COMPOSE_EXTRA=docker-compose.vllm-redserver.yml \
+#   VLLM_TP_SIZE=2 \
+#   VLLM_JUDGE_TP_SIZE=2 \
+#   bash run.sh
+#
+# The tensor-parallel sizes above must match the number of device_ids below.
+
+services:
+  vllm:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0", "1"]
+              capabilities: [gpu]
+
+  vllm-judge:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["2", "3"]
+              capabilities: [gpu]

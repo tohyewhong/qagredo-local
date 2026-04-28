@@ -14,6 +14,8 @@ import json
 from pathlib import Path
 from typing import Iterable, Tuple
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
 
 def _iter_jsonl_records(input_path: Path) -> Iterable[Tuple[int, dict]]:
     with input_path.open("r", encoding="utf-8") as handle:
@@ -25,12 +27,12 @@ def _iter_jsonl_records(input_path: Path) -> Iterable[Tuple[int, dict]]:
                 parsed = json.loads(line)
             except json.JSONDecodeError as exc:
                 raise ValueError(
-                    f"Invalid JSON at line {line_num} in {input_path}: {exc.msg}"
+                    f"Invalid JSON at line {line_num} in {input_path}: {exc.msg}"  # noqa: E501
                 ) from exc
 
             if not isinstance(parsed, dict):
                 raise ValueError(
-                    f"Expected JSON object at line {line_num} in {input_path}, "
+                    f"Expected JSON object at line {line_num} in {input_path}, "  # noqa: E501
                     f"got {type(parsed).__name__}."
                 )
             yield line_num, parsed
@@ -52,7 +54,7 @@ def split_jsonl_to_txt(input_path: Path, output_dir: Path) -> int:
         text = _extract_text(record)
         if not text:
             raise ValueError(
-                "Encountered record missing non-empty `content` and `text` fields."
+                "Encountered record missing non-empty `content` and `text` fields."  # noqa: E501
             )
 
         written += 1
@@ -70,12 +72,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--input",
-        default="/home/tyewhong/qagredo/data/train-data.jsonl",
+        default=str(_REPO_ROOT / "data" / "train-data.jsonl"),
         help="Path to source JSONL file.",
     )
     parser.add_argument(
         "--output-dir",
-        default="/home/tyewhong/qagredo/data/train-data_txt",
+        default=str(_REPO_ROOT / "data" / "train-data_txt"),
         help="Directory to store generated .txt files.",
     )
     return parser

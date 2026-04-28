@@ -1,598 +1,194 @@
-# QAGRedo (Layman Guide -- run online + transfer offline)
+# QAGRedo Online Setup Guide
 
-This README is written for **your exact folder layout** on this server:
+Use this guide on your connected/build machine to:
 
-- **Repo (code)**: `/home/tyewhong/qagredo/`
-- **Host data/models/cache/output**: `/home/tyewhong/qagredo_host/`
-- **Offline transfer files** (`.tar` / `.tar.gz`): stored directly in `/home/tyewhong/qagredo/`
+1. Run locally for validation.
+2. Build offline transfer archives.
 
-## Purpose (what you are doing)
+Maintainer index: **`docs/HANDOVER.md`**.
 
-QAGRedo reads your documents (JSON/JSONL), generates **complex questions +
-grounded answers** using an LLM served by **vLLM**, then verifies every answer
-is supported by the source document (using **MiniLM** for semantic similarity
-and **LLM-as-judge** (a separate Qwen model) for complex reasoning, avoiding self-evaluation bias).
+---
 
-You run **three containers**:
-- **vLLM** (Llama-3.1-8B on GPU 0, port 7100): generates questions and answers
-- **vLLM-judge** (Qwen2.5-7B on GPU 1, port 7101): independent LLM-as-judge for hallucination checking
-- **QAGRedo** (CPU): pipeline orchestration + MiniLM for semantic similarity
+## 1) Local run (quick validation)
 
-### Pipeline overview
-
-```
-Documents (JSONL)
-    |
-    v
-  Question Generation (10 types, few-shot examples, temp=0.7)
-    + Grounding validation + comprehensiveness check
-    |
-    v
-  Answer Generation (structured + evidence, temp=0.3, retries + coverage rewrite)
-    |
-    v
-  Hallucination Grading (hybrid: semantic + Qwen LLM fallback)
-    |
-    v
-  Output JSON (grade A-F, confidence %, reasons)
-```
-
-**Key features**:
-- 10 question types including synthesis, evaluation, and counterfactual
-- Per-question comprehensiveness check (rejects trivial questions, regenerates with guidance)
-- Structured answers with supporting evidence citations
-- Up to 3 retries for ungrounded answers
-- Coverage validation to ensure answers address all parts of each question
-- One targeted rewrite pass for low-coverage answers (accepted only if grounded)
-- Hybrid grading: fast semantic check (MiniLM, CPU) + Qwen LLM fallback for
-  counting, aggregation, and inference
-- Per-run timestamped output folders (YYYY-MM-DD_HHMMSS)
-- Run summary (Generator/Judge/Provider) with `generator_model` and `judge_model` in JSON, plus detailed reasons for ungrounded answers
-
-For full algorithm details, see `ALGORITHM_REPORT.md`.
-
-## Glossary (so you don't get lost later)
-
-| Term | Meaning |
-|------|---------|
-| **Host** | Your normal shell prompt (e.g., `tyewhong@server1:~$`). Run `docker ...` here |
-| **Container** | Prompt looks like `qagredo@...:/workspace$`. Do NOT run `docker` inside |
-| **Repo folder** | `/home/tyewhong/qagredo/` (code + compose file + scripts) |
-| **Host folder** | `/home/tyewhong/qagredo_host/` (config/data/models/cache/output) |
-| **Offline bundle** | `.tar` / `.tar.gz` files stored directly in `/home/tyewhong/qagredo/` (archives you copy by USB) |
-| **Grounded** | An answer supported by the source document |
-| **Ungrounded** | An answer not supported (hallucination) |
-
-## Part A -- Run on this server (online machine)
-
-### A1) One command (recommended)
-
-Purpose: the easiest way to run end-to-end without copy/pasting many commands.
-
-Prereqs (this is what the script expects on **this server**):
-
-- **Docker** installed, and `docker compose` works.
-- **QAGRedo image exists**: `qagredo-v1:latest` (build or load it first).
-- **Model zip exists**: `/home/tyewhong/Meta-Llama-3.1-8B-Instruct_hf_cache.zip`
-- **Sample input exists**: `/home/tyewhong/Llama328BInstruct/dev-data.jsonl`
+From repo root:
 
 ```bash
-cd /home/tyewhong/qagredo
-bash scripts/run_online.sh            # safe mode (no overwrite)
-# bash scripts/run_online.sh --overwrite
+bash run.sh --status
+bash run.sh --num-documents 2
 ```
 
-#### If you changed `num_documents` (or other run settings)
+Edit only:
 
-Purpose: avoid long re-copying/unzipping.
+- `.env` (profile + host paths)
+- `config/config.<profile>.yaml` (model tags, question/doc counts)
 
-QAGRedo reads the **host** config here:
+---
 
-- `/home/tyewhong/qagredo_host/config/config.yaml`
+## 2) Profile model rules
 
-So for changes like `run.num_documents: 2`, edit:
+### `dev` / `kubeflow` (Ollama)
 
-- `/home/tyewhong/qagredo_host/config/config.yaml`
+- `llm.model` and `judge.model` are Ollama tags.
+- Model storage format is Ollama store (`blobs/` + `manifests/`).
 
-Then just run:
+### `vllm`
+
+- Model files are HuggingFace directories (with `config.json`, safetensors).
+- `config/config.vllm.yaml` model names must match:
+  - `VLLM_SERVED_MODEL_NAME`
+  - `VLLM_JUDGE_SERVED_NAME`
+
+---
+
+## 3) Build offline tarballs
+
+Use the unified script:
 
 ```bash
-cd /home/tyewhong/qagredo
-bash scripts/run_online.sh
+# all artifacts
+bash scripts/make_offline_tarballs.sh --all
+
+# dev
+bash scripts/make_offline_tarballs.sh --bundle --image-dev --models-ollama
+
+# kubeflow
+bash scripts/make_offline_tarballs.sh --bundle --image-kubeflow --models-ollama
+
+# vllm
+bash scripts/make_offline_tarballs.sh --bundle --image-dev --image-vllm --models-vllm
 ```
 
-#### About `--overwrite` (why it can take very long)
-
-Purpose: understand when you should (and should not) use it.
-
-`--overwrite` forces the script to refresh everything into `/home/tyewhong/qagredo_host/`. This can take a long time because it may:
-
-- Re-extract the large model zip into `qagredo_host/hf_cache/`
-- Re-copy large model files into `qagredo_host/models_llm/`
-
-Only use `--overwrite` if you really need to rebuild/refresh the host folder from scratch (for example, after changing model files).
-
-If you want the script to overwrite/update existing files (still non-interactive):
+For large-file limits, split Ollama model tarballs:
 
 ```bash
-cd /home/tyewhong/qagredo
-bash scripts/run_online.sh --overwrite
+bash scripts/make_offline_tarballs.sh \
+  --models-ollama-split=qwen3.5:9b,llama3.1:8b-instruct-fp16
 ```
 
-### A2) Where is my output?
+---
 
-Purpose: confirm it worked and find the result files.
+## 4) Output location
+
+Default output directory:
+
+- `offline_out/`
+
+Override:
 
 ```bash
-find /home/tyewhong/qagredo_host/output -name '*.json' | tail -n 5
+QAGREDO_OFFLINE_OUT=/path/to/output bash scripts/make_offline_tarballs.sh --bundle
 ```
 
-Output folders are timestamped: `output/vllm/<model>/YYYY-MM-DD_HHMMSS/`
+Generated files include matching `.sha256`. Large transfer archives are often staged under **`/data/tyewhong/qagredo/`** (keep home repo free of huge tarballs).
 
-### A3) What `run_online.sh` does (so you know it's safe)
+---
 
-Purpose: understand what will be created/modified.
+## 5) Recommended archive sets by target runtime
 
-`scripts/run_online.sh` will:
+### Offline `dev`
 
-- Create `/home/tyewhong/qagredo_host/{config,data,output,models_llm,models_embed,hf_cache,hf_cache_judge}`
-- Copy `config/config.yaml` into `qagredo_host/config/`
-- Copy sample input data into `qagredo_host/data/dev-data.jsonl`
-- (If needed) extract `/home/tyewhong/Meta-Llama-3.1-8B-Instruct_hf_cache.zip` and build a real model folder under `qagredo_host/models_llm/Meta-Llama-3.1-8B-Instruct/`
-- Set up MiniLM (via `models_embed/` if present, otherwise HF cache) so semantic grading works offline
-- Start both vLLM services (main on port **7100**, judge on port **7101**), wait for `/health`, then run QAGRedo
+- `qagredo_bundle.tar.gz`
+- `qagredo-v1.tar`
+- `models_ollama.tar.gz` or split `models_ollama_<tag>.tar.gz`
 
-## Convert your files into QAGRedo input (pdf/txt/docx/xlsx/csv/json/jsonl to JSONL)
+### Offline `kubeflow`
 
-QAGRedo reads **JSONL** (one JSON object per line). The bundled converter
-handles the heavy lifting -- it accepts multiple input formats and produces
-normalized JSONL that QAGRedo can ingest directly.
+- `qagredo_bundle.tar.gz`
+- `qagredo-kubeflow.tar`
+- `models_ollama.tar.gz` or split `models_ollama_<tag>.tar.gz`
 
-Important:
-- Conversion is deterministic parser-based processing (not LLM-based).
-- The pipeline now supports runtime auto-preparation for non-JSONL inputs via `run.input_folder` / `run.input_type`.
-- Manual conversion remains available if you want a stable intermediate JSONL file.
+### Offline `vllm`
 
-### Quickstart (3 steps)
+- `qagredo_bundle.tar.gz`
+- `qagredo-v1.tar`
+- `vllm-openai_*.rootfs.tar`
+- `models_vllm.tar.gz`
 
-1) Install dependencies:
+---
+
+## 6) Sanity checks before transfer
 
 ```bash
-cd /home/tyewhong/qagredo
-python3 -m pip install -r requirements.txt
+# ensure bundle exists
+ls -lh offline_out/qagredo_bundle.tar.gz
+
+# verify checksums
+cd offline_out
+sha256sum -c *.sha256
 ```
 
-2) Configure runtime input selection:
+---
+
+## 7) Important compatibility note
+
+If your vLLM runtime is pinned to older stack versions, Qwen3 checkpoints may fail with model-type errors. In that case:
+
+- use Qwen2.5 for `vllm` profile, or
+- use `dev`/`kubeflow` with Ollama for Qwen3.
+
+---
+
+## 8) Next step on the offline host
+
+Continue with **`docs/OFFLINE_SETUP_GUIDE.md`**.
+
+---
+
+## 9) Loading images on the air-gapped host (reference)
 
 ```bash
-cd /home/tyewhong/qagredo
+docker load -i /data/tyewhong/qagredo/qagredo-v1.tar
+docker load -i /data/tyewhong/qagredo/qagredo-kubeflow.tar   # kubeflow profile only
 ```
 
-```yaml
-run:
-  input_folder: /home/tyewhong/qagredo/train-data_txt
-  input_type: txt            # auto/jsonl/json/txt/pdf/docx/xlsx/csv
-  max_files: 10
-  num_documents: 10
-  min_content_words: 20
-  min_content_chars: 0
-```
-
-3) Run the pipeline:
+vLLM rootfs import (when using `vllm` profile):
 
 ```bash
-bash run.sh
-```
-
-### Supported input formats
-
-| Format | Extension | Notes |
-|--------|-----------|-------|
-| **JSON** | `.json` | Arrays of objects, single objects, or nested wrappers (`{"articles": [...]}`) |
-| **JSON (press/news)** | `.json` | Nested press-style schema with `country`, `source_date`, `summary`, and `source[].english.article` -- auto-detected and flattened |
-| **JSONL** | `.jsonl` | One JSON object per line |
-| **PDF** | `.pdf` | Requires `pypdf` (included in `requirements.txt`) |
-| **Plain text** | `.txt` | Entire file becomes one document |
-| **Word document** | `.docx` | Paragraphs are joined into one document text (`python-docx`) |
-| **Excel** | `.xlsx` | Requires `openpyxl` (included in `requirements.txt`) |
-| **CSV** | `.csv` | Each row becomes one document record |
-
-**JSON repair**: The converter auto-fixes common hand-editing mistakes in JSON
-files (missing commas between properties, unterminated strings, trailing
-commas). No need to manually clean up your JSON before converting.
-
-### 1) Install dependencies (one-time)
-
-```bash
-cd /home/tyewhong/qagredo
-/home/tyewhong/qagredo/.venv/bin/pip install -r requirements.txt
-```
-
-### 2) Convert your file to JSONL
-
-```bash
-cd /home/tyewhong/qagredo
-
-# JSON (flat or press/news-style nested)
-python3 scripts/conversion/convert_to_qagredo_jsonl.py \
-  --input "data/sample press.json" \
-  --output data/sample_press.jsonl
-
-# PDF
-python3 scripts/conversion/convert_to_qagredo_jsonl.py \
-  --input data/report.pdf \
-  --output data/report.jsonl
-
-# Excel
-python3 scripts/conversion/convert_to_qagredo_jsonl.py \
-  --input data/data.xlsx \
-  --output data/data.jsonl
-
-# CSV
-python3 scripts/conversion/convert_to_qagredo_jsonl.py \
-  --input data/data.csv \
-  --output data/data_from_csv.jsonl
-
-# DOCX
-python3 scripts/conversion/convert_to_qagredo_jsonl.py \
-  --input data/brief.docx \
-  --output data/brief.jsonl
-
-# Plain text
-python3 scripts/conversion/convert_to_qagredo_jsonl.py \
-  --input data/notes.txt \
-  --output data/notes.jsonl
-```
-
-> **Tip**: File paths with spaces are supported -- just wrap them in quotes.
-
-Output JSONL format (per line):
-
-| Field | Description |
-|-------|-------------|
-| `id` | Unique document identifier |
-| `title` | Document title |
-| `content` | Full text (preferred by QAGRedo) |
-| `text` | Same as `content` (alias) |
-| `source` | Input file path |
-| `type` | `text_document` |
-| `metadata` | Optional -- preserves `country`, `source_date`, `languages`, etc. |
-
-### 3) Point QAGRedo to the converted JSONL (manual conversion path)
-
-Copy the output JSONL into the host data folder and update the config:
-
-```bash
-cp data/sample_press.jsonl ~/qagredo_host/data/
-```
-
-Edit `config/config.yaml` and set:
-- `run.input_file: data/sample_press.jsonl`
-
-Runtime override example (without editing config):
-
-```bash
-bash run.sh -- --input-folder train-data_txt --input-type txt --max-files 10 --num-documents 10 --min-content-words 20
-```
-
-### A4) Run WITHOUT Docker (host-only, advanced)
-
-Purpose: run `run_qa_pipeline.py` directly on the Linux host (no containers).
-
-Important notes:
-
-- You still need an LLM server. In host-only mode we run **vLLM on the host** (still on port `7100`).
-- Use the repo Python environment (`/home/tyewhong/qagredo/.venv/`). System `python3` may miss packages.
-
-#### A4.1) Start (or verify) vLLM on the host
-
-```bash
-curl -i http://localhost:7100/health
-```
-
-If you do **not** get `HTTP/1.1 200 OK`, start vLLM via Docker Compose:
-
-```bash
-cd /home/tyewhong/qagredo
-docker compose -f docker-compose.yml up -d vllm vllm-judge
-```
-
-#### A4.2) Ensure QAGRedo points to `localhost` (host mode)
-
-When running on the host, the vLLM base URL must be:
-
-- `http://localhost:7100/v1`
-
-Check this file:
-
-- `/home/tyewhong/qagredo/config/config.yaml` (see `llm.base_url`)
-
-#### A4.3) Run the pipeline (host mode)
-
-```bash
-cd /home/tyewhong/qagredo
-/home/tyewhong/qagredo/.venv/bin/python run_qa_pipeline.py --config /home/tyewhong/qagredo/config/config.yaml
-```
-
-If you ever see:
-
-- `OpenAI library not installed. Install with: pip install openai`
-
-It means you are running with the wrong Python (usually system `python3`). Use the `.venv` python above, or install dependencies into the environment:
-
-```bash
-cd /home/tyewhong/qagredo
-/home/tyewhong/qagredo/.venv/bin/pip install -r requirements.txt
-```
-
-#### A4.4) Where is host-mode output?
-
-In host mode, outputs default to the repo output folder:
-
-- `/home/tyewhong/qagredo/output/`
-
-Output folders are timestamped: `output/vllm/<model>/YYYY-MM-DD_HHMMSS/`
-
-```bash
-find /home/tyewhong/qagredo/output -name '*.json' | tail -n 5
-```
-
-## Part B -- Create the offline transfer bundle (repeatable)
-
-### B1) Why you need this
-
-Purpose: the repo folder `/home/tyewhong/qagredo/` can be huge because of `.venv/`, but the offline server does **not** need it (Docker runs the app).\
-This step creates **small archives** that contain only what the offline server needs.
-
-### B2) Create the bundle (6-file approach)
-
-Purpose: create a small code/config/data bundle you can re-transfer quickly whenever code changes.
-
-```bash
-cd /home/tyewhong/qagredo
-bash scripts/make_qagredo_bundle.sh              # code + config + data
-bash scripts/make_qagredo_bundle.sh --include-data   # also include data/ files
-```
-
-This produces `qagredo_bundle.tar.gz` (~few MB) plus a `.sha256` checksum.
-
-For the full 6-file transfer workflow (bundle + Docker images + models), see:
-
-- `docs/OFFLINE_SETUP_GUIDE.md`
-
-## Part C -- Transfer to the offline server
-
-Copy these 6 files to the offline server (USB / SCP):
-
-| # | File | Size | Re-transfer when |
-|---|------|------|-----------------|
-| 1 | `vllm-openai_v0.5.3.post1.rootfs.tar` | ~15-20 GB | Rarely (new vLLM version) |
-| 2 | `qagredo-v1.tar` | ~5-10 GB | Rarely (new Docker image) |
-| 3 | `models_llama.tar.gz` | ~12-16 GB | Rarely (new generator model) |
-| 4 | `models_qwen.tar.gz` | ~12-14 GB | Rarely (new judge model) |
-| 5 | `models_embed_all-MiniLM-L6-v2.tar` | ~263 MB | Rarely (new embedding model) |
-| 6 | `qagredo_bundle.tar.gz` | ~few MB | Often (code/config/data changes) |
-
-### Optional verification (recommended)
-
-```bash
-sha256sum -c qagredo_bundle.tar.gz.sha256
-```
-
-## Part D -- Offline server install + run
-
-### D1) Unpack + setup
-
-```bash
-tar xzf qagredo_bundle.tar.gz        # extracts to qagredo_host/
-cd qagredo_host
-bash setup_offline.sh                  # loads images, links models, fixes permissions
-```
-
-### D2) Run
-
-```bash
-cd qagredo_host
-bash run.sh
-```
-
-### D3) Find output
-
-Purpose: confirm it worked.
-
-```bash
-find qagredo_host/output -name '*.json' | tail -n 5
-```
-
-Output folders are timestamped: `output/vllm/<model>/YYYY-MM-DD_HHMMSS/`
-
-## Quick checks / troubleshooting
-
-### vLLM health
-
-Purpose: confirm both vLLM services are up.
-
-```bash
-curl -i http://localhost:7100/health
-curl -i http://localhost:7101/health
-```
-
-### vLLM models (requires API key)
-
-Purpose: confirm the models are registered in vLLM.
-
-```bash
-export VLLM_API_KEY=llama-local
-curl -H "Authorization: Bearer ${VLLM_API_KEY}" http://localhost:7100/v1/models
-curl -H "Authorization: Bearer ${VLLM_API_KEY}" http://localhost:7101/v1/models
-```
-
-### Common problems
-
-| Problem | Solution |
-|---------|----------|
-| `>` prompt | Stuck in a heredoc. Type `EOF` on its own line or press `Ctrl+C` |
-| Unauthorized | `export VLLM_API_KEY=llama-local` |
-| Connection error | vLLM is still loading. Wait for "Uvicorn running..." |
-| Browser can't open `localhost:7100` | Your laptop's `localhost` is not the server. Use SSH tunnel / port-forward |
-| Permission denied | `bash setup_offline.sh --force` |
-| Cannot delete hf_cache | `docker run --rm --privileged --userns=host -u 0 --entrypoint bash -v "$(pwd)/hf_cache:/hf" vllm/vllm-openai:v0.5.3.post1 -c "rm -rf /hf/modules /hf/hub"` |
-| Cannot delete hf_cache_judge | Same as above but use `hf_cache_judge` instead of `hf_cache` |
-| `pynvml.NVMLError_InvalidArgument` | Do **not** set `CUDA_VISIBLE_DEVICES` in docker-compose. GPU assignment is handled by Docker's `deploy.resources.reservations.devices.device_ids` |
-
-## Change code on the offline server (no rebuild needed)
-
-Purpose: edit code offline without rebuilding Docker images.
-
-On the dev machine, make your changes, then re-create the bundle:
-
-```bash
-cd /home/tyewhong/qagredo
-bash scripts/make_qagredo_bundle.sh
-```
-
-Transfer just `qagredo_bundle.tar.gz` (~few MB) to the offline server and re-extract:
-
-```bash
-tar xzf qagredo_bundle.tar.gz
-cd qagredo_host
-bash run.sh
-```
-
-## Permission model
-
-QAGRedo uses a three-layer permission model:
-
-| Layer | Where | What |
-|-------|-------|------|
-| Entrypoint startup | Inside container | `chown` writable dirs to HOST_UID:HOST_GID |
-| Entrypoint EXIT trap | Inside container | `chown` on exit |
-| Post-run safety net | Host side (run.sh) | Docker `chown` with `--privileged --userns=host` |
-
-All Docker volume mounts use `:rw`. The `--privileged --userns=host` flags
-bypass Docker user namespace remapping, ensuring files are always owned by
-the host user regardless of Docker configuration.
-
-## Browser note (port-forward)
-
-- On the server, vLLM is at `http://localhost:7100`, vLLM-judge at `http://localhost:7101`
-- In your laptop browser, Cursor may forward it to a different local port (e.g. `http://localhost:50400`)
-- The root path `/` shows `{"detail":"Not Found"}` -- normal
-
-Useful pages:
-
-- Main vLLM: Docs UI `http://localhost:7100/docs`, Health `http://localhost:7100/health`
-- Judge vLLM: Docs UI `http://localhost:7101/docs`, Health `http://localhost:7101/health`
-
-## Send this working setup to an offline server
-
-Recommended: use the 6-file bundle approach (see **Part B/C/D** above).
-Run `bash scripts/make_qagredo_bundle.sh` to create `qagredo_bundle.tar.gz`, then transfer the
-6 files to the offline server. See `docs/OFFLINE_SETUP_GUIDE.md` for the full walkthrough.
-
-### 1) Export Docker images (online machine)
-
-```bash
-cd /home/tyewhong/qagredo
-
-docker save -o qagredo-v1.tar qagredo-v1:latest
-
-# Export vLLM as a rootfs tar (smaller than docker save; loaded via docker import)
-docker rm -f vllm-export-tmp 2>/dev/null || true
-docker create --name vllm-export-tmp vllm/vllm-openai:v0.5.3.post1
-docker export -o vllm-openai_v0.5.3.post1.rootfs.tar vllm-export-tmp
-docker rm -f vllm-export-tmp
-```
-
-### 2) Copy folders to the offline server
-
-Copy these two folders:
-
-- `/home/tyewhong/qagredo/` (code + compose file + `.tar` / `.tar.gz` archives)
-- `/home/tyewhong/qagredo_host/` (config/data/models/cache/output)
-
-### 3) Load images on the offline server
-
-```bash
-cd /home/tyewhong/qagredo
-
-docker load -i qagredo-v1.tar
-
-# Import vLLM rootfs tar (created via docker export)
 docker import \
   --change 'WORKDIR /vllm-workspace' \
   --change 'ENTRYPOINT ["python3","-m","vllm.entrypoints.openai.api_server"]' \
-  vllm-openai_v0.5.3.post1.rootfs.tar \
+  /data/tyewhong/qagredo/vllm-openai_v0.5.3.post1.rootfs.tar \
   vllm/vllm-openai:v0.5.3.post1
 ```
 
-### 4) Run on the offline server
+Then extract the bundle and run **`setup_offline.sh`** (see **`docs/OFFLINE_SETUP_GUIDE.md`**).
+
+---
+
+## 10) vLLM diagnostic URLs (host ports from `.env`)
+
+**Generator (`VLLM_HOST_PORT`, default 7100):**
+
+- Health: `http://localhost:${VLLM_HOST_PORT}/health`
+- API docs: `http://localhost:${VLLM_HOST_PORT}/docs`
+
+**Judge (`VLLM_JUDGE_HOST_PORT`, default 7101):**
+
+- Health: `http://localhost:${VLLM_JUDGE_HOST_PORT}/health`
+- API docs: `http://localhost:${VLLM_JUDGE_HOST_PORT}/docs`
+
+Root URL returning `{"detail":"Not Found"}` is normal.
+
+---
+
+## 11) Common problems (build / transfer)
+
+- **401 Unauthorized** on `/v1/*`: missing or wrong `Authorization` header (match `VLLM_API_KEY` to the server).
+- **Connection error**: vLLM still loading weights — wait for Uvicorn “running” in logs.
+- **CUDA/driver mismatch**: align the vLLM image tag with the host driver (`VLLM_IMAGE` in `.env`).
+
+---
+
+## 12) Regenerate diagram PNGs from sources
+
+Examples:
 
 ```bash
-cd /home/tyewhong/qagredo
-export QAGREDO_HOST_DIR=/home/tyewhong/qagredo_host
-
-export VLLM_IMAGE=vllm/vllm-openai:v0.5.3.post1
-export VLLM_MODEL=/models/Meta-Llama-3.1-8B-Instruct
-export VLLM_API_KEY=llama-local
-export VLLM_SERVED_MODEL_NAME=meta-llama/Meta-Llama-3.1-8B-Instruct
-
-# Judge service (Qwen2.5-7B on port 7101)
-export VLLM_JUDGE_IMAGE=vllm/vllm-openai:v0.5.3.post1
-export VLLM_JUDGE_MODEL=/models/Qwen2.5-7B-Instruct
-export VLLM_JUDGE_API_KEY=llama-local
-export VLLM_JUDGE_SERVED_MODEL_NAME=Qwen/Qwen2.5-7B-Instruct
-
-docker compose -f docker-compose.yml up -d vllm vllm-judge
-docker compose -f docker-compose.yml run --rm qagredo
+dot -Tpng docs/architecture/diagrams/network_docker_compose_ollama.dot \
+  -o docs/architecture/diagrams/network_docker_compose_ollama.png
+dot -Tpng docs/qagredo_grading_test_flow.dot \
+  -o docs/qagredo_grading_test_flow_16x9.png
 ```
 
-## Useful vLLM URLs
-
-**Main vLLM (port 7100):**
-- API docs UI: `http://localhost:7100/docs`
-- OpenAPI JSON: `http://localhost:7100/openapi.json`
-- Health: `http://localhost:7100/health`
-
-**Judge vLLM (port 7101):**
-- API docs UI: `http://localhost:7101/docs`
-- OpenAPI JSON: `http://localhost:7101/openapi.json`
-- Health: `http://localhost:7101/health`
-
-Note: the root URL `http://localhost:7100/` (and 7101) returns `{"detail":"Not Found"}` (normal).
-
-## Common problems (quick)
-
-- **401 Unauthorized** on `/v1/*`: you forgot the `Authorization` header.
-- **Connection error**: vLLM is still loading. Wait for the "Uvicorn running..." log line.
-- **CUDA/driver mismatch** (mentions CUDA >= X): use an older vLLM image tag via `VLLM_IMAGE` (this repo defaults to `v0.5.3.post1`).
-
-## "No sentence-transformers model found ... mean pooling" warning (MiniLM)
-
-If you see:
-
-`No sentence-transformers model found with name sentence-transformers/all-MiniLM-L6-v2. Creating a new one with mean pooling.`
-
-It means MiniLM is missing from the mounted cache. Fix (offline-safe):
-
-1) Ensure the HF model is present in your host cache:
-
-```bash
-ls ~/.cache/huggingface/hub/models--sentence-transformers--all-MiniLM-L6-v2 >/dev/null
-```
-
-2) Copy it into the host folder used by Docker Compose:
-
-```bash
-mkdir -p "$QAGREDO_HOST_DIR/hf_cache/hub"
-cp -a ~/.cache/huggingface/hub/models--sentence-transformers--all-MiniLM-L6-v2 "$QAGREDO_HOST_DIR/hf_cache/hub/"
-```
-
-3) Create the sentence-transformers cache links (one-time):
-
-```bash
-mkdir -p "$QAGREDO_HOST_DIR/hf_cache/sentence-transformers"
-ln -sfn ../hub/models--sentence-transformers--all-MiniLM-L6-v2 "$QAGREDO_HOST_DIR/hf_cache/sentence-transformers/models--sentence-transformers--all-MiniLM-L6-v2"
-```
-
-Then re-run QAGRedo.
+PlantUML (if installed): render **`docs/architecture/diagrams/QAGRedo_Pipeline_Flowchart.puml`** to PNG/SVG as needed.

@@ -26,8 +26,13 @@ class QAQuality:
     notes: List[str] = field(default_factory=list)
 
 
-def _evaluate_pair(pair: Dict[str, Any], idx: int, thresholds: Dict[str, float]) -> QAQuality:
-    grading = pair.get("grading") or {}
+def _evaluate_pair(
+    pair: Dict[str, Any], idx: int, thresholds: Dict[str, float]
+) -> QAQuality:
+    chk = pair.get("hallucination_check")
+    grading = chk if isinstance(chk, dict) else pair.get("grading")
+    if not isinstance(grading, dict):
+        grading = {}
     confidence = grading.get("confidence")
     is_grounded = grading.get("is_grounded")
     answer = pair.get("answer") or ""
@@ -39,7 +44,9 @@ def _evaluate_pair(pair: Dict[str, Any], idx: int, thresholds: Dict[str, float])
         notes.append("missing confidence")
         status = "warn"
     elif confidence < thresholds["low_confidence"]:
-        notes.append(f"confidence {confidence:.2f} below {thresholds['low_confidence']:.2f}")
+        notes.append(
+            f"confidence {confidence:.2f} below {thresholds['low_confidence']:.2f}"  # noqa: E501
+        )
         status = "warn"
 
     if is_grounded is False:
@@ -68,18 +75,28 @@ def evaluate_document_quality(
     cfg = {**DEFAULT_THRESHOLDS, **(thresholds or {})}
     qa_pairs = document.get("qa_pairs") or []
 
-    per_pair = [_evaluate_pair(pair, idx + 1, cfg) for idx, pair in enumerate(qa_pairs)]
+    per_pair = [
+        _evaluate_pair(pair, idx + 1, cfg) for idx, pair in enumerate(qa_pairs)
+    ]
 
-    overall_conf = document.get("grading_summary", {}).get("overall_confidence")
-    confidences = [pair.confidence for pair in per_pair if pair.confidence is not None]
+    overall_conf = document.get("grading_summary", {}).get(
+        "overall_confidence"
+    )
+    confidences = [
+        pair.confidence for pair in per_pair if pair.confidence is not None
+    ]
     if overall_conf is None and confidences:
         overall_conf = mean(confidences)
 
     warnings: List[str] = []
     if len(qa_pairs) < cfg["min_questions"]:
-        warnings.append(f"Only {len(qa_pairs)} question(s); expected ≥ {cfg['min_questions']}")
+        warnings.append(
+            f"Only {len(qa_pairs)} question(s); expected ≥ {cfg['min_questions']}"  # noqa: E501
+        )
 
-    low_conf_pairs = [pair for pair in per_pair if pair.status in {"warn", "fail"}]
+    low_conf_pairs = [
+        pair for pair in per_pair if pair.status in {"warn", "fail"}
+    ]
     warnings.extend(
         f"Q{pair.question_index}: {', '.join(pair.notes)}"
         for pair in low_conf_pairs
@@ -93,11 +110,19 @@ def evaluate_document_quality(
     if not qa_pairs:
         quality_band = "needs_attention"
         warnings.append("No Q&A pairs available")
-    elif overall_conf is not None and overall_conf < cfg["attention_confidence"]:
+    elif (
+        overall_conf is not None and overall_conf < cfg["attention_confidence"]
+    ):
         quality_band = "needs_attention"
-    elif low_conf_pairs and overall_conf is not None and overall_conf < cfg["review_confidence"]:
+    elif (
+        low_conf_pairs
+        and overall_conf is not None
+        and overall_conf < cfg["review_confidence"]
+    ):
         quality_band = "needs_attention"
-    elif warnings or (overall_conf is not None and overall_conf < cfg["review_confidence"]):
+    elif warnings or (
+        overall_conf is not None and overall_conf < cfg["review_confidence"]
+    ):
         quality_band = "review"
 
     document_id = (
@@ -137,4 +162,3 @@ __all__ = [
     "summarize_documents",
     "DEFAULT_THRESHOLDS",
 ]
-

@@ -1,0 +1,12 @@
+[
+  {
+    "id": "json_a",
+    "title": "Array doc A",
+    "content": "Alpha research notes: the baseline measurement was taken at 08:00. The control group showed no drift for the first six hours. After the intervention window, sensors reported a gradual rise within expected tolerance."
+  },
+  {
+    "id": "json_b",
+    "title": "Array doc B",
+    "content": "Beta field log: equipment check completed. Calibration verified against the reference standard. Weather conditions were stable; no anomalies were recorded during the observation period."
+  }
+]

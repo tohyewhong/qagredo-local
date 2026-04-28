@@ -1,0 +1,97 @@
+# =============================================================================
+# QAGRedo — Kubeflow / single-image profile (K2-B)
+# =============================================================================
+#
+# One container image that includes:
+#   * QAGRedo runner (Python)
+#   * Ollama serving generator + judge from a mounted models directory
+#
+# Models live OUTSIDE the image so you can swap them (including 70B GGUF) by
+# replacing files on disk — no image rebuild.
+#
+# Host models directory (set in .env or shell):
+#   * Dev server (yours)    : QAGREDO_MODELS_DIR=/home/tyewhong/qagredo/models
+#   * Kubeflow offline node : QAGREDO_MODELS_DIR=/home/jovyan/models
+#
+# Inside the container models always appear at /opt/ollama/models.
+#
+# Run:
+#   QAGREDO_PROFILE=kubeflow bash run.sh
+#
+# Or raw compose:
+#   docker compose -f docker-compose.kubeflow.yml up --build
+# =============================================================================
+
+name: qagredo_kubeflow
+
+services:
+  qagredo:
+    build:
+      context: .
+      dockerfile: Dockerfile.kubeflow
+      args:
+        UID: ${HOST_UID:-10005}
+        GID: ${HOST_GID:-10006}
+    image: qagredo-kubeflow:latest
+    container_name: qagredo-kubeflow
+    # Kubeflow / on-prem GPU passthrough. Adjust count to match the pod spec.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: ${QAGREDO_GPU_COUNT:-2}
+              capabilities: [gpu]
+    # Provider/model URLs for the pipeline live in
+    # config/config.kubeflow.yaml — NOT here. The variables below only control
+    # the Ollama SERVER running inside the container (bind address, model
+    # directory) and the startup warning that checks the required tags exist.
+    environment:
+      TZ: ${TZ:-Asia/Singapore}
+      HOST_UID: ${HOST_UID:-1000}
+      HOST_GID: ${HOST_GID:-1000}
+      OFFLINE_MODE: "1"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      PYDANTIC_DISABLE_PLUGIN_LOADING: "1"
+
+      # ---- In-container Ollama SERVER settings ----
+      QAGREDO_SERVE_OLLAMA: "1"
+      OLLAMA_HOST: "127.0.0.1:11434"
+      OLLAMA_MODELS: "/opt/ollama/models"
+      # Only used by docker-entrypoint.sh for a "model exists?" warning.
+      # Keep these matching llm.model / judge.model in config.kubeflow.yaml.
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:9b}
+      OLLAMA_JUDGE_MODEL: ${OLLAMA_JUDGE_MODEL:-llama3.1:8b-instruct-fp16}
+
+      # ---- GPU pinning (generator vs judge) ----
+      CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES:-}
+
+      # ---- Data plumbing (same names as dev profile) ----
+      QAGREDO_OFFLINE_HOST: ${QAGREDO_OFFLINE_HOST:-}
+      QAGREDO_OFFLINE_INPUT: ${QAGREDO_OFFLINE_INPUT:-}
+    volumes:
+      # Models come from the host: /home/jovyan/models on Kubeflow,
+      # /home/tyewhong/qagredo/models on the dev server, etc.
+      - ${QAGREDO_MODELS_DIR:-./models}:/opt/ollama/models:rw
+
+      # Pipeline inputs / outputs / config mirror the dev profile.
+      - ./run_qa_pipeline.py:/workspace/run_qa_pipeline.py:rw
+      - ./utils:/workspace/utils:rw
+      - ./scripts:/workspace/scripts:rw
+      - ./config:/workspace/config:rw
+      - ${DATA_DIR:-./data}:/workspace/data:rw
+      - ./output:/workspace/output:rw
+      - ./hf_cache:/opt/hf_cache:rw
+      - ./models_embed:/opt/models_embed:rw
+      - ./README.md:/workspace/README.md:rw
+      - ./docs:/workspace/docs:rw
+    command:
+      - bash
+      - -c
+      - |
+        echo "[INFO] Kubeflow profile — config/config.kubeflow.yaml"
+        echo "[INFO] OLLAMA_MODELS=$${OLLAMA_MODELS}"
+        echo "[INFO] Generator model: $${OLLAMA_MODEL}"
+        echo "[INFO] Judge model    : $${OLLAMA_JUDGE_MODEL}"
+        python /workspace/run_qa_pipeline.py

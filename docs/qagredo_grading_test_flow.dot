@@ -1,0 +1,86 @@
+// Source of truth: grading test / validation + E2E replacement-question loop.
+// Regenerate:
+//   dot -Tpng -o qagredo_grading_test_flow_16x9.png qagredo_grading_test_flow.dot
+digraph GradingTestFlow {
+  graph [
+    rankdir=TB,
+    fontname="Helvetica",
+    fontsize=11,
+    labelloc=t,
+    label="QAGRedo — grading validation paths & E2E replacement-question loop",
+    dpi=120,
+    size="15,8.5",
+    ratio=fill
+  ];
+  node [fontname="Helvetica", fontsize=10, shape=box, style="rounded,filled", fillcolor="#f8fafc"];
+  edge [fontname="Helvetica", fontsize=9];
+
+  start [label="Goal: validate grading\nor run full pipeline", shape=ellipse, fillcolor="#e0e7ff"];
+
+  subgraph cluster_fast {
+    label="Fast / isolated (no full pipeline)";
+    style=dashed;
+    color="#64748b";
+
+    smoke [label="smoke_strict_llm_judge.py\n• data/txt/00001.txt …\n• check_hallucination (llm)\n• no grade_qa_results"];
+    manual [label="Manual / REPL\n• check_hallucination(...)\n• set_llm_config() for llm"];
+  }
+
+  subgraph cluster_batch {
+    label="Batch on saved QA payloads";
+    style=dashed;
+    color="#64748b";
+
+  gscript [label="scripts/utils/grade_qa_results.py\n• *qa_results*.json\n• strict llm judge grading path"];
+    payload [label="Body text fields:\ncontent → text → body →\ndocument → article → passage", shape=note, fillcolor="#fef9c3"];
+  }
+
+  subgraph cluster_e2e {
+    label="End-to-end: run_qa_pipeline.py (run.sh)";
+    style=dashed;
+    color="#0f766e";
+
+    pipeline [label="Start document:\npending_q_count = num_questions\n(config: question_generation.num_questions)"];
+    setcfg [label="set_llm_config(config)\nhallucination.method (llm strict default)\nmin_confidence_threshold"];
+
+    subgraph cluster_round {
+      label="Round loop (max_question_regeneration_rounds, default 3)";
+      style=filled;
+      fillcolor="#fff7ed";
+      color="#c2410c";
+
+      genq [label="1) generate_questions\nnum_questions = pending_q_count\n(replacement set when pending < initial)"];
+      gena [label="2) generate_answers_from_results"];
+      gr [label="3) grade_qa_results([qa_result])"];
+      pairs [label="4) build_qa_pairs +\n_merge_pair_grading\n(keep last round only\nfor export)"];
+      count [label="5) failed_count = pairs where\nNOT (is_grounded AND\nconf >= min_confidence_threshold)"];
+      gate [label="6) pending_q_count = failed_count", shape=diamond, fillcolor="#ffedd5"];
+    }
+
+    allp [label="After loop: last round only.\nAll pass? → save passing only.\nElse → save full final\nround (incl. failures)."];
+    analysis [label="Save *_analysis.json\n+ grading_summary\n(match save policy)"];
+    summarize [label="summarize_run.sh --json"];
+  }
+
+  subgraph cluster_meta {
+    label="Quality band (not the checker)";
+    style=dashed;
+    color="#94a3b8";
+
+    quick [label="quick_test.py\nsynthetic grading → evaluate_document_quality"];
+  }
+
+  start -> smoke;
+  start -> manual;
+  start -> gscript;
+  start -> pipeline;
+  start -> quick;
+
+  gscript -> payload [style=dotted, arrowhead=none];
+
+  pipeline -> setcfg -> genq;
+  genq -> gena -> gr -> pairs -> count -> gate;
+  gate -> genq [label="pending > 0\n→ generate replacement\nquestions (count = failed)", color="#c2410c", fontcolor="#9a3412"];
+  gate -> allp [label="pending = 0 (all pass)\nOR last round reached\n(still append pairs)", color="#0f766e"];
+  allp -> analysis -> summarize;
+}

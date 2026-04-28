@@ -109,7 +109,7 @@ def build_svg() -> str:
     textc(CX, 214, "More slots?", 9)
     line_m(CX, 152, CX, 176)
     rect(478, 188, 152, 44)
-    textc(554, 208, "save_results\n(+ optional filters)", 9)
+    textc(554, 208, "save_results +\nGitHub publish", 9)
     line_m(CX + 78, 210, 478, 210)
     lbl(CX + 82, 204, "no", "lbl", "start")
     rect(CX - 100, 252, 200, 38)

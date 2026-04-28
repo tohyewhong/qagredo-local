@@ -1,17 +1,21 @@
 """Hallucination checker to verify answers are grounded in source documents.
 
 Methods:
-  - "semantic"  : sentence-level cosine similarity via MiniLM (fast, free)
   - "keyword"   : key-phrase substring matching (fast, free)
-  - "llm"       : LLM-as-judge via vLLM/OpenAI API (accurate, uses GPU)
-  - "hybrid"    : semantic first, LLM fallback for low-confidence sentences
-                  (best balance of speed and accuracy)
+  - "semantic"  : legacy alias → same as ``keyword`` (embedding path removed)
+  - "llm"       : LLM-as-judge via Ollama / vLLM / OpenAI API
+  - "hybrid"    : legacy alias → LLM-as-judge only (former embedding pass removed)
 """
 
 from typing import Dict, List, Any, Optional
 import re
 import os
 import time
+import json
+from urllib.request import Request, urlopen
+
+from .config_manager import validate_provider_for_offline_mode
+from .document_text import extract_document_text
 
 
 # ---------------------------------------------------------------------------
@@ -19,6 +23,86 @@ import time
 # ---------------------------------------------------------------------------
 _llm_config: Dict[str, Any] = {}
 _judge_config: Dict[str, Any] = {}
+
+
+def _hallucination_policy() -> Dict[str, Any]:
+    """Read hallucination policy flags from the active pipeline config."""
+    if not isinstance(_llm_config, dict):
+        return {}
+    raw = _llm_config.get("hallucination")
+    return raw if isinstance(raw, dict) else {}
+
+
+def _config_bool(value: Any, default: bool = False) -> bool:
+    """YAML-friendly bool parser used by strict judge policy flags."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return bool(value)
+    sval = str(value).strip().lower()
+    if sval in ("1", "true", "yes", "on"):
+        return True
+    if sval in ("0", "false", "no", "off", ""):
+        return False
+    return default
+
+
+def _strict_llm_judge_required() -> bool:
+    """Whether llm judging must succeed without permissive fallbacks."""
+    policy = _hallucination_policy()
+    judge_required = _config_bool(policy.get("judge_required"), default=False)
+    strict_verdict = _config_bool(
+        policy.get("judge_strict_verdict"), default=False
+    )
+    return judge_required or strict_verdict
+
+
+def _call_ollama_chat_native(
+    *,
+    base_url: str,
+    model: str,
+    prompt: str,
+    max_retries: int,
+    retry_delay: float,
+    timeout: float,
+    temperature: float,
+    max_tokens: int,
+) -> str:
+    root = base_url.split("/v1", 1)[0].rstrip("/")
+    endpoint = f"{root}/api/chat"
+    payload = {
+        "model": model,
+        "stream": False,
+        "think": False,
+        "messages": [{"role": "user", "content": prompt}],
+        "options": {
+            "temperature": temperature,
+            "num_predict": max_tokens,
+        },
+    }
+    for attempt in range(max_retries):
+        try:
+            req = Request(
+                endpoint,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urlopen(req, timeout=timeout) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+            msg = body.get("message", {}) if isinstance(body, dict) else {}
+            content = str(msg.get("content", "")).strip()
+            if content:
+                return content
+            return str(msg.get("thinking", "")).strip()
+        except Exception:
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay * (attempt + 1))
+                continue
+            return ""
+    return ""
 
 
 def set_llm_config(config: Dict[str, Any]) -> None:
@@ -31,40 +115,46 @@ def set_llm_config(config: Dict[str, Any]) -> None:
     global _llm_config, _judge_config
     _llm_config = config
 
-    # Build judge-specific config: prefer config["judge"], fall back to config["llm"]
+    # Build judge-specific config: prefer config["judge"], fall back to
+    # config["llm"]
     judge_section = config.get("judge", {})
     llm_section = config.get("llm", {})
 
-    # Environment-variable overrides (set by docker-compose)
-    judge_base_url = os.getenv("VLLM_JUDGE_BASE_URL", "").strip()
-    judge_model = os.getenv("VLLM_JUDGE_MODEL", "").strip()
-    judge_api_key = os.getenv("VLLM_JUDGE_API_KEY", "").strip()
+    provider = (
+        judge_section.get("provider")
+        or llm_section.get("provider")
+        or "ollama"
+    )
+    provider = str(provider).lower()
+
+    # Environment-variable overrides are scoped to the selected judge provider.
+    # This avoids an Ollama judge accidentally reading VLLM_JUDGE_* values.
+    prefix = provider.upper()
+    judge_base_url = os.getenv(f"{prefix}_JUDGE_BASE_URL", "").strip()
+    judge_model = os.getenv(f"{prefix}_JUDGE_MODEL", "").strip()
+    judge_api_key = os.getenv(f"{prefix}_JUDGE_API_KEY", "").strip()
 
     _judge_config = {
-        "base_url": judge_base_url or judge_section.get("base_url") or llm_section.get("base_url", "http://localhost:7101/v1"),
-        "model": judge_model or judge_section.get("model") or llm_section.get("model", "Qwen/Qwen2.5-7B-Instruct"),
-        "api_key": judge_api_key or judge_section.get("api_key") or llm_section.get("api_key", "qwen-local"),
-        "timeout": judge_section.get("timeout", llm_section.get("timeout", 60)),
-        "max_retries": judge_section.get("max_retries", llm_section.get("max_retries", 3)),
-        "retry_delay": judge_section.get("retry_delay", llm_section.get("retry_delay", 1.0)),
+        "provider": provider,
+        "base_url": judge_base_url
+        or judge_section.get("base_url")
+        or llm_section.get("base_url", "http://localhost:11434/v1"),
+        "model": judge_model
+        or judge_section.get("model")
+        or llm_section.get("model", "Qwen/Qwen2.5-7B-Instruct"),
+        "api_key": judge_api_key
+        or judge_section.get("api_key")
+        or llm_section.get("api_key", "qwen-local"),
+        "timeout": judge_section.get(
+            "timeout", llm_section.get("timeout", 60)
+        ),
+        "max_retries": judge_section.get(
+            "max_retries", llm_section.get("max_retries", 3)
+        ),
+        "retry_delay": judge_section.get(
+            "retry_delay", llm_section.get("retry_delay", 1.0)
+        ),
     }
-
-
-def check_hallucination(
-    answer: str,
-    document_content: str,
-    question: Optional[str] = None,
-    method: str = "semantic",
-) -> Dict[str, Any]:
-    if method in ("keyword", "both"):
-        return _check_keyword_based(answer, document_content, question)
-    if method == "semantic":
-        return _check_semantic_based(answer, document_content, question)
-    if method == "llm":
-        return _check_llm_based(answer, document_content, question)
-    if method == "hybrid":
-        return _check_hybrid(answer, document_content, question)
-    raise ValueError(f"Unknown method: {method}. Use 'keyword', 'semantic', 'llm', or 'hybrid'")
 
 
 def _check_keyword_based(
@@ -115,11 +205,14 @@ def _check_keyword_based(
             else:
                 ungrounded_sentences.append(sentence)
                 issues.append(
-                    f"Potential hallucination: '{sentence[:100]}...' - key phrases not found in document"
+                    "Potential hallucination: "
+                    f"'{sentence[:100]}...' - key phrases not found in document"
                 )
 
     total_sentences = len(grounded_sentences) + len(ungrounded_sentences)
-    confidence = (len(grounded_sentences) / total_sentences) if total_sentences else 0.0
+    confidence = (
+        (len(grounded_sentences) / total_sentences) if total_sentences else 0.0
+    )
 
     if any(
         phrase in answer_lower
@@ -149,110 +242,51 @@ def _check_keyword_based(
     }
 
 
-def _check_semantic_based(
+def _legacy_semantic_as_keyword(
     answer: str,
     document_content: str,
     question: Optional[str] = None,
 ) -> Dict[str, Any]:
-    try:
-        from sentence_transformers import SentenceTransformer
-        import numpy as np
-        from sklearn.metrics.pairwise import cosine_similarity
-    except ImportError:
-        result = _check_keyword_based(answer, document_content, question)
-        result["method"] = "keyword (semantic unavailable)"
-        result["note"] = "sentence-transformers not installed, using keyword-based method"
-        return result
+    """Former ``semantic`` mode used embeddings; map to keyword overlap."""
+    res = _check_keyword_based(answer, document_content, question)
+    res["method"] = "keyword"
+    note = (
+        "hallucination.method 'semantic' maps to keyword overlap "
+        "(embedding grading removed)."
+    )
+    issues = list(res.get("issues") or [])
+    issues.append(note)
+    res["issues"] = issues
+    return res
 
-    try:
-        offline_mode = os.getenv("OFFLINE_MODE", "").lower() in ("1", "true", "yes", "on")
-        if offline_mode:
-            os.environ["HF_HUB_OFFLINE"] = "1"
-            os.environ["TRANSFORMERS_OFFLINE"] = "1"
-        else:
-            os.environ.setdefault("HF_HUB_OFFLINE", "0")
 
-        local_model_path = os.getenv("SENTENCE_TRANSFORMERS_MODEL_PATH", "").strip()
-        if offline_mode and local_model_path and os.path.isdir(local_model_path):
-            model = SentenceTransformer(local_model_path, device="cpu")
-        else:
-            model = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
-    except Exception as e:
-        result = _check_keyword_based(answer, document_content, question)
-        result["method"] = "keyword (semantic unavailable)"
-        result["note"] = f"Could not load semantic model: {e}. Using keyword-based fallback."
-        return result
-
-    issues: List[str] = []
-    grounded_sentences: List[str] = []
-    ungrounded_sentences: List[str] = []
-
-    answer_sentences = _split_into_sentences(answer or "")
-    doc_sentences = _split_into_sentences(document_content or "")
-
-    if not answer_sentences:
-        return {
-            "is_grounded": False,
-            "confidence": 0.0,
-            "issues": ["Answer is empty"],
-            "grounded_sentences": [],
-            "ungrounded_sentences": [],
-            "method": "semantic",
-        }
-
-    # Build sliding-window chunks from document sentences.
-    # A window of 3 consecutive sentences captures cross-sentence context
-    # (e.g. "John was arrested. Peter was arrested." → "John was arrested. Peter was arrested.")
-    # which single-sentence comparison would miss.
-    WINDOW_SIZE = 3
-    doc_chunks: List[str] = list(doc_sentences)  # individual sentences
-    for w in range(2, WINDOW_SIZE + 1):
-        for j in range(len(doc_sentences) - w + 1):
-            doc_chunks.append(" ".join(doc_sentences[j : j + w]))
-
-    answer_embeddings = model.encode(answer_sentences)
-    doc_chunk_embeddings = model.encode(doc_chunks)
-
-    threshold = 0.5
-
-    for i, answer_sentence in enumerate(answer_sentences):
-        if not answer_sentence.strip():
-            continue
-
-        similarities = cosine_similarity([answer_embeddings[i]], doc_chunk_embeddings)[0]
-        max_similarity = float(np.max(similarities))
-
-        if max_similarity >= threshold:
-            grounded_sentences.append(answer_sentence)
-        else:
-            if _is_generic_statement(answer_sentence):
-                grounded_sentences.append(answer_sentence)
-            else:
-                ungrounded_sentences.append(answer_sentence)
-                issues.append(f"Low similarity ({max_similarity:.2f}): '{answer_sentence[:100]}...'")
-
-    total_sentences = len(grounded_sentences) + len(ungrounded_sentences)
-    confidence = (len(grounded_sentences) / total_sentences) if total_sentences else 0.0
-    is_grounded = confidence >= 0.7 and len(ungrounded_sentences) == 0
-
-    return {
-        "is_grounded": is_grounded,
-        "confidence": round(confidence, 3),
-        "issues": issues,
-        "grounded_sentences": grounded_sentences,
-        "ungrounded_sentences": ungrounded_sentences,
-        "method": "semantic",
-        "total_sentences": total_sentences,
-        "grounded_count": len(grounded_sentences),
-        "ungrounded_count": len(ungrounded_sentences),
-    }
+def check_hallucination(
+    answer: str,
+    document_content: str,
+    question: Optional[str] = None,
+    method: str = "llm",
+) -> Dict[str, Any]:
+    if method in ("keyword", "both"):
+        return _check_keyword_based(answer, document_content, question)
+    if method == "semantic":
+        return _legacy_semantic_as_keyword(
+            answer, document_content, question
+        )
+    if method == "llm":
+        return _check_llm_based(answer, document_content, question)
+    if method == "hybrid":
+        return _check_hybrid(answer, document_content, question)
+    raise ValueError(
+        f"Unknown method: {method}. Use 'keyword', 'semantic', 'llm', or "
+        "'hybrid'"
+    )
 
 
 # ---------------------------------------------------------------------------
 #  LLM-as-judge verification
 # ---------------------------------------------------------------------------
 
-_LLM_JUDGE_PROMPT = """You are a grounding verifier. Your job is to determine whether an answer is fully supported by the given document.
+_LLM_JUDGE_PROMPT = """You are a grounding verifier. Your job is to determine whether an answer is fully supported by the given document.  # noqa: E501
 
 DOCUMENT:
 {document}
@@ -266,14 +300,14 @@ ANSWER:
 Instructions:
 1. Check if EVERY claim in the answer is supported by the document.
 2. Pay special attention to:
-   - Numbers, counts, and aggregations (e.g. "3 men" — verify by counting in the document)
+   - Numbers, counts, and aggregations (e.g. "3 men" — verify by counting in the document)  # noqa: E501
    - Inferences and conclusions drawn from multiple parts of the document
    - Negations and qualifiers
 3. Respond with EXACTLY this JSON format (no other text):
 
-{{"verdict": "SUPPORTED" or "NOT_SUPPORTED", "confidence": 0.0 to 1.0, "reason": "brief explanation"}}
+{{"verdict": "SUPPORTED" or "NOT_SUPPORTED", "confidence": 0.0 to 1.0, "reason": "brief explanation"}}  # noqa: E501
 
-If the answer correctly aggregates, counts, or infers from the document, it IS supported.
+If the answer correctly aggregates, counts, or infers from the document, it IS supported.  # noqa: E501
 If the answer adds information not in the document, it is NOT supported."""
 
 
@@ -288,25 +322,19 @@ def _call_llm_judge(
     (Llama) to avoid self-evaluation bias — the model that generated the answer
     should NOT be the same model that judges it.
     """
-    try:
-        import openai
-    except ImportError:
-        raise RuntimeError(
-            "openai package required for LLM-based hallucination checking. "
-            "Install with: pip install openai"
-        )
-
     if not _judge_config and not _llm_config:
         raise RuntimeError(
-            "LLM config not set. Call set_llm_config() before using method='llm' or 'hybrid'."
+            "LLM config not set. Call set_llm_config() before using method='llm' or 'hybrid'."  # noqa: E501
         )
 
-    # Use dedicated judge config (Qwen on port 7101)
+    # Use dedicated judge config (often a second Ollama model)
     jcfg = _judge_config if _judge_config else _llm_config.get("llm", {})
+    provider = str(jcfg.get("provider", "ollama")).lower()
+    validate_provider_for_offline_mode(provider, {"llm": jcfg})
     api_key = jcfg.get("api_key", "not-required")
     if api_key == "EMPTY" or not api_key:
         api_key = "not-required"
-    base_url = jcfg.get("base_url", "http://localhost:7101/v1")
+    base_url = jcfg.get("base_url", "http://localhost:11434/v1")
     model = jcfg.get("model", "Qwen/Qwen2.5-7B-Instruct")
     timeout = jcfg.get("timeout", 60)
     max_retries = jcfg.get("max_retries", 3)
@@ -325,6 +353,27 @@ def _call_llm_judge(
         answer=answer or "",
     )
 
+    if provider == "ollama":
+        reply = _call_ollama_chat_native(
+            base_url=base_url,
+            model=model,
+            prompt=prompt,
+            max_retries=max_retries,
+            retry_delay=retry_delay,
+            timeout=timeout,
+            temperature=0.0,
+            max_tokens=200,
+        )
+        return _parse_llm_verdict(reply)
+
+    try:
+        import openai
+    except ImportError:
+        raise RuntimeError(
+            "openai package required for LLM-based hallucination checking. "
+            "Install with: pip install openai"
+        )
+
     client = openai.OpenAI(base_url=base_url, api_key=api_key, timeout=timeout)
 
     for attempt in range(max_retries):
@@ -335,7 +384,11 @@ def _call_llm_judge(
                 temperature=0.0,  # deterministic for judging
                 max_tokens=200,
             )
-            content = response.choices[0].message.content if response.choices else None
+            content = (
+                response.choices[0].message.content
+                if response.choices
+                else None
+            )
             reply = (content or "").strip()
             return _parse_llm_verdict(reply)
         except Exception as e:
@@ -348,7 +401,11 @@ def _call_llm_judge(
                 "reason": f"LLM call failed: {e}",
             }
 
-    return {"verdict": "UNKNOWN", "confidence": 0.5, "reason": "LLM call exhausted retries"}
+    return {
+        "verdict": "UNKNOWN",
+        "confidence": 0.5,
+        "reason": "LLM call exhausted retries",
+    }
 
 
 def _parse_llm_verdict(reply: str) -> Dict[str, Any]:
@@ -390,6 +447,171 @@ def _parse_llm_verdict(reply: str) -> Dict[str, Any]:
     return {"verdict": verdict, "confidence": confidence, "reason": reason}
 
 
+_GROUNDING_EXPLAIN_PROMPT = """You are assisting with audit documentation.
+
+DOCUMENT (excerpt):
+{document}
+
+QUESTION:
+{question}
+
+ANSWER:
+{answer}
+
+The answer has already been marked as supported by an automated checker, but
+there are no verbatim citation spans. In 1-2 short English sentences, explain
+how the answer is supported by the document (which facts or phrases align).
+Do not use JSON or bullet points. Max 80 words."""
+
+
+def explain_grounding_brief(
+    answer: str,
+    document_content: str,
+    question: str = "",
+) -> str:
+    """
+    One extra judge-LLM call: short prose why the answer fits the document.
+
+    Used when grounding_explanation_when_no_citations is 'always' and
+    llm_verdict.reason is missing. Returns empty string on failure.
+    """
+    if not _judge_config and not _llm_config:
+        return ""
+
+    jcfg = _judge_config if _judge_config else _llm_config.get("llm", {})
+    provider = str(jcfg.get("provider", "ollama")).lower()
+    api_key = jcfg.get("api_key", "not-required")
+    if api_key == "EMPTY" or not api_key:
+        api_key = "not-required"
+    base_url = jcfg.get("base_url", "http://localhost:11434/v1")
+    model = jcfg.get("model", "Qwen/Qwen2.5-7B-Instruct")
+    timeout = jcfg.get("timeout", 60)
+    max_retries = int(jcfg.get("max_retries", 3))
+    retry_delay = float(jcfg.get("retry_delay", 1.0))
+
+    max_doc_chars = int(os.getenv("HALLUC_MAX_DOC_CHARS", "6000"))
+    doc = document_content or ""
+    doc_text = doc[:max_doc_chars]
+    if len(doc) > max_doc_chars:
+        doc_text += "\n... [document truncated] ..."
+
+    prompt = _GROUNDING_EXPLAIN_PROMPT.format(
+        document=doc_text,
+        question=question or "(no question provided)",
+        answer=answer or "",
+    )
+    max_out = 300
+    if provider == "ollama":
+        text = _call_ollama_chat_native(
+            base_url=base_url,
+            model=model,
+            prompt=prompt,
+            max_retries=max_retries,
+            retry_delay=retry_delay,
+            timeout=timeout,
+            temperature=0.0,
+            max_tokens=200,
+        )
+        if len(text) > max_out:
+            text = text[: max_out - 3] + "..."
+        return text
+
+    try:
+        import openai
+    except ImportError:
+        return ""
+
+    client = openai.OpenAI(base_url=base_url, api_key=api_key, timeout=timeout)
+
+    for attempt in range(max_retries):
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=200,
+            )
+            content = (
+                response.choices[0].message.content
+                if response.choices
+                else None
+            )
+            text = (content or "").strip()
+            if len(text) > max_out:
+                text = text[: max_out - 3] + "..."
+            return text
+        except Exception:
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay * (attempt + 1))
+                continue
+            return ""
+    return ""
+
+
+def apply_grounding_why_when_no_citations(
+    pair: Dict[str, Any],
+    document_content: str,
+    question: str,
+    mode: str,
+) -> None:
+    """
+    If is_grounded and citations are empty, set
+    hallucination_check.grounding_why.
+
+    mode: off | reuse_llm_only | always
+    """
+    raw_mode = str(mode or "off").strip().lower()
+    if raw_mode in ("", "off", "false", "0", "no"):
+        return
+    grading = pair.get("hallucination_check")
+    if not isinstance(grading, dict):
+        grading = pair.get("grading")
+    if not isinstance(grading, dict):
+        return
+    pair["hallucination_check"] = grading
+    if grading.get("is_grounded") is not True:
+        return
+
+    spans = pair.get("citation_spans")
+    notes = pair.get("citation_notes")
+    if not isinstance(spans, list):
+        spans = []
+    if not isinstance(notes, list):
+        notes = []
+    if spans or notes:
+        return
+
+    if str(grading.get("grounding_why") or "").strip():
+        return
+
+    def _from_llm_verdict() -> bool:
+        lv = grading.get("llm_verdict")
+        if not isinstance(lv, dict):
+            return False
+        r = str(lv.get("reason") or "").strip()
+        if not r:
+            return False
+        grading["grounding_why"] = r[:300]
+        return True
+
+    if raw_mode == "reuse_llm_only":
+        _from_llm_verdict()
+        return
+
+    if raw_mode == "always":
+        if _from_llm_verdict():
+            return
+        ans = pair.get("answer")
+        brief = explain_grounding_brief(
+            str(ans or ""),
+            document_content,
+            question or "",
+        )
+        if brief:
+            grading["grounding_why"] = brief
+    # Unknown modes: no-op
+
+
 def _check_llm_based(
     answer: str,
     document_content: str,
@@ -412,6 +634,14 @@ def _check_llm_based(
         }
 
     verdict = _call_llm_judge(answer, document_content, question or "")
+    strict_required = _strict_llm_judge_required()
+    raw_verdict = str(verdict.get("verdict", "")).upper()
+    if strict_required and raw_verdict not in ("SUPPORTED", "NOT_SUPPORTED"):
+        reason = str(verdict.get("reason", "")).strip() or "unknown verdict"
+        raise RuntimeError(
+            "Strict LLM judge mode requires a valid verdict. "
+            f"Got {raw_verdict or 'EMPTY'} ({reason})."
+        )
 
     is_supported = verdict["verdict"] == "SUPPORTED"
     confidence = verdict["confidence"]
@@ -427,7 +657,6 @@ def _check_llm_based(
         ungrounded = sentences
         issues = [f"LLM judge: {reason}"]
 
-    total = len(grounded) + len(ungrounded)
     is_grounded = is_supported and confidence >= 0.7
 
     return {
@@ -437,116 +666,105 @@ def _check_llm_based(
         "grounded_sentences": grounded,
         "ungrounded_sentences": ungrounded,
         "method": "llm",
-        "total_sentences": total,
-        "grounded_count": len(grounded),
-        "ungrounded_count": len(ungrounded),
         "llm_verdict": verdict,
     }
 
 
 # ---------------------------------------------------------------------------
-#  Hybrid: semantic first, LLM fallback for low-confidence sentences
+#  Hybrid (legacy): formerly embedding + LLM; now LLM judge only.
 # ---------------------------------------------------------------------------
+
 
 def _check_hybrid(
     answer: str,
     document_content: str,
     question: Optional[str] = None,
 ) -> Dict[str, Any]:
+    out = _check_llm_based(answer, document_content, question)
+    if isinstance(out, dict) and out.get("method") == "llm":
+        out["method"] = "hybrid"
+    return out
+
+
+def _document_text_for_grading(payload: Dict[str, Any]) -> str:
+    """Resolve document body from a merged QA/grading dict.
+
+    Same resolution order as ``extract_document_text`` (priority fields,
+    ``english.article``, English-only ``source`` list), but **no** deep scan
+    or generic fallback so ``questions`` / ``answers`` never become body
+    text.
     """
-    Two-pass verification:
-      1. Semantic similarity (fast) — classifies each sentence
-      2. LLM-as-judge (accurate) — re-checks sentences that semantic
-         marked as ungrounded, since they may involve counting,
-         aggregation, or inference that embedding similarity misses.
-
-    This gives the speed of semantic for clearly-grounded sentences,
-    and the accuracy of LLM for ambiguous ones.
-    """
-    # --- Pass 1: semantic check ---
-    semantic_result = _check_semantic_based(answer, document_content, question)
-
-    ungrounded = semantic_result.get("ungrounded_sentences", [])
-    if not ungrounded:
-        # All sentences passed semantic check — no need for LLM
-        semantic_result["method"] = "hybrid (semantic only — all passed)"
-        return semantic_result
-
-    # --- Pass 2: LLM re-check for ungrounded sentences ---
-    # Send the FULL answer + document to the LLM for holistic judgment,
-    # since the issue may be aggregation/inference across sentences.
-    try:
-        llm_verdict = _call_llm_judge(answer, document_content, question or "")
-    except Exception as e:
-        # LLM unavailable — fall back to semantic-only result
-        semantic_result["method"] = "hybrid (LLM unavailable — semantic only)"
-        semantic_result["issues"].append(f"LLM fallback failed: {e}")
-        return semantic_result
-
-    llm_supported = llm_verdict["verdict"] == "SUPPORTED"
-    llm_confidence = llm_verdict["confidence"]
-
-    if llm_supported and llm_confidence >= 0.7:
-        # LLM says the answer IS supported — override semantic's ungrounded verdict
-        all_sentences = semantic_result.get("grounded_sentences", []) + ungrounded
-        total = len(all_sentences)
-
-        return {
-            "is_grounded": True,
-            "confidence": round(llm_confidence, 3),
-            "issues": [],
-            "grounded_sentences": all_sentences,
-            "ungrounded_sentences": [],
-            "method": "hybrid (semantic + LLM override)",
-            "total_sentences": total,
-            "grounded_count": total,
-            "ungrounded_count": 0,
-            "llm_verdict": llm_verdict,
-            "semantic_ungrounded_overridden": ungrounded,
-        }
-    else:
-        # LLM also says NOT supported — keep semantic's verdict but add LLM detail
-        reason = llm_verdict.get("reason", "")
-        # Use the lower confidence between semantic and LLM
-        combined_conf = min(semantic_result["confidence"], llm_confidence)
-
-        result = dict(semantic_result)
-        result["method"] = "hybrid (semantic + LLM confirmed)"
-        result["confidence"] = round(combined_conf, 3)
-        result["is_grounded"] = combined_conf >= 0.7 and len(ungrounded) == 0
-        result["llm_verdict"] = llm_verdict
-        if reason:
-            result["issues"].append(f"LLM confirms: {reason}")
-        return result
+    return extract_document_text(
+        payload,
+        strict=False,
+        allow_loose_resolution=False,
+    )
 
 
 def grade_qa_results(
     qa_results: List[Dict[str, Any]],
-    method: str = "semantic",
+    method: str = "llm",
 ) -> List[Dict[str, Any]]:
     graded_results: List[Dict[str, Any]] = []
 
     for result in qa_results:
-        document_content = (result.get("content") or result.get("text") or result.get("body") or "")
+        document_content = _document_text_for_grading(result)
         questions = result.get("questions") or []
         answers = result.get("answers") or []
 
         hallucination_checks = []
-        total_confidence = 0.0
-        total_checks = 0
+        grounded_confidences: List[float] = []
 
         for question, answer in zip(questions, answers):
-            check_result = check_hallucination(
-                answer=answer,
-                document_content=document_content,
-                question=question,
-                method=method,
+            try:
+                check_result = check_hallucination(
+                    answer=answer,
+                    document_content=document_content,
+                    question=question,
+                    method=method,
+                )
+            except Exception as exc:
+                if method == "llm" and _strict_llm_judge_required():
+                    raise RuntimeError(
+                        "Strict LLM judge mode failed while grading: "
+                        f"{exc}"
+                    ) from exc
+                check_result = {
+                    "is_grounded": False,
+                    "confidence": 0.0,
+                    "issues": [f"Hallucination check failed: {exc}"],
+                    "grounded_sentences": [],
+                    "ungrounded_sentences": _split_into_sentences(
+                        answer or ""
+                    ),
+                    "method": f"{method} (failed)",
+                    "llm_verdict": {
+                        "verdict": "UNKNOWN",
+                        "confidence": 0.0,
+                        "reason": str(exc),
+                    },
+                }
+            hallucination_checks.append(
+                {
+                    "question": question,
+                    "answer": answer,
+                    "check_result": check_result,
+                }
             )
-            hallucination_checks.append({"question": question, "answer": answer, "check_result": check_result})
-            total_confidence += check_result.get("confidence", 0.0)
-            total_checks += 1
+            if check_result.get("is_grounded") is True:
+                try:
+                    grounded_confidences.append(
+                        float(check_result.get("confidence", 0.0))
+                    )
+                except (TypeError, ValueError):
+                    grounded_confidences.append(0.0)
 
-        overall_confidence = (total_confidence / total_checks) if total_checks else 0.0
+        if grounded_confidences:
+            overall_confidence = sum(grounded_confidences) / len(
+                grounded_confidences
+            )
+        else:
+            overall_confidence = 0.0
 
         if overall_confidence >= 0.9:
             overall_grade = "A"
@@ -566,7 +784,9 @@ def grade_qa_results(
                 "overall_grade": overall_grade,
                 "overall_confidence": round(overall_confidence, 3),
                 "grading_method": method,
-                "judge_model": _judge_config.get("model", "unknown") if method in ("llm", "hybrid") else "N/A (semantic only)",
+                "judge_model": _judge_config.get("model", "unknown")
+                if method in ("llm", "hybrid")
+                else "N/A (keyword / legacy semantic)",
             }
         )
 
@@ -586,7 +806,7 @@ def _split_into_sentences(text: str) -> List[str]:
         return []
 
     # Protect abbreviations from being split
-    _ABBREVS = r"(?:Dr|Mr|Mrs|Ms|Prof|Sr|Jr|St|vs|etc|inc|ltd|corp|dept|approx|est|govt|intl|natl|assn|assoc|vol|no|fig|ref|pp|ed|rev|gen|sgt|cpl|pvt|lt|col|capt|maj|brig|adm|cmdr)"
+    _ABBREVS = r"(?:Dr|Mr|Mrs|Ms|Prof|Sr|Jr|St|vs|etc|inc|ltd|corp|dept|approx|est|govt|intl|natl|assn|assoc|vol|no|fig|ref|pp|ed|rev|gen|sgt|cpl|pvt|lt|col|capt|maj|brig|adm|cmdr)"  # noqa: E501
     protected = text
     # Protect abbreviation periods: "Dr." → "Dr<DOT>"
     protected = re.sub(
@@ -602,7 +822,8 @@ def _split_into_sentences(text: str) -> List[str]:
     # Protect ellipsis: "..." → "<ELLIPSIS>"
     protected = re.sub(r"\.{3,}", "<ELLIPSIS>", protected)
 
-    # Split on sentence-ending punctuation followed by whitespace or end-of-string
+    # Split on sentence-ending punctuation followed by whitespace or
+    # end-of-string
     parts = re.split(r"(?<=[.!?])\s+", protected)
 
     # Also split on newlines (paragraphs are sentence boundaries)
@@ -616,7 +837,9 @@ def _split_into_sentences(text: str) -> List[str]:
         s = s.replace("<DOT>", ".").replace("<ELLIPSIS>", "...").strip()
         # Keep short numeric answers (e.g. "7", "3.5", "10%") so they are
         # not misclassified as empty answers in downstream checks.
-        is_short_numeric = bool(re.fullmatch(r"[$€£]?\s*[-+]?\d+(?:[.,]\d+)?(?:%|/\d+)?", s))
+        is_short_numeric = bool(
+            re.fullmatch(r"[$€£]?\s*[-+]?\d+(?:[.,]\d+)?(?:%|/\d+)?", s)
+        )
         # Otherwise skip very short fragments that are often noise.
         if s and (len(s) > 2 or is_short_numeric):
             sentences.append(s)
@@ -698,21 +921,24 @@ def _extract_key_phrases(sentence: str, min_length: int = 4) -> List[str]:
 def _is_generic_statement(sentence: str) -> bool:
     """
     Detect meta-statements about the document that carry no factual claims.
-    These are auto-grounded because penalising them would unfairly lower confidence.
+    These are auto-grounded because penalising them would unfairly lower confidence.  # noqa: E501
     """
     generic_patterns = [
         r"^the document\b",
         r"^according to the (document|text|article|report)",
-        r"^as (stated|mentioned|described|noted|indicated) in the (document|text|article)",
-        r"^the document (states|mentions|describes|discusses|says|indicates|notes)",
+        r"^as (stated|mentioned|described|noted|indicated) in the (document|text|article)",  # noqa: E501
+        r"^the document (states|mentions|describes|discusses|says|indicates|notes)",  # noqa: E501
         r"^based on the (document|text|article|information provided)",
-        # Only treat "this/it is" as generic when followed by document-reference context
+        # Only treat "this/it is" as generic when followed by
+        # document-reference context
         r"^this (is a|refers to|means|suggests that|indicates)",
-        r"^it (refers to|means|should be noted|is (important|worth noting|clear|evident))",
+        r"^it (refers to|means|should be noted|is (important|worth noting|clear|evident))",  # noqa: E501
     ]
 
     sentence_lower = sentence.lower().strip()
-    return any(re.match(pattern, sentence_lower) for pattern in generic_patterns)
+    return any(
+        re.match(pattern, sentence_lower) for pattern in generic_patterns
+    )
 
 
 def print_grading_report(graded_results: List[Dict[str, Any]]) -> None:
@@ -733,14 +959,31 @@ def print_grading_report(graded_results: List[Dict[str, Any]]) -> None:
         print()
 
         checks = result.get("hallucination_checks", [])
-        for j, check in enumerate(checks, 1):
-            question = check.get("question", "N/A")
-            check_result = check.get("check_result", {})
+        qa_rows = result.get("qa_pairs", [])
+        if checks:
+            iterable = checks
+            use_qa_pairs = False
+        else:
+            iterable = qa_rows
+            use_qa_pairs = True
+        for j, check in enumerate(iterable, 1):
+            if use_qa_pairs:
+                question = check.get("question", "N/A")
+                check_result = check.get("hallucination_check")
+                if not isinstance(check_result, dict):
+                    check_result = check.get("grading") or {}
+            else:
+                question = check.get("question", "N/A")
+                check_result = check.get("check_result", {})
             is_grounded = check_result.get("is_grounded", False)
             conf = check_result.get("confidence", 0.0)
             issues = check_result.get("issues", [])
 
-            status = "[OK] GROUNDED" if is_grounded else "[WARN] POTENTIAL HALLUCINATION"
+            status = (
+                "[OK] GROUNDED"
+                if is_grounded
+                else "[WARN] POTENTIAL HALLUCINATION"
+            )
             print(f"  Q{j}. {question[:80]}...")
             print(f"     Status: {status} (Confidence: {conf:.1%})")
 
@@ -752,4 +995,3 @@ def print_grading_report(graded_results: List[Dict[str, Any]]) -> None:
 
         print("-" * 80)
         print()
-

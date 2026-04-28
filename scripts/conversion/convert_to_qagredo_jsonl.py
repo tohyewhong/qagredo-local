@@ -2,8 +2,8 @@
 """
 Multi-format input normalizer for QAGRedo.
 
-Converts: pdf | txt | docx | xlsx | csv | json | jsonl
-Outputs: JSONL where each line is a normalized document record that QAGRedo can ingest.
+Converts: pdf | txt | doc | docx | pptx | xlsx | csv | json | jsonl
+Outputs: JSONL where each line is a normalized document record that QAGRedo can ingest.  # noqa: E501
 
 Canonical record schema (per line):
   - id
@@ -15,8 +15,8 @@ Canonical record schema (per line):
   - metadata (optional)
 
 Examples:
-  /home/tyewhong/qagredo/.venv/bin/python scripts/conversion/convert_to_qagredo_jsonl.py --input data/dev-data.jsonl --output data/normalized.jsonl
-  /home/tyewhong/qagredo/.venv/bin/python scripts/conversion/convert_to_qagredo_jsonl.py --input data/my.pdf --output data/my.jsonl
+  /home/tyewhong/qagredo/.venv/bin/python scripts/conversion/convert_to_qagredo_jsonl.py --input data/dev-data.jsonl --output data/normalized.jsonl  # noqa: E501
+  /home/tyewhong/qagredo/.venv/bin/python scripts/conversion/convert_to_qagredo_jsonl.py --input data/my.pdf --output data/my.jsonl  # noqa: E501
 """
 
 from __future__ import annotations
@@ -24,13 +24,26 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import re
+import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 
-SUPPORTED_INPUT_TYPES = ("pdf", "txt", "docx", "xlsx", "csv", "json", "jsonl")
+SUPPORTED_INPUT_TYPES = (
+    "pdf",
+    "txt",
+    "doc",
+    "docx",
+    "pptx",
+    "xlsx",
+    "csv",
+    "json",
+    "jsonl",
+)
 
 
 def _repo_root() -> Path:
@@ -42,9 +55,12 @@ def _repo_root() -> Path:
       - run_qa_pipeline.py
     """
     here = Path(__file__).resolve()
-    # Search upward a few levels (this script is typically at scripts/conversion/*.py)
+    # Search upward a few levels (this script is typically at
+    # scripts/conversion/*.py)
     for parent in [here.parent, *list(here.parents)[:8]]:
-        if (parent / "utils" / "parse.py").is_file() and (parent / "run_qa_pipeline.py").is_file():
+        if (parent / "utils" / "parse.py").is_file() and (
+            parent / "run_qa_pipeline.py"
+        ).is_file():
             return parent
     # Fallback: best-effort (should still work when run from repo root cwd)
     return here.parent.parent
@@ -80,7 +96,9 @@ def _resolve_input_path(file_path: str) -> Path:
             return candidate
 
     tried = "\n".join(f"  - {c}" for c in candidates)
-    raise FileNotFoundError(f"File not found: {file_path}\nTried locations:\n{tried}")
+    raise FileNotFoundError(
+        f"File not found: {file_path}\nTried locations:\n{tried}"
+    )
 
 
 def _safe_slug(value: str) -> str:
@@ -91,6 +109,7 @@ def _safe_slug(value: str) -> str:
 # ---------------------------------------------------------------------------
 #  JSON repair — tolerate common hand-editing mistakes
 # ---------------------------------------------------------------------------
+
 
 def _try_repair_json(raw_text: str) -> Any:
     """
@@ -126,17 +145,17 @@ def _try_repair_json(raw_text: str) -> Any:
             # If line ends with a trailing comma, close the string *before*
             # the comma so the comma stays a JSON delimiter.
             # e.g.  "title": "abc,  →  "title": "abc",
-            trail_comma = re.search(r',\s*$', stripped)
+            trail_comma = re.search(r",\s*$", stripped)
             if trail_comma:
-                stripped = stripped[:trail_comma.start()] + '",'
+                stripped = stripped[: trail_comma.start()] + '",'
             else:
                 stripped += '"'
         fixed_lines.append(stripped)
     repaired = "\n".join(fixed_lines)
 
     # --- Repair pass 2 — insert missing commas ---
-    # A line that ends with a value token (string / number / bool / null / ] / })
-    # followed (after whitespace + newline) by a line starting with '"' (a new key)
+    # A line that ends with a value token (string / number / bool / null / ] / })  # noqa: E501
+    # followed (after whitespace + newline) by a line starting with '"' (a new key)  # noqa: E501
     # without an intervening comma.
     repaired = re.sub(
         r'("(?:[^"\\]|\\.)*"|true|false|null|\d+(?:\.\d+)?|\]|\})\s*\n(\s*")',
@@ -159,12 +178,13 @@ def _try_repair_json(raw_text: str) -> Any:
 #  Fallback JSON object extraction from broken text
 # ---------------------------------------------------------------------------
 
+
 def _regex_extract_press_doc(block: str) -> Optional[Dict[str, Any]]:
     """
     Last-resort extraction: pull press-style document fields out of a
     ``{…}`` text block using regex when JSON parsing has failed completely.
 
-    Extracts ``country``, ``title``, ``summary``, **English-only** ``"article"``
+    Extracts ``country``, ``title``, ``summary``, **English-only** ``"article"``  # noqa: E501
     values, and ``source_date`` entries.  Articles inside ``"native"`` blocks
     are skipped.
     """
@@ -179,7 +199,9 @@ def _regex_extract_press_doc(block: str) -> Optional[Dict[str, Any]]:
     # -- English-only article texts (skip articles inside "native" blocks) --
     # Find positions of all "native" keys so we can exclude articles near them.
     native_positions = [m.start() for m in re.finditer(r'"native"\s*:', block)]
-    all_article_matches = list(re.finditer(r'"article"\s*:\s*"((?:[^"\\]|\\.)*)"', block))
+    all_article_matches = list(
+        re.finditer(r'"article"\s*:\s*"((?:[^"\\]|\\.)*)"', block)
+    )
 
     articles: List[str] = []
     for m in all_article_matches:
@@ -209,12 +231,14 @@ def _regex_extract_press_doc(block: str) -> Optional[Dict[str, Any]]:
     )
     source_dates: List[Dict[str, Any]] = []
     for m in sd_blocks:
-        source_dates.append({
-            "source": m.group(1),
-            "day": int(m.group(2)),
-            "month": m.group(3),
-            "year": int(m.group(4)),
-        })
+        source_dates.append(
+            {
+                "source": m.group(1),
+                "day": int(m.group(2)),
+                "month": m.group(3),
+                "year": int(m.group(4)),
+            }
+        )
     if source_dates:
         doc["source_date"] = source_dates
 
@@ -241,7 +265,7 @@ def _extract_json_objects_from_text(raw_text: str) -> List[Dict[str, Any]]:
     length = len(raw_text)
 
     while i < length:
-        if raw_text[i] != '{':
+        if raw_text[i] != "{":
             i += 1
             continue
 
@@ -259,19 +283,19 @@ def _extract_json_objects_from_text(raw_text: str) -> List[Dict[str, Any]]:
                 j += 1
                 continue
             if in_string:
-                if c == '\\':
+                if c == "\\":
                     escape_next = True
                 elif c == '"':
                     in_string = False
             else:
                 if c == '"':
                     in_string = True
-                elif c == '{':
+                elif c == "{":
                     depth += 1
-                elif c == '}':
+                elif c == "}":
                     depth -= 1
                     if depth == 0:
-                        block = raw_text[start:j + 1]
+                        block = raw_text[start: j + 1]
                         parsed = False
                         try:
                             obj = _try_repair_json(block)
@@ -302,8 +326,9 @@ def _extract_json_objects_from_text(raw_text: str) -> List[Dict[str, Any]]:
 #  Press / news-article schema helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_source_list(doc: Dict[str, Any]) -> Optional[list]:
-    """Return the source list from *doc*, tolerating both ``source`` and ``sources``."""
+    """Return the source list from *doc*, tolerating both ``source`` and ``sources``."""  # noqa: E501
     for key in ("source", "sources"):
         val = doc.get(key)
         if isinstance(val, list):
@@ -312,7 +337,7 @@ def _get_source_list(doc: Dict[str, Any]) -> Optional[list]:
 
 
 def _get_source_dates(doc: Dict[str, Any]) -> list:
-    """Return the source-date list from *doc*, tolerating both ``source_date`` and ``source_dates``."""
+    """Return the source-date list from *doc*, tolerating both ``source_date`` and ``source_dates``."""  # noqa: E501
     for key in ("source_date", "source_dates"):
         val = doc.get(key)
         if isinstance(val, list):
@@ -325,17 +350,19 @@ def _is_press_style_doc(doc: Dict[str, Any]) -> bool:
     Detect whether *doc* follows the press / news-article schema.
 
     Indicators:
-      * ``source`` or ``sources`` is a **list** (language-variant objects, not a file path)
-      * at least one of ``country``, ``summary``, ``source_date``/``source_dates`` is present
+      * ``source`` or ``sources`` is a **list** (language-variant objects, not a file path)  # noqa: E501
+      * at least one of ``country``, ``summary``, ``source_date``/``source_dates`` is present  # noqa: E501
     """
     if _get_source_list(doc) is None:
         return False
-    return any(k in doc for k in ("country", "summary", "source_date", "source_dates"))
+    return any(
+        k in doc for k in ("country", "summary", "source_date", "source_dates")
+    )
 
 
 def _extract_source_articles(src_item: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
-    Extract **English-only** article text from a single item in the ``source`` array.
+    Extract **English-only** article text from a single item in the ``source`` array.  # noqa: E501
 
     All ``"native"`` content is **skipped** — regardless of whether it is
     ``null``, ``{}`` (empty), or contains actual article text.  Only the
@@ -352,7 +379,7 @@ def _extract_source_articles(src_item: Dict[str, Any]) -> List[Dict[str, Any]]:
            {"article": "…", "title": "…"}               → used as-is
 
     Returns a list of dicts each with keys:
-    ``language``, ``article``, ``title``, ``source_date`` (any may be empty/None).
+    ``language``, ``article``, ``title``, ``source_date`` (any may be empty/None).  # noqa: E501
     """
     results: List[Dict[str, Any]] = []
     if not isinstance(src_item, dict):
@@ -367,39 +394,44 @@ def _extract_source_articles(src_item: Dict[str, Any]) -> List[Dict[str, Any]]:
     if isinstance(lang_data, dict) and lang_data:
         article_text = lang_data.get("article", "")
         if isinstance(article_text, str) and article_text.strip():
-            results.append({
-                "language": "english",
-                "article": article_text.strip(),
-                "title": str(lang_data.get("title", "") or ""),
-                "source_date": lang_data.get("source_date"),
-            })
+            results.append(
+                {
+                    "language": "english",
+                    "article": article_text.strip(),
+                    "title": str(lang_data.get("title", "") or ""),
+                    "source_date": lang_data.get("source_date"),
+                }
+            )
             found_via_lang_key = True
 
-    # Flat / unwrapped structure — ``article`` lives directly on the source item
+    # Flat / unwrapped structure — ``article`` lives directly on the source item  # noqa: E501
     # (no "english" wrapper at all).  "native" siblings are ignored.
     if not found_via_lang_key:
         direct_article = src_item.get("article", "")
         if isinstance(direct_article, str) and direct_article.strip():
-            results.append({
-                "language": "unknown",
-                "article": direct_article.strip(),
-                "title": str(src_item.get("title", "") or ""),
-                "source_date": src_item.get("source_date"),
-            })
+            results.append(
+                {
+                    "language": "unknown",
+                    "article": direct_article.strip(),
+                    "title": str(src_item.get("title", "") or ""),
+                    "source_date": src_item.get("source_date"),
+                }
+            )
 
     return results
 
 
-def _flatten_press_doc(doc: Dict[str, Any], *, doc_index: int = 1) -> Dict[str, Any]:
+def _flatten_press_doc(
+    doc: Dict[str, Any], *, doc_index: int = 1
+) -> Dict[str, Any]:
     """
     Transform a press / news-style nested document into a **flat** dict
     with ``content`` at the top level so the normal QAGRedo text
     extraction works correctly.
 
-    Handles **multiple sources per title**: each source item in the
-    ``source`` array may contribute one or more articles (English,
-    native, or both).  All article texts are merged into a single
-    ``content`` string.
+    Handles **multiple sources per title**: each source item may carry
+    English and native variants; **only English** (or flat ``article``)
+    text is merged into ``content`` — ``native`` is always skipped.
 
     Content is built **only** from ``article`` fields inside the
     ``source`` array.  The ``summary`` field is preserved in metadata
@@ -463,9 +495,11 @@ def _flatten_press_doc(doc: Dict[str, Any], *, doc_index: int = 1) -> Dict[str, 
 
     # Per-source metadata
     if all_articles:
-        languages_found = list(dict.fromkeys(
-            a["language"] for a in all_articles if a.get("language")
-        ))
+        languages_found = list(
+            dict.fromkeys(
+                a["language"] for a in all_articles if a.get("language")
+            )
+        )
         if languages_found:
             meta["languages"] = languages_found
         meta["num_sources"] = num_articles
@@ -498,6 +532,7 @@ def _flatten_press_doc(doc: Dict[str, Any], *, doc_index: int = 1) -> Dict[str, 
 # ---------------------------------------------------------------------------
 #  Deep (recursive) text extraction for arbitrary nested JSON
 # ---------------------------------------------------------------------------
+
 
 def _deep_extract_articles(obj: Any, *, _depth: int = 0) -> List[str]:
     """
@@ -533,7 +568,15 @@ def _extract_text_field(document: Dict[str, Any]) -> str:
     """
     Extract text content from a document dict, mirroring QAGRedo’s tolerance.
     """
-    text_fields = ["content", "text", "body", "document", "article", "passage", "summary"]
+    text_fields = [
+        "content",
+        "text",
+        "body",
+        "document",
+        "article",
+        "passage",
+        "summary",
+    ]
     for field in text_fields:
         if field in document and document[field]:
             val = document[field]
@@ -580,7 +623,11 @@ def _canonicalize_record(
     # Preserve any per-record source for debugging, but standardize `source`
     # to the actual input path to be predictable for layman users.
     raw_source = raw.get("source")
-    if raw_source and not isinstance(raw_source, list) and str(raw_source) != str(source):
+    if (
+        raw_source
+        and not isinstance(raw_source, list)
+        and str(raw_source) != str(source)
+    ):
         metadata.setdefault("original_source", str(raw_source))
     if isinstance(raw.get("metadata"), dict):
         # Merge in any existing metadata without losing our input_type marker.
@@ -592,7 +639,7 @@ def _canonicalize_record(
         "id": str(raw.get("id") or fallback_id),
         "title": str(raw.get("title") or fallback_title),
         "content": content,
-        "text": content,  # explicit alias; QAGRedo prefers `content` but accepts `text`
+        "text": content,  # explicit alias; QAGRedo prefers `content` but accepts `text`  # noqa: E501
         "source": str(source),
         "type": str(raw.get("type") or "text_document"),
     }
@@ -634,8 +681,70 @@ def _extract_docx(path: Path) -> str:
         ) from e
 
     doc = Document(str(path))
-    paragraphs = [p.text.strip() for p in doc.paragraphs if p.text and p.text.strip()]
+    paragraphs = [
+        p.text.strip() for p in doc.paragraphs if p.text and p.text.strip()
+    ]
     return "\n\n".join(paragraphs).strip()
+
+
+def _extract_pptx(path: Path) -> str:
+    try:
+        from pptx import Presentation
+    except Exception as e:  # pragma: no cover
+        raise RuntimeError(
+            "PPTX support requires the 'python-pptx' package. "
+            "Install it (or run `pip install -r requirements.txt`)."
+        ) from e
+
+    prs = Presentation(str(path))
+    chunks: List[str] = []
+
+    def collect_from_shapes(shapes: Any) -> None:
+        for shape in shapes:
+            nested = getattr(shape, "shapes", None)
+            if nested is not None:
+                collect_from_shapes(nested)
+                continue
+            if getattr(shape, "has_table", False):
+                for row in shape.table.rows:
+                    for cell in row.cells:
+                        t = (cell.text or "").strip()
+                        if t:
+                            chunks.append(t)
+                continue
+            tx = (getattr(shape, "text", None) or "").strip()
+            if tx:
+                chunks.append(tx)
+
+    for slide in prs.slides:
+        collect_from_shapes(slide.shapes)
+    return "\n\n".join(chunks).strip()
+
+
+def _extract_doc(path: Path) -> str:
+    """
+    Extract text from legacy .doc files via antiword.
+    """
+    try:
+        result = subprocess.run(
+            ["antiword", str(path)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError as e:  # pragma: no cover
+        raise RuntimeError(
+            "DOC support requires the 'antiword' command-line tool. "
+            "Install it in your environment (or run inside the updated Docker image)."  # noqa: E501
+        ) from e
+    except subprocess.CalledProcessError as e:
+        stderr = (e.stderr or "").strip()
+        raise RuntimeError(
+            f"Failed to extract DOC file with antiword: {path}"
+            + (f" ({stderr})" if stderr else "")
+        ) from e
+
+    return (result.stdout or "").strip()
 
 
 def _extract_xlsx(path: Path) -> tuple[str, Dict[str, Any]]:
@@ -647,18 +756,23 @@ def _extract_xlsx(path: Path) -> tuple[str, Dict[str, Any]]:
             "Install it (or run `pip install -r requirements.txt`)."
         ) from e
 
-    wb = openpyxl.load_workbook(filename=str(path), read_only=True, data_only=True)
+    wb = openpyxl.load_workbook(
+        filename=str(path), read_only=True, data_only=True
+    )
     sheet_names = list(wb.sheetnames)
 
     chunks: List[str] = []
     for sheet_name in sheet_names:
         ws = wb[sheet_name]
         chunks.append(f"Sheet: {sheet_name}")
-        # Stream rows; keep readable plaintext (tabs between cells, newlines between rows).
+        # Stream rows; keep readable plaintext (tabs between cells, newlines
+        # between rows).
         for row in ws.iter_rows(values_only=True):
             if not row:
                 continue
-            cells = [str(c).strip() for c in row if c is not None and str(c).strip()]
+            cells = [
+                str(c).strip() for c in row if c is not None and str(c).strip()
+            ]
             if cells:
                 chunks.append("\t".join(cells))
         chunks.append("")  # blank line between sheets
@@ -670,9 +784,15 @@ def _extract_xlsx(path: Path) -> tuple[str, Dict[str, Any]]:
 
 def _load_csv_docs(path: Path) -> List[Dict[str, Any]]:
     docs: List[Dict[str, Any]] = []
-    with path.open("r", encoding="utf-8-sig", errors="replace", newline="") as f:
+    with path.open(
+        "r", encoding="utf-8-sig", errors="replace", newline=""
+    ) as f:
         reader = csv.DictReader(f)
-        fieldnames = [str(n).strip() for n in (reader.fieldnames or []) if n and str(n).strip()]
+        fieldnames = [
+            str(n).strip()
+            for n in (reader.fieldnames or [])
+            if n and str(n).strip()
+        ]
         for row_idx, row in enumerate(reader, start=1):
             if not row:
                 continue
@@ -693,7 +813,9 @@ def _load_csv_docs(path: Path) -> List[Dict[str, Any]]:
                 }
             )
     if not docs:
-        raise ValueError(f"No rows with non-empty text found in CSV file: {path}")
+        raise ValueError(
+            f"No rows with non-empty text found in CSV file: {path}"
+        )
     return docs
 
 
@@ -756,7 +878,9 @@ def _load_jsonl_docs(path: Path) -> List[Dict[str, Any]]:
                 obj = json.loads(line)
             except json.JSONDecodeError as e:
                 raise json.JSONDecodeError(
-                    f"Invalid JSON on line {line_num} of {path}: {e.msg}", e.doc, e.pos
+                    f"Invalid JSON on line {line_num} of {path}: {e.msg}",
+                    e.doc,
+                    e.pos,
                 )
             if isinstance(obj, dict):
                 docs.append(obj)
@@ -773,11 +897,198 @@ def _write_jsonl(records: Iterable[Dict[str, Any]], output_path: Path) -> None:
             f.write("\n")
 
 
+def _build_semantic_llm_config() -> Dict[str, Any]:
+    provider = os.getenv("SEMANTIC_LLM_PROVIDER", "vllm").strip().lower()
+    model = os.getenv(
+        "SEMANTIC_LLM_MODEL",
+        "meta-llama/Meta-Llama-3.1-8B-Instruct",
+    ).strip()
+    timeout = int(os.getenv("SEMANTIC_LLM_TIMEOUT", "60"))
+    max_retries = int(os.getenv("SEMANTIC_LLM_MAX_RETRIES", "3"))
+    retry_delay = float(os.getenv("SEMANTIC_LLM_RETRY_DELAY", "1.0"))
+    temperature = float(os.getenv("SEMANTIC_LLM_TEMPERATURE", "0.0"))
+    max_tokens = int(os.getenv("SEMANTIC_LLM_MAX_TOKENS", "300"))
+
+    if provider == "openai":
+        api_key = os.getenv("OPENAI_API_KEY") or os.getenv(
+            "SEMANTIC_LLM_API_KEY", ""
+        )
+        base_url = os.getenv("OPENAI_BASE_URL") or os.getenv(
+            "SEMANTIC_LLM_BASE_URL", ""
+        )
+    else:
+        # vLLM defaults
+        api_key = os.getenv("VLLM_API_KEY") or os.getenv(
+            "SEMANTIC_LLM_API_KEY", "llama-local"
+        )
+        base_url = os.getenv("VLLM_BASE_URL") or os.getenv(
+            "SEMANTIC_LLM_BASE_URL", "http://localhost:7100/v1"
+        )
+
+    return {
+        "provider": provider,
+        "model": model,
+        "api_key": api_key,
+        "base_url": base_url,
+        "timeout": timeout,
+        "max_retries": max_retries,
+        "retry_delay": retry_delay,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+
+
+def _call_semantic_llm(prompt: str, llm_cfg: Dict[str, Any]) -> str:
+    import openai
+
+    provider = str(llm_cfg.get("provider", "vllm")).lower()
+    api_key = str(llm_cfg.get("api_key", "") or "")
+    base_url = str(llm_cfg.get("base_url", "") or "")
+    model = str(llm_cfg.get("model", "meta-llama/Meta-Llama-3.1-8B-Instruct"))
+    timeout = int(llm_cfg.get("timeout", 60))
+    max_retries = int(llm_cfg.get("max_retries", 3))
+    retry_delay = float(llm_cfg.get("retry_delay", 1.0))
+    temperature = float(llm_cfg.get("temperature", 0.0))
+    max_tokens = int(llm_cfg.get("max_tokens", 300))
+
+    if provider == "openai":
+        if not api_key:
+            raise RuntimeError(
+                "OpenAI semantic enrichment requires OPENAI_API_KEY or SEMANTIC_LLM_API_KEY."  # noqa: E501
+            )
+        kwargs: Dict[str, Any] = {"api_key": api_key, "timeout": timeout}
+        if base_url:
+            kwargs["base_url"] = base_url
+        client = openai.OpenAI(**kwargs)
+    elif provider == "vllm":
+        if not api_key:
+            api_key = "not-required"
+        if not base_url:
+            base_url = "http://localhost:7100/v1"
+        client = openai.OpenAI(
+            base_url=base_url, api_key=api_key, timeout=timeout
+        )
+    else:
+        raise ValueError(f"Unsupported semantic LLM provider: {provider}")
+
+    for attempt in range(max_retries):
+        try:
+            resp = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You extract compact semantic metadata from a document. "  # noqa: E501
+                            "Never alter source facts. Output strict JSON only."  # noqa: E501
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            content = resp.choices[0].message.content if resp.choices else None
+            return (content or "").strip()
+        except Exception as exc:
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay * (attempt + 1))
+                continue
+            raise RuntimeError(
+                f"Semantic LLM call failed after {max_retries} attempts: {exc}"
+            ) from exc
+
+
+def _parse_json_object_maybe_wrapped(text: str) -> Dict[str, Any]:
+    try:
+        obj = json.loads(text)
+        if isinstance(obj, dict):
+            return obj
+    except Exception:
+        pass
+    m = re.search(r"\{[\s\S]*\}", text or "")
+    if not m:
+        return {}
+    try:
+        obj = json.loads(m.group(0))
+        return obj if isinstance(obj, dict) else {}
+    except Exception:
+        return {}
+
+
+def _semantic_enrich_record(
+    rec: Dict[str, Any],
+    *,
+    llm_cfg: Dict[str, Any],
+    max_content_chars: int,
+) -> Dict[str, Any]:
+    """
+    Add optional semantic metadata while preserving original `content` and `text`.  # noqa: E501
+    """
+    content = str(rec.get("content", "") or "")
+    clipped = content[:max_content_chars]
+    if len(content) > max_content_chars:
+        clipped += "\n... [content truncated for enrichment] ..."
+
+    prompt = f"""Extract semantic metadata from the document below.
+
+Rules:
+- Use only information present in the text.
+- Do not infer unavailable facts.
+- Keep tags short and generic.
+- Return STRICT JSON only with this shape:
+{{
+  "doc_type": "short type label",
+  "topic": "primary topic",
+  "keywords": ["k1", "k2", "k3"],
+  "content_quality_flags": ["flag1", "flag2"],
+  "confidence": 0.0
+}}
+
+Document title: {rec.get("title", "")}
+Document text:
+{clipped}
+"""
+
+    parsed = _parse_json_object_maybe_wrapped(
+        _call_semantic_llm(prompt, llm_cfg)
+    )
+    metadata = rec.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    enrichment = {
+        "enabled": True,
+        "provider": llm_cfg.get("provider"),
+        "model": llm_cfg.get("model"),
+        "doc_type": str(parsed.get("doc_type", "") or ""),
+        "topic": str(parsed.get("topic", "") or ""),
+        "keywords": [
+            str(x) for x in (parsed.get("keywords") or []) if str(x).strip()
+        ][:12],
+        "content_quality_flags": [
+            str(x)
+            for x in (parsed.get("content_quality_flags") or [])
+            if str(x).strip()
+        ][:12],
+    }
+    try:
+        enrichment["confidence"] = float(parsed.get("confidence", 0.0))
+    except Exception:
+        enrichment["confidence"] = 0.0
+
+    metadata["semantic_enrichment"] = enrichment
+    rec["metadata"] = metadata
+    return rec
+
+
 def _detect_input_type(input_type: Optional[str], input_path: Path) -> str:
     if input_type:
         normalized = input_type.strip().lower()
         if normalized not in SUPPORTED_INPUT_TYPES:
-            raise ValueError(f"Unsupported --input-type {input_type!r}. Use one of: {SUPPORTED_INPUT_TYPES}")
+            raise ValueError(
+                f"Unsupported --input-type {input_type!r}. Use one of: {SUPPORTED_INPUT_TYPES}"  # noqa: E501
+            )
         return normalized
 
     suffix = input_path.suffix.lower().lstrip(".")
@@ -789,7 +1100,15 @@ def _detect_input_type(input_type: Optional[str], input_path: Path) -> str:
     )
 
 
-def convert_to_qagredo_jsonl(input_file: str, output_file: str, input_type: Optional[str] = None) -> int:
+def convert_to_qagredo_jsonl(
+    input_file: str,
+    output_file: str,
+    input_type: Optional[str] = None,
+    *,
+    semantic_normalize: bool = False,
+    semantic_llm_config: Optional[Dict[str, Any]] = None,
+    semantic_max_content_chars: int = 5000,
+) -> int:
     input_path = _resolve_input_path(input_file)
     inferred_type = _detect_input_type(input_type, input_path)
 
@@ -800,22 +1119,108 @@ def convert_to_qagredo_jsonl(input_file: str, output_file: str, input_type: Opti
 
     if inferred_type == "txt":
         text = _extract_txt(input_path)
-        raw = {"id": stem, "title": input_path.stem, "content": text, "source": source_str, "type": "text_document"}
-        records.append(_canonicalize_record(raw, fallback_id=stem, fallback_title=input_path.stem, source=source_str, input_type="txt"))
+        raw = {
+            "id": stem,
+            "title": input_path.stem,
+            "content": text,
+            "source": source_str,
+            "type": "text_document",
+        }
+        records.append(
+            _canonicalize_record(
+                raw,
+                fallback_id=stem,
+                fallback_title=input_path.stem,
+                source=source_str,
+                input_type="txt",
+            )
+        )
+
+    elif inferred_type == "doc":
+        text = _extract_doc(input_path)
+        raw = {
+            "id": stem,
+            "title": input_path.stem,
+            "content": text,
+            "source": source_str,
+            "type": "text_document",
+        }
+        records.append(
+            _canonicalize_record(
+                raw,
+                fallback_id=stem,
+                fallback_title=input_path.stem,
+                source=source_str,
+                input_type="doc",
+            )
+        )
 
     elif inferred_type == "docx":
         text = _extract_docx(input_path)
-        raw = {"id": stem, "title": input_path.stem, "content": text, "source": source_str, "type": "text_document"}
-        records.append(_canonicalize_record(raw, fallback_id=stem, fallback_title=input_path.stem, source=source_str, input_type="docx"))
+        raw = {
+            "id": stem,
+            "title": input_path.stem,
+            "content": text,
+            "source": source_str,
+            "type": "text_document",
+        }
+        records.append(
+            _canonicalize_record(
+                raw,
+                fallback_id=stem,
+                fallback_title=input_path.stem,
+                source=source_str,
+                input_type="docx",
+            )
+        )
+
+    elif inferred_type == "pptx":
+        text = _extract_pptx(input_path)
+        raw = {
+            "id": stem,
+            "title": input_path.stem,
+            "content": text,
+            "source": source_str,
+            "type": "text_document",
+        }
+        records.append(
+            _canonicalize_record(
+                raw,
+                fallback_id=stem,
+                fallback_title=input_path.stem,
+                source=source_str,
+                input_type="pptx",
+            )
+        )
 
     elif inferred_type == "pdf":
         text = _extract_pdf(input_path)
-        raw = {"id": stem, "title": input_path.stem, "content": text, "source": source_str, "type": "text_document"}
-        records.append(_canonicalize_record(raw, fallback_id=stem, fallback_title=input_path.stem, source=source_str, input_type="pdf"))
+        raw = {
+            "id": stem,
+            "title": input_path.stem,
+            "content": text,
+            "source": source_str,
+            "type": "text_document",
+        }
+        records.append(
+            _canonicalize_record(
+                raw,
+                fallback_id=stem,
+                fallback_title=input_path.stem,
+                source=source_str,
+                input_type="pdf",
+            )
+        )
 
     elif inferred_type == "xlsx":
         text, meta = _extract_xlsx(input_path)
-        raw = {"id": stem, "title": input_path.stem, "content": text, "source": source_str, "type": "text_document"}
+        raw = {
+            "id": stem,
+            "title": input_path.stem,
+            "content": text,
+            "source": source_str,
+            "type": "text_document",
+        }
         records.append(
             _canonicalize_record(
                 raw,
@@ -830,8 +1235,17 @@ def convert_to_qagredo_jsonl(input_file: str, output_file: str, input_type: Opti
     elif inferred_type == "json":
         docs = _load_json_docs(input_path)
         for idx, doc in enumerate(docs, start=1):
-            doc_id = str(doc.get("id") or f"{stem}_{idx}" if len(docs) > 1 else stem)
-            title = str(doc.get("title") or (f"{input_path.stem} {idx}" if len(docs) > 1 else input_path.stem))
+            doc_id = str(
+                doc.get("id") or f"{stem}_{idx}" if len(docs) > 1 else stem
+            )
+            title = str(
+                doc.get("title")
+                or (
+                    f"{input_path.stem} {idx}"
+                    if len(docs) > 1
+                    else input_path.stem
+                )
+            )
             records.append(
                 _canonicalize_record(
                     doc,
@@ -846,8 +1260,17 @@ def convert_to_qagredo_jsonl(input_file: str, output_file: str, input_type: Opti
     elif inferred_type == "jsonl":
         docs = _load_jsonl_docs(input_path)
         for idx, doc in enumerate(docs, start=1):
-            doc_id = str(doc.get("id") or f"{stem}_{idx}" if len(docs) > 1 else stem)
-            title = str(doc.get("title") or (f"{input_path.stem} {idx}" if len(docs) > 1 else input_path.stem))
+            doc_id = str(
+                doc.get("id") or f"{stem}_{idx}" if len(docs) > 1 else stem
+            )
+            title = str(
+                doc.get("title")
+                or (
+                    f"{input_path.stem} {idx}"
+                    if len(docs) > 1
+                    else input_path.stem
+                )
+            )
             records.append(
                 _canonicalize_record(
                     doc,
@@ -855,7 +1278,10 @@ def convert_to_qagredo_jsonl(input_file: str, output_file: str, input_type: Opti
                     fallback_title=title,
                     source=source_str,
                     input_type="jsonl",
-                    extra_metadata={"source_path": source_str, "line_number": idx},
+                    extra_metadata={
+                        "source_path": source_str,
+                        "line_number": idx,
+                    },
                 )
             )
 
@@ -879,6 +1305,33 @@ def convert_to_qagredo_jsonl(input_file: str, output_file: str, input_type: Opti
     else:
         raise ValueError(f"Unsupported input type: {inferred_type}")
 
+    if semantic_normalize:
+        llm_cfg = semantic_llm_config or _build_semantic_llm_config()
+        enriched: List[Dict[str, Any]] = []
+        for rec in records:
+            try:
+                enriched.append(
+                    _semantic_enrich_record(
+                        rec,
+                        llm_cfg=llm_cfg,
+                        max_content_chars=semantic_max_content_chars,
+                    )
+                )
+            except Exception as exc:
+                meta = rec.get("metadata")
+                if not isinstance(meta, dict):
+                    meta = {}
+                meta["semantic_enrichment"] = {
+                    "enabled": True,
+                    "status": "failed",
+                    "error": str(exc),
+                    "provider": llm_cfg.get("provider"),
+                    "model": llm_cfg.get("model"),
+                }
+                rec["metadata"] = meta
+                enriched.append(rec)
+        records = enriched
+
     output_path = Path(output_file)
     _write_jsonl(records, output_path)
 
@@ -887,19 +1340,38 @@ def convert_to_qagredo_jsonl(input_file: str, output_file: str, input_type: Opti
     print(f"✅ Script version: 2026-02-10 (content from article, not summary)")
     print(f"✅ Converted: {input_path}")
     print(f"✅ Input type: {inferred_type}")
-    print(f"✅ Wrote JSONL: {output_path} ({len(records)} record(s), {total_chars} chars total)")
+    print(
+        f"✅ Semantic enrichment: {'enabled' if semantic_normalize else 'disabled'}"  # noqa: E501
+    )
+    print(
+        f"✅ Wrote JSONL: {output_path} ({len(records)} record(s), {total_chars} chars total)"  # noqa: E501
+    )
     for i, r in enumerate(records, 1):
         meta = r.get("metadata", {})
         src_count = meta.get("num_sources", 1)
         has_summary = "summary" in meta
-        print(f"   Record {i}: title={r.get('title','?')!r}, sources={src_count}, summary_in_metadata={has_summary}")
+        print(
+            f"   Record {i}: title={r.get('title','?')!r}, sources={src_count}, summary_in_metadata={has_summary}"  # noqa: E501
+        )
     print("=" * 80)
     return 0
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Convert pdf/txt/docx/xlsx/csv/json/jsonl into QAGRedo-compatible JSONL.")
-    p.add_argument("--input", required=True, help="Input file path (pdf/txt/docx/xlsx/csv/json/jsonl)")
+    p = argparse.ArgumentParser(
+        description=(
+            "Convert pdf/txt/doc/docx/pptx/xlsx/csv/json/jsonl into "
+            "QAGRedo-compatible JSONL."
+        ),
+    )
+    p.add_argument(
+        "--input",
+        required=True,
+        help=(
+            "Input file path "
+            "(pdf/txt/doc/docx/pptx/xlsx/csv/json/jsonl)"
+        ),
+    )
     p.add_argument("--output", required=True, help="Output JSONL path")
     p.add_argument(
         "--input-type",
@@ -907,14 +1379,30 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         choices=SUPPORTED_INPUT_TYPES,
         help="Override input type (otherwise inferred from extension).",
     )
+    p.add_argument(
+        "--semantic-normalize",
+        action="store_true",
+        help="Enable optional LLM semantic enrichment (keeps raw content unchanged).",  # noqa: E501
+    )
+    p.add_argument(
+        "--semantic-max-content-chars",
+        type=int,
+        default=5000,
+        help="Max content chars sent to enrichment LLM per record.",
+    )
     return p
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = _build_arg_parser().parse_args(argv)
-    return convert_to_qagredo_jsonl(args.input, args.output, input_type=args.input_type)
+    return convert_to_qagredo_jsonl(
+        args.input,
+        args.output,
+        input_type=args.input_type,
+        semantic_normalize=bool(args.semantic_normalize),
+        semantic_max_content_chars=int(args.semantic_max_content_chars),
+    )
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

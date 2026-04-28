@@ -1,8 +1,8 @@
 """
-Duplicate question detection utility.
+Duplicate question detection using lexical similarity (Jaccard).
 
-This module provides functions to detect and filter duplicate or similar questions
-using text similarity algorithms.
+Embedding-based similarity was removed from QAGRedo; use ``deduplication_method:
+\"llm\"`` in config for semantic duplicate judgment via the generator LLM.
 """
 
 from typing import List, Tuple, Dict
@@ -39,78 +39,39 @@ def calculate_jaccard_similarity(text1: str, text2: str) -> float:
     return intersection / union if union > 0 else 0.0
 
 
-def calculate_semantic_similarity(
-    text1: str,
-    text2: str,
-    model_name: str = "all-MiniLM-L6-v2",
-) -> float:
-    try:
-        from sentence_transformers import SentenceTransformer
-        from sklearn.metrics.pairwise import cosine_similarity
-    except ImportError:
-        return -1.0
-
-    try:
-        import os
-
-        if not hasattr(calculate_semantic_similarity, "_model_cache"):
-            calculate_semantic_similarity._model_cache = {}
-
-        offline_mode = os.getenv("OFFLINE_MODE", "").lower() in ("1", "true", "yes", "on")
-        if offline_mode:
-            os.environ["HF_HUB_OFFLINE"] = "1"
-            os.environ["TRANSFORMERS_OFFLINE"] = "1"
-        else:
-            os.environ.setdefault("HF_HUB_OFFLINE", "0")
-
-        local_model_path = os.getenv("SENTENCE_TRANSFORMERS_MODEL_PATH", "").strip()
-
-        cache: Dict[str, SentenceTransformer] = calculate_semantic_similarity._model_cache
-        if model_name not in cache:
-            if offline_mode and local_model_path and os.path.isdir(local_model_path):
-                cache[model_name] = SentenceTransformer(local_model_path, device="cpu")
-            else:
-                cache[model_name] = SentenceTransformer(model_name, device="cpu")
-
-        model = cache[model_name]
-        embeddings = model.encode([text1, text2])
-        similarity = cosine_similarity([embeddings[0]], [embeddings[1]])[0][0]
-        return float(max(0.0, similarity))
-    except Exception:
-        return -1.0
-
-
 def is_duplicate(
     question1: str,
     question2: str,
     similarity_threshold: float = 0.85,
     exact_match: bool = True,
-    method: str = "semantic",
+    method: str = "jaccard",
 ) -> bool:
+    """Return True if two questions are duplicates.
+
+    ``method``:
+      - ``jaccard`` (default): Jaccard similarity on token sets
+      - ``both``: Jaccard OR exact normalized match after exact_match pass
+    Legacy values ``semantic`` / ``embedding`` are treated as ``jaccard``.
+    """
+    legacy = str(method or "jaccard").lower()
+    if legacy in ("semantic", "embedding", "both"):
+        method = "jaccard" if legacy != "both" else "both"
+
     if exact_match:
         if normalize_text(question1) == normalize_text(question2):
             return True
 
-    if method in ("semantic", "both"):
-        semantic_sim = calculate_semantic_similarity(question1, question2)
-        if semantic_sim >= 0:
-            if method == "both":
-                jaccard_sim = calculate_jaccard_similarity(question1, question2)
-                return semantic_sim >= similarity_threshold or jaccard_sim >= similarity_threshold
-            return semantic_sim >= similarity_threshold
-        if method == "semantic":
-            jaccard_sim = calculate_jaccard_similarity(question1, question2)
-            return jaccard_sim >= similarity_threshold
-
-    similarity = calculate_jaccard_similarity(question1, question2)
-    return similarity >= similarity_threshold
+    jaccard_sim = calculate_jaccard_similarity(question1, question2)
+    if method == "both":
+        return jaccard_sim >= similarity_threshold
+    return jaccard_sim >= similarity_threshold
 
 
 def detect_duplicate_questions(
     questions: List[str],
     similarity_threshold: float = 0.85,
     exact_match: bool = True,
-    method: str = "semantic",
+    method: str = "jaccard",
 ) -> Tuple[List[str], List[int]]:
     if len(questions) <= 1:
         return questions, []
@@ -129,7 +90,13 @@ def detect_duplicate_questions(
 
     for i in range(len(questions)):
         for j in range(i + 1, len(questions)):
-            if is_duplicate(questions[i], questions[j], similarity_threshold, exact_match, method):
+            if is_duplicate(
+                questions[i],
+                questions[j],
+                similarity_threshold,
+                exact_match,
+                method,
+            ):
                 union(i, j)
 
     clusters: Dict[int, List[int]] = {}
@@ -151,16 +118,20 @@ def filter_duplicates_from_new_questions(
     existing_questions: List[str],
     new_questions: List[str],
     similarity_threshold: float = 0.85,
-    method: str = "semantic",
+    method: str = "jaccard",
 ) -> List[str]:
     if not existing_questions:
-        unique_new, _ = detect_duplicate_questions(new_questions, similarity_threshold, method=method)
+        unique_new, _ = detect_duplicate_questions(
+            new_questions, similarity_threshold, method=method
+        )
         return unique_new
     if not new_questions:
         return []
 
     combined = existing_questions + new_questions
-    unique_combined, _ = detect_duplicate_questions(combined, similarity_threshold, method=method)
+    unique_combined, _ = detect_duplicate_questions(
+        combined, similarity_threshold, method=method
+    )
 
     existing_set = set(normalize_text(q) for q in existing_questions)
     filtered: List[str] = []
@@ -168,4 +139,3 @@ def filter_duplicates_from_new_questions(
         if normalize_text(q) not in existing_set:
             filtered.append(q)
     return filtered
-

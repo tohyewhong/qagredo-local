@@ -5,13 +5,14 @@ set -euo pipefail
 # - Creates a repo-local qagredo_host/ structure
 # - Copies sample config + sample input data
 # - Extracts Llama model zip and materializes it into models_llm/
-# - Sets up MiniLM cache if available
 # - Starts vLLM, waits for /health, then runs QAGRedo
 #
 # Usage:
 #   cd /path/to/qagredo
 #   bash scripts/run_online.sh           # safe mode (no overwrite)
 #   bash scripts/run_online.sh --overwrite
+#
+# Rare: HOST_DATA_DIR=... if sample copy should not go to qagredo_host/data.
 
 OVERWRITE=0
 if [[ "${1:-}" == "--overwrite" ]]; then
@@ -25,15 +26,18 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HOST_DIR_DEFAULT="${REPO_DIR}/qagredo_host"
 HOST_DIR="${QAGREDO_HOST_DIR:-$HOST_DIR_DEFAULT}"
 
-# Default to the repo's sample input (you can override with DATA_SRC=...).
-DATA_SRC_DEFAULT="${REPO_DIR}/data/dev-data.jsonl"
-DATA_SRC="${DATA_SRC:-$DATA_SRC_DEFAULT}"
+# Where sample input is copied under the host bundle (override: HOST_DATA_DIR=...).
+HOST_DATA_DIR="${HOST_DATA_DIR:-$HOST_DIR/data}"
+
+# No bundled sample dataset by default. Provide DATA_SRC explicitly.
+DATA_SRC="${DATA_SRC:-}"
 
 # Optional: place the model zip under the repo root (override with MODEL_ZIP=...).
 MODEL_ZIP_DEFAULT="${REPO_DIR}/Meta-Llama-3.1-8B-Instruct_hf_cache.zip"
 MODEL_ZIP="${MODEL_ZIP:-$MODEL_ZIP_DEFAULT}"
 MODEL_DIR_NAME="Meta-Llama-3.1-8B-Instruct"
 
+# Dual stack with Qwen3.5 judge needs a newer image than v0.5.3.post1 (qwen3_5).
 VLLM_IMAGE_DEFAULT="vllm/vllm-openai:v0.5.3.post1"
 VLLM_IMAGE="${VLLM_IMAGE:-$VLLM_IMAGE_DEFAULT}"
 VLLM_MODEL_IN_CONTAINER="/models/${MODEL_DIR_NAME}"
@@ -85,7 +89,7 @@ main() {
 
   ensure_dir "$HOST_DIR"
   ensure_dir "$HOST_DIR/config"
-  ensure_dir "$HOST_DIR/data"
+  ensure_dir "$HOST_DATA_DIR"
   ensure_dir "$HOST_DIR/output"
   ensure_dir "$HOST_DIR/models_llm"
   ensure_dir "$HOST_DIR/models_embed"
@@ -95,11 +99,12 @@ main() {
   copy_file "$REPO_DIR/config/config.yaml" "$HOST_DIR/config/config.yaml"
 
   # Copy sample input data (skip if already present)
-  local data_dst="$HOST_DIR/data/dev-data.jsonl"
+  local data_dst="$HOST_DATA_DIR/dev-data.jsonl"
   if [[ -f "$data_dst" && "$OVERWRITE" -ne 1 ]]; then
     info "Keeping existing data file: $data_dst"
   else
-    [[ -f "$DATA_SRC" ]] || die "Missing sample input file: $DATA_SRC (set DATA_SRC=... or place dev-data.jsonl at $data_dst)"
+    [[ -n "$DATA_SRC" ]] || die "DATA_SRC is not set. Point it to your JSONL input file."
+    [[ -f "$DATA_SRC" ]] || die "Missing input file: $DATA_SRC"
     copy_file "$DATA_SRC" "$data_dst"
   fi
 
@@ -132,48 +137,6 @@ main() {
     ok "Model folder ready: $model_dst"
   fi
 
-  # MiniLM cache (best-effort)
-  local minilm_src="$HOME/.cache/huggingface/hub/models--sentence-transformers--all-MiniLM-L6-v2"
-  if [[ -d "$minilm_src" ]]; then
-    ensure_dir "$HOST_DIR/hf_cache/hub"
-    if [[ ! -d "$HOST_DIR/hf_cache/hub/models--sentence-transformers--all-MiniLM-L6-v2" || "$OVERWRITE" -eq 1 ]]; then
-      info "Copying MiniLM cache into host folder"
-      rm -rf "$HOST_DIR/hf_cache/hub/models--sentence-transformers--all-MiniLM-L6-v2" || true
-      cp -a "$minilm_src" "$HOST_DIR/hf_cache/hub/"
-    fi
-    ensure_dir "$HOST_DIR/hf_cache/sentence-transformers"
-    ln -sfn ../hub/models--sentence-transformers--all-MiniLM-L6-v2 \
-      "$HOST_DIR/hf_cache/sentence-transformers/models--sentence-transformers--all-MiniLM-L6-v2"
-    ok "MiniLM cache linked for offline use"
-
-    # Also materialize a direct sentence-transformers model folder under models_embed/
-    # (more reliable than HF cache layout when running fully offline)
-    local embed_dst="$HOST_DIR/models_embed/all-MiniLM-L6-v2"
-    local hf_minilm_dir="$HOST_DIR/hf_cache/hub/models--sentence-transformers--all-MiniLM-L6-v2"
-    local snapshots_dir="$hf_minilm_dir/snapshots"
-    if [[ -d "$embed_dst" && "$OVERWRITE" -ne 1 ]]; then
-      info "Keeping existing embedding model folder: $embed_dst"
-    else
-      rm -rf "$embed_dst"
-      ensure_dir "$embed_dst"
-      if [[ -d "$snapshots_dir" ]] && ls -1 "$snapshots_dir" >/dev/null 2>&1; then
-        local snap
-        snap="$(ls -1 "$snapshots_dir" | head -n 1 || true)"
-        if [[ -n "$snap" && -d "$snapshots_dir/$snap" ]]; then
-          info "Materializing MiniLM snapshot $snap into $embed_dst"
-          cp -aL "$snapshots_dir/$snap/." "$embed_dst/"
-          ok "Embedding model folder ready: $embed_dst"
-        else
-          info "MiniLM snapshots found but could not pick one under $snapshots_dir (skipping models_embed materialization)"
-        fi
-      else
-        info "MiniLM cache present but snapshots folder missing under $snapshots_dir (skipping models_embed materialization)"
-      fi
-    fi
-  else
-    info "MiniLM cache not found at $minilm_src (will run with fallback warning)"
-  fi
-
   # Pull vLLM image if missing (best-effort)
   if ! docker image inspect "$VLLM_IMAGE" >/dev/null 2>&1; then
     info "Pulling vLLM image: $VLLM_IMAGE"
@@ -194,7 +157,7 @@ main() {
     export VLLM_MODEL="$VLLM_MODEL_IN_CONTAINER"
     export VLLM_API_KEY="$VLLM_API_KEY"
     export VLLM_SERVED_MODEL_NAME="$VLLM_SERVED_MODEL_NAME"
-    docker compose -f docker-compose.yml up -d vllm
+    docker compose -f docker-compose.vllm-stack.yml up -d vllm
   )
 
   info "Waiting for vLLM health: http://localhost:7100/health"
@@ -213,7 +176,7 @@ main() {
   (
     cd "$REPO_DIR"
     export QAGREDO_HOST_DIR="$HOST_DIR"
-    docker compose -f docker-compose.yml run --rm qagredo
+    docker compose -f docker-compose.vllm-stack.yml run --rm qagredo
   )
 
   ok "Done. Output folder:"

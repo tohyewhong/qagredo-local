@@ -1,0 +1,142 @@
+[
+  {
+    "type": "pdf",
+    "mode": "auto",
+    "input": "examples/non_qagredo_format_samples/medium_story_case_note.pdf",
+    "ok": false,
+    "returncode": 1,
+    "line_count": 0,
+    "stderr": "Traceback (most recent call last):\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 613, in _extract_pdf\n    from pypdf import PdfReader\nModuleNotFoundError: No module named 'pypdf'\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 1169, in <module>\n    raise SystemExit(main())\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 1159, in main\n    return convert_to_qagredo_jsonl(\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 1017, in convert_to_qagredo_jsonl\n    text = _extract_pdf(input_path)\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 615, in _extract_pdf\n    raise RuntimeError(\nRuntimeError: PDF support requires the 'pypdf' package. Install it (or run `pip install -r requirements.txt`).",
+    "stdout_tail": ""
+  },
+  {
+    "type": "pdf",
+    "mode": "explicit",
+    "input": "examples/non_qagredo_format_samples/medium_story_case_note.pdf",
+    "ok": false,
+    "returncode": 1,
+    "line_count": 0,
+    "stderr": "Traceback (most recent call last):\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 613, in _extract_pdf\n    from pypdf import PdfReader\nModuleNotFoundError: No module named 'pypdf'\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 1169, in <module>\n    raise SystemExit(main())\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 1159, in main\n    return convert_to_qagredo_jsonl(\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 1017, in convert_to_qagredo_jsonl\n    text = _extract_pdf(input_path)\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 615, in _extract_pdf\n    raise RuntimeError(\nRuntimeError: PDF support requires the 'pypdf' package. Install it (or run `pip install -r requirements.txt`).",
+    "stdout_tail": ""
+  },
+  {
+    "type": "txt",
+    "mode": "auto",
+    "input": "examples/non_qagredo_format_samples/medium_story_case_note.txt",
+    "ok": true,
+    "returncode": 0,
+    "line_count": 1,
+    "stderr": "",
+    "stdout_tail": "\u2705 Wrote JSONL: /home/tyewhong/qagredo/.tmp/input_format_tests/txt_auto.jsonl (1 record(s), 1672 chars total)\n   Record 1: title='medium_story_case_note', sources=1, summary_in_metadata=False\n================================================================================"
+  },
+  {
+    "type": "txt",
+    "mode": "explicit",
+    "input": "examples/non_qagredo_format_samples/medium_story_case_note.txt",
+    "ok": true,
+    "returncode": 0,
+    "line_count": 1,
+    "stderr": "",
+    "stdout_tail": "\u2705 Wrote JSONL: /home/tyewhong/qagredo/.tmp/input_format_tests/txt_explicit.jsonl (1 record(s), 1672 chars total)\n   Record 1: title='medium_story_case_note', sources=1, summary_in_metadata=False\n================================================================================"
+  },
+  {
+    "type": "docx",
+    "mode": "auto",
+    "input": "tmp_validation/sample_input.docx",
+    "ok": false,
+    "returncode": 1,
+    "line_count": 0,
+    "stderr": "Traceback (most recent call last):\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 632, in _extract_docx\n    from docx import Document\nImportError: cannot import name 'Document' from 'docx' (unknown location)\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 1169, in <module>\n    raise SystemExit(main())\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 1159, in main\n    return convert_to_qagredo_jsonl(\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 1012, in convert_to_qagredo_jsonl\n    text = _extract_docx(input_path)\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 634, in _extract_docx\n    raise RuntimeError(\nRuntimeError: DOCX support requires the 'python-docx' package. Install it (or run `pip install -r requirements.txt`).",
+    "stdout_tail": ""
+  },
+  {
+    "type": "docx",
+    "mode": "explicit",
+    "input": "tmp_validation/sample_input.docx",
+    "ok": false,
+    "returncode": 1,
+    "line_count": 0,
+    "stderr": "Traceback (most recent call last):\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 632, in _extract_docx\n    from docx import Document\nImportError: cannot import name 'Document' from 'docx' (unknown location)\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 1169, in <module>\n    raise SystemExit(main())\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 1159, in main\n    return convert_to_qagredo_jsonl(\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 1012, in convert_to_qagredo_jsonl\n    text = _extract_docx(input_path)\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 634, in _extract_docx\n    raise RuntimeError(\nRuntimeError: DOCX support requires the 'python-docx' package. Install it (or run `pip install -r requirements.txt`).",
+    "stdout_tail": ""
+  },
+  {
+    "type": "xlsx",
+    "mode": "auto",
+    "input": "examples/non_qagredo_format_samples/medium_story_case_note.xlsx",
+    "ok": false,
+    "returncode": 1,
+    "line_count": 0,
+    "stderr": "Traceback (most recent call last):\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 672, in _extract_xlsx\n    import openpyxl\nModuleNotFoundError: No module named 'openpyxl'\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 1169, in <module>\n    raise SystemExit(main())\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 1159, in main\n    return convert_to_qagredo_jsonl(\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 1022, in convert_to_qagredo_jsonl\n    text, meta = _extract_xlsx(input_path)\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 674, in _extract_xlsx\n    raise RuntimeError(\nRuntimeError: XLSX support requires the 'openpyxl' package. Install it (or run `pip install -r requirements.txt`).",
+    "stdout_tail": ""
+  },
+  {
+    "type": "xlsx",
+    "mode": "explicit",
+    "input": "examples/non_qagredo_format_samples/medium_story_case_note.xlsx",
+    "ok": false,
+    "returncode": 1,
+    "line_count": 0,
+    "stderr": "Traceback (most recent call last):\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 672, in _extract_xlsx\n    import openpyxl\nModuleNotFoundError: No module named 'openpyxl'\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 1169, in <module>\n    raise SystemExit(main())\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 1159, in main\n    return convert_to_qagredo_jsonl(\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 1022, in convert_to_qagredo_jsonl\n    text, meta = _extract_xlsx(input_path)\n  File \"/home/tyewhong/qagredo/scripts/conversion/convert_to_qagredo_jsonl.py\", line 674, in _extract_xlsx\n    raise RuntimeError(\nRuntimeError: XLSX support requires the 'openpyxl' package. Install it (or run `pip install -r requirements.txt`).",
+    "stdout_tail": ""
+  },
+  {
+    "type": "csv",
+    "mode": "auto",
+    "input": "tmp_validation/sample_input.csv",
+    "ok": true,
+    "returncode": 0,
+    "line_count": 2,
+    "stderr": "",
+    "stdout_tail": "   Record 1: title='sample_input row 1', sources=1, summary_in_metadata=False\n   Record 2: title='sample_input row 2', sources=1, summary_in_metadata=False\n================================================================================"
+  },
+  {
+    "type": "csv",
+    "mode": "explicit",
+    "input": "tmp_validation/sample_input.csv",
+    "ok": true,
+    "returncode": 0,
+    "line_count": 2,
+    "stderr": "",
+    "stdout_tail": "   Record 1: title='sample_input row 1', sources=1, summary_in_metadata=False\n   Record 2: title='sample_input row 2', sources=1, summary_in_metadata=False\n================================================================================"
+  },
+  {
+    "type": "json",
+    "mode": "auto",
+    "input": "examples/non_qagredo_format_samples/medium_story_case_note.json",
+    "ok": true,
+    "returncode": 0,
+    "line_count": 1,
+    "stderr": "",
+    "stdout_tail": "\u2705 Wrote JSONL: /home/tyewhong/qagredo/.tmp/input_format_tests/json_auto.jsonl (1 record(s), 1681 chars total)\n   Record 1: title='medium_story_case_note', sources=1, summary_in_metadata=False\n================================================================================"
+  },
+  {
+    "type": "json",
+    "mode": "explicit",
+    "input": "examples/non_qagredo_format_samples/medium_story_case_note.json",
+    "ok": true,
+    "returncode": 0,
+    "line_count": 1,
+    "stderr": "",
+    "stdout_tail": "\u2705 Wrote JSONL: /home/tyewhong/qagredo/.tmp/input_format_tests/json_explicit.jsonl (1 record(s), 1681 chars total)\n   Record 1: title='medium_story_case_note', sources=1, summary_in_metadata=False\n================================================================================"
+  },
+  {
+    "type": "jsonl",
+    "mode": "auto",
+    "input": "examples/non_qagredo_format_samples/medium_story_case_note.jsonl",
+    "ok": true,
+    "returncode": 0,
+    "line_count": 8,
+    "stderr": "",
+    "stdout_tail": "   Record 7: title='medium_story_case_note 7', sources=1, summary_in_metadata=False\n   Record 8: title='medium_story_case_note 8', sources=1, summary_in_metadata=False\n================================================================================"
+  },
+  {
+    "type": "jsonl",
+    "mode": "explicit",
+    "input": "examples/non_qagredo_format_samples/medium_story_case_note.jsonl",
+    "ok": true,
+    "returncode": 0,
+    "line_count": 8,
+    "stderr": "",
+    "stdout_tail": "   Record 7: title='medium_story_case_note 7', sources=1, summary_in_metadata=False\n   Record 8: title='medium_story_case_note 8', sources=1, summary_in_metadata=False\n================================================================================"
+  }
+]

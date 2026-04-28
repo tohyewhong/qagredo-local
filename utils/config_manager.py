@@ -15,16 +15,29 @@ DEFAULT_CONFIG_PATH = REPO_ROOT / "config" / "config.yaml"
 
 ENV_API_KEY_VARS = {
     "vllm": "VLLM_API_KEY",
+    "ollama": "OLLAMA_API_KEY",
     "openai": "OPENAI_API_KEY",
+}
+
+ENV_JUDGE_API_KEY_VARS = {
+    "vllm": "VLLM_JUDGE_API_KEY",
+    "ollama": "OLLAMA_JUDGE_API_KEY",
+    "openai": "OPENAI_JUDGE_API_KEY",
 }
 
 # Cloud-based providers that require internet access
 CLOUD_PROVIDERS = {"openai", "anthropic", "gemini", "azure_openai", "mistral"}
 
-# Offline-capable providers
-OFFLINE_PROVIDERS = {"vllm"}
+# Offline-capable providers (local OpenAI-compatible or Ollama)
+OFFLINE_PROVIDERS = {"vllm", "ollama"}
 
-MISSING_API_KEY_SENTINELS = {"", "REPLACE_ME", "CHANGEME", "CHANGE_ME", "YOUR_KEY_HERE"}
+MISSING_API_KEY_SENTINELS = {
+    "",
+    "REPLACE_ME",
+    "CHANGEME",
+    "CHANGE_ME",
+    "YOUR_KEY_HERE",
+}
 
 ENV_PROVIDER_SETTING_VARS: Dict[str, Dict[str, str]] = {
     "vllm": {
@@ -35,6 +48,15 @@ ENV_PROVIDER_SETTING_VARS: Dict[str, Dict[str, str]] = {
         "temperature": "VLLM_TEMPERATURE",
         "max_tokens": "VLLM_MAX_TOKENS",
         "model": "VLLM_MODEL",
+    },
+    "ollama": {
+        "base_url": "OLLAMA_BASE_URL",
+        "timeout": "OLLAMA_TIMEOUT",
+        "max_retries": "OLLAMA_MAX_RETRIES",
+        "retry_delay": "OLLAMA_RETRY_DELAY",
+        "temperature": "OLLAMA_TEMPERATURE",
+        "max_tokens": "OLLAMA_MAX_TOKENS",
+        "model": "OLLAMA_MODEL",
     },
     "openai": {
         "timeout": "OPENAI_TIMEOUT",
@@ -47,13 +69,45 @@ ENV_PROVIDER_SETTING_VARS: Dict[str, Dict[str, str]] = {
     },
 }
 
+ENV_JUDGE_SETTING_VARS: Dict[str, Dict[str, str]] = {
+    "vllm": {
+        "base_url": "VLLM_JUDGE_BASE_URL",
+        "timeout": "VLLM_JUDGE_TIMEOUT",
+        "max_retries": "VLLM_JUDGE_MAX_RETRIES",
+        "retry_delay": "VLLM_JUDGE_RETRY_DELAY",
+        "temperature": "VLLM_JUDGE_TEMPERATURE",
+        "max_tokens": "VLLM_JUDGE_MAX_TOKENS",
+        "model": "VLLM_JUDGE_MODEL",
+    },
+    "ollama": {
+        "base_url": "OLLAMA_JUDGE_BASE_URL",
+        "timeout": "OLLAMA_JUDGE_TIMEOUT",
+        "max_retries": "OLLAMA_JUDGE_MAX_RETRIES",
+        "retry_delay": "OLLAMA_JUDGE_RETRY_DELAY",
+        "temperature": "OLLAMA_JUDGE_TEMPERATURE",
+        "max_tokens": "OLLAMA_JUDGE_MAX_TOKENS",
+        "model": "OLLAMA_JUDGE_MODEL",
+    },
+    "openai": {
+        "timeout": "OPENAI_JUDGE_TIMEOUT",
+        "max_retries": "OPENAI_JUDGE_MAX_RETRIES",
+        "retry_delay": "OPENAI_JUDGE_RETRY_DELAY",
+        "temperature": "OPENAI_JUDGE_TEMPERATURE",
+        "max_tokens": "OPENAI_JUDGE_MAX_TOKENS",
+        "model": "OPENAI_JUDGE_MODEL",
+        "base_url": "OPENAI_JUDGE_BASE_URL",
+    },
+}
+
 
 def is_offline_mode() -> bool:
     offline_env = os.getenv("OFFLINE_MODE", "").lower()
     return offline_env in ("1", "true", "yes", "on")
 
 
-def validate_provider_for_offline_mode(provider: str, config: Optional[Dict[str, Any]] = None) -> None:
+def validate_provider_for_offline_mode(
+    provider: str, config: Optional[Dict[str, Any]] = None
+) -> None:
     provider_lower = provider.lower() if provider else ""
 
     offline_mode = is_offline_mode()
@@ -62,8 +116,8 @@ def validate_provider_for_offline_mode(provider: str, config: Optional[Dict[str,
 
     if offline_mode and provider_lower in CLOUD_PROVIDERS:
         raise ValueError(
-            f"Provider '{provider}' requires internet access and cannot be used in offline mode. "
-            f"Please use one of the offline-capable providers: {', '.join(OFFLINE_PROVIDERS)}."
+            f"Provider '{provider}' requires internet access and cannot be used in offline mode. "  # noqa: E501
+            f"Please use one of the offline-capable providers: {', '.join(OFFLINE_PROVIDERS)}."  # noqa: E501
         )
 
 
@@ -94,14 +148,64 @@ def _load_yaml(path: Path) -> Dict[str, Any]:
     return _expand_env_vars(loaded) or {}
 
 
-def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+def _deep_merge(
+    base: Dict[str, Any], override: Dict[str, Any]
+) -> Dict[str, Any]:
     result = copy.deepcopy(base)
     for key, value in (override or {}).items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+        if (
+            key in result
+            and isinstance(result[key], dict)
+            and isinstance(value, dict)
+        ):
             result[key] = _deep_merge(result[key], value)
         else:
             result[key] = copy.deepcopy(value)
     return result
+
+
+def _apply_offline_input_preset(config: Dict[str, Any]) -> None:
+    """
+    When both env vars are set, override ``run.*`` for folder batch mode.
+
+    QAGREDO_OFFLINE_HOST (Linux paths only):
+
+    - ``repo`` — inputs under this install’s ``data/`` tree (alias: ``linux``).
+    - ``data`` — inputs under a shared root, e.g. ``.../Data/txt`` or ``json``.
+    - ``wsl`` — optional; same as ``windows``; only if you mount the
+      “Downloads/txt|json” layout (default ``/mnt/c/Users/.../Downloads``).
+
+    QAGREDO_OFFLINE_INPUT: txt | json
+
+    ``data`` + txt|json → ``DATA_DIR`` = shared root / txt|json (see run.sh).
+    """
+    host = (os.environ.get("QAGREDO_OFFLINE_HOST") or "").strip()
+    kind = (os.environ.get("QAGREDO_OFFLINE_INPUT") or "").strip().lower()
+    if not host or not kind:
+        return
+    if kind not in ("txt", "json"):
+        raise ValueError(
+            "QAGREDO_OFFLINE_INPUT must be 'txt' or 'json' "
+            f"(got {kind!r})."
+        )
+    host_l = host.strip().lower()
+    run = config.setdefault("run", {})
+    run["input_file"] = ""
+    run["input_glob"] = (
+        "*.json,*.jsonl" if kind == "json" else "*.txt"
+    )
+    run["auto_convert"] = kind == "json"
+    if host_l in ("repo", "linux"):
+        run["input_folder"] = kind
+    elif host_l in ("wsl", "windows"):
+        run["input_folder"] = "."
+    elif host_l == "data":
+        run["input_folder"] = "."
+    else:
+        raise ValueError(
+            "QAGREDO_OFFLINE_HOST must be 'repo', 'data', or 'wsl' "
+            f"(got {host!r}; aliases: linux=repo, windows=wsl)."
+        )
 
 
 def _apply_profile_selection(config: Dict[str, Any]) -> None:
@@ -111,44 +215,98 @@ def _apply_profile_selection(config: Dict[str, Any]) -> None:
         return
 
     profile_key = str(profile).strip()
-    profiles_cfg = config.get("profiles") if isinstance(config.get("profiles"), dict) else {}
-    selected = profiles_cfg.get(profile_key) if isinstance(profiles_cfg, dict) else None
+    profiles_cfg = (
+        config.get("profiles")
+        if isinstance(config.get("profiles"), dict)
+        else {}
+    )
+    selected = (
+        profiles_cfg.get(profile_key)
+        if isinstance(profiles_cfg, dict)
+        else None
+    )
     if not isinstance(selected, dict):
         return
 
     selected_llm = selected.get("llm")
-    if not isinstance(selected_llm, dict) or not selected_llm:
-        return
+    if isinstance(selected_llm, dict) and selected_llm:
+        config["llm"] = _deep_merge(config.get("llm", {}) or {}, selected_llm)
 
-    config["llm"] = _deep_merge(config.get("llm", {}) or {}, selected_llm)
+    selected_judge = selected.get("judge")
+    if isinstance(selected_judge, dict) and selected_judge:
+        config["judge"] = _deep_merge(
+            config.get("judge", {}) or {}, selected_judge
+        )
 
 
-def _apply_environment_overrides(config: Dict[str, Any]) -> None:
-    llm_cfg = config.setdefault("llm", {})
-    provider = (llm_cfg.get("provider") or "").lower()
+def _coerce_env_value(key: str, raw: str) -> Any:
+    if key in {"timeout", "max_retries", "max_tokens"}:
+        return int(raw)
+    if key in {"retry_delay", "temperature"}:
+        return float(raw)
+    return raw
 
-    api_key_env_var = ENV_API_KEY_VARS.get(provider)
+
+def _apply_section_environment_overrides(
+    section: Dict[str, Any],
+    provider: str,
+    setting_vars: Dict[str, Dict[str, str]],
+    api_key_vars: Dict[str, str],
+) -> None:
+    api_key_env_var = api_key_vars.get(provider)
     if api_key_env_var:
         api_key_env = os.getenv(api_key_env_var)
         if api_key_env:
-            llm_cfg["api_key"] = api_key_env
+            section["api_key"] = api_key_env
 
-    for key, env_var in ENV_PROVIDER_SETTING_VARS.get(provider, {}).items():
+    for key, env_var in setting_vars.get(provider, {}).items():
         raw = os.getenv(env_var)
         if raw is None or raw == "":
             continue
-        if key in {"timeout", "max_retries", "max_tokens"}:
-            llm_cfg[key] = int(raw)
-        elif key in {"retry_delay", "temperature"}:
-            llm_cfg[key] = float(raw)
-        else:
-            llm_cfg[key] = raw
+        section[key] = _coerce_env_value(key, raw)
 
-    if provider == "vllm" and not llm_cfg.get("api_key"):
-        llm_cfg["api_key"] = "EMPTY"
+    if provider in ("vllm", "ollama") and not section.get("api_key"):
+        section["api_key"] = "EMPTY"
 
 
-def load_config(config_path: Optional[os.PathLike[str]] = None) -> Dict[str, Any]:
+def _apply_environment_overrides(config: Dict[str, Any]) -> None:
+    # The profile config YAML (config.<profile>.yaml) is the source of truth
+    # for provider, base_url, model, and api_key. Environment variables are
+    # only used as a narrow power-user escape hatch for the provider that the
+    # YAML already selected (e.g. override VLLM_MODEL without editing YAML).
+    #
+    # Historical: QAGREDO_USE_OLLAMA=1 used to rewire llm/judge providers on
+    # the fly. That behaviour has been removed to make configuration easier
+    # to reason about. To switch providers, edit the profile YAML or set
+    # QAGREDO_PROFILE.
+    llm_cfg = config.setdefault("llm", {})
+    provider = (llm_cfg.get("provider") or "").lower()
+
+    _apply_section_environment_overrides(
+        llm_cfg, provider, ENV_PROVIDER_SETTING_VARS, ENV_API_KEY_VARS
+    )
+
+    judge_cfg = config.get("judge")
+    if not isinstance(judge_cfg, dict):
+        return
+
+    judge_provider = (
+        judge_cfg.get("provider") or llm_cfg.get("provider") or ""
+    ).lower()
+    if judge_provider and not judge_cfg.get("provider"):
+        judge_cfg["provider"] = judge_provider
+
+    _apply_section_environment_overrides(
+        judge_cfg,
+        judge_provider,
+        ENV_JUDGE_SETTING_VARS,
+        ENV_JUDGE_API_KEY_VARS,
+    )
+
+
+def load_config(
+    config_path: Optional[os.PathLike[str]] = None,
+) -> Dict[str, Any]:
     path = _ensure_path(config_path, DEFAULT_CONFIG_PATH)
     if not path.exists():
         raise FileNotFoundError(
@@ -181,11 +339,15 @@ def build_effective_config(
 
     _apply_profile_selection(config)
     _apply_environment_overrides(config)
+    _apply_offline_input_preset(config)
 
     llm_cfg = config.get("llm", {})
     provider_lower = str(llm_cfg.get("provider", "")).lower()
     api_key_val = llm_cfg.get("api_key")
-    api_key_missing = api_key_val is None or str(api_key_val).strip() in MISSING_API_KEY_SENTINELS
+    api_key_missing = (
+        api_key_val is None
+        or str(api_key_val).strip() in MISSING_API_KEY_SENTINELS
+    )
     if provider_lower in CLOUD_PROVIDERS and api_key_missing:
         env_name = ENV_API_KEY_VARS.get(provider_lower, "<API_KEY_ENV_VAR>")
         raise ValueError(
@@ -196,6 +358,11 @@ def build_effective_config(
     provider = config.get("llm", {}).get("provider")
     if provider:
         validate_provider_for_offline_mode(provider, config)
+
+    judge = config.get("judge")
+    judge_provider = judge.get("provider") if isinstance(judge, dict) else None
+    if judge_provider:
+        validate_provider_for_offline_mode(judge_provider, config)
 
     return config
 
@@ -226,4 +393,3 @@ __all__ = [
     "OFFLINE_PROVIDERS",
     "DEFAULT_CONFIG_PATH",
 ]
-

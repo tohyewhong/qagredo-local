@@ -1,0 +1,12 @@
+---
+description: Enforce pictorial-first style for docs files
+globs: docs/**/*.{md,html}
+alwaysApply: false
+---
+
+# Docs Pictorial Priority
+
+- For `docs/**` markdown/html updates, lead each major section with a visual (diagram or flow image) when the content explains process, architecture, or setup.
+- Keep each visual paired with a short caption: **what this shows**, **when to use it**, **failure/retry path**.
+- Prefer updating diagram source files (`.dot`, `.puml`, Mermaid) and regenerating `.png` outputs, rather than editing only rendered images.
+- Ensure visuals reflect current behavior (especially required/optional modes, routing, and fallback logic).

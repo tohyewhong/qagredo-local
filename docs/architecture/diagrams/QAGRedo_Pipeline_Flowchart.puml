@@ -1,4 +1,6 @@
 @startuml
+' Maintainer index: ../../HANDOVER.md
+' Render: plantuml -tpng QAGRedo_Pipeline_Flowchart.puml  (or Docker plantuml)
 title QAGRedo Pipeline Flowchart (Core Loop)
 
 skinparam linetype ortho
@@ -30,6 +32,7 @@ while (Another document?) is (yes)
   repeat while (More slots?) is (yes)
 
   :save_results (per config);
+  :Publish results to GitHub (origin);
 endwhile (no)
 
 stop

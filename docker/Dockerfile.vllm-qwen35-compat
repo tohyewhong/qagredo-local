@@ -1,0 +1,25 @@
+# Qwen3.5 checkpoints use model_type "qwen3_5", which requires Transformers 5.4+.
+# Stock vLLM images (through v0.17.x) still ship Transformers 4.57.x, so AutoConfig
+# fails before the model loads. We upgrade Transformers in-image.
+#
+# Base: v0.17.1 — includes Qwen3.5 support in vLLM's model executor; needs a newer
+# NVIDIA driver/CUDA stack than v0.5.3. If this image fails on your host GPU, use
+# an older vLLM tag that matches your driver and keep Qwen2.5 weights instead.
+#
+# Build:
+#   bash scripts/docker_build_vllm_qwen35_compat.sh
+
+FROM vllm/vllm-openai:v0.17.1
+
+COPY certbundle/certbundle.crt /etc/ssl/certs/qagredo-certbundle.crt
+ENV SSL_CERT_FILE=/etc/ssl/certs/qagredo-certbundle.crt
+ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/qagredo-certbundle.crt
+ENV CURL_CA_BUNDLE=/etc/ssl/certs/qagredo-certbundle.crt
+
+# vLLM declares transformers<5; Qwen3.5 needs 5.4+. In practice v0.17.1 runs with 5.5.x for these models.
+# Newer tokenization stacks import mistral_common.ReasoningEffort — bump mistral-common to match.
+RUN python3 -m pip install --no-cache-dir --upgrade \
+    "transformers>=5.4.0,<5.6" \
+    "mistral-common>=1.8.0" \
+    && python3 -c "import transformers; v=transformers.__version__; assert tuple(int(x) for x in v.split('.')[:2]) >= (5, 4), v" \
+    && python3 -c "from mistral_common.protocol.instruct.request import ReasoningEffort"
