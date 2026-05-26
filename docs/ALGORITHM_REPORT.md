@@ -264,13 +264,19 @@ to ensure it is not a trivial fact-lookup question:
    - Up to `comprehensiveness_max_attempts` (default: 2) regeneration attempts
    - Each regeneration prompt includes the weakness and explicit instructions
      for producing a more complex question
-4. **After all attempts**: keep the best version (even if still below threshold
-   — it is reported in the output metadata)
+4. **After all attempts**:
+   - **Default (`comprehensiveness_strict: false`)**: keep the best version
+     (even if still below threshold — reported in output metadata).
+   - **Strict (`comprehensiveness_strict: true`)**: **reject** the slot — the
+     question is not added to `questions`, no answer is generated, and
+     `question_validation` records `accepted: false` with
+     `rejection_reason: comprehensiveness_check_failed`.
 
 **Why this check is needed:**
 - The prompt instructions ("must reason across 2+ parts") are soft guidelines.
   The LLM sometimes ignores them and produces simple "What is X?" questions.
-- The comprehensiveness check is a hard gate that catches these failures.
+- The comprehensiveness check catches these failures; with
+  `comprehensiveness_strict: true` it rejects failed slots (no answer).
 - Combined with grounding validation, each question must be both **grounded in
   the document** and **complex enough to test real understanding**.
 
@@ -288,6 +294,7 @@ question_generation:
     enable_comprehensiveness_check: true     # default: true
     comprehensiveness_min_score: 0.6         # default: 0.6
     comprehensiveness_max_attempts: 2        # default: 2
+    comprehensiveness_strict: true         # default in repo configs: reject failed slots
 ```
 
 ### 2.8 Deduplication
@@ -441,6 +448,12 @@ Each answer goes through a validate-and-regenerate cycle, then a coverage check:
 - When `run.save_grounded_qa_pairs_only` is **true**, ungrounded slots are
   **dropped** before save (same gate as retries); documents with no
   grounded pairs produce **no** analysis file.
+- When `run.reject_insufficient_answers` is **true** (default in repo
+  configs), a slot whose final answer contains **"Insufficient information
+  in the document."** is **omitted** from `qa_pairs` (and from
+  `overall_grade`), with `question_validation.rejection_reason:
+  insufficient_information_answer`. Retries still run first; omission
+  applies after the last replacement round.
 - When `run.minimal_qa_output` is **true**, the saved analysis JSON contains
   `document: {"content": "..."}` (plain text aligned with the full-output
   snapshot) and `{"qa_pairs": [{"question", "answer"}, ...]}` only (no
@@ -583,9 +596,11 @@ Special handling:
 
 #### 4.3.3 LLM-as-judge (`method="llm"`)
 
-The judge uses **Qwen2.5-7B** — a *different* model from the generator
-(Llama-3.1-8B) — to avoid self-evaluation bias. A model should not grade
-its own outputs.
+The judge uses a **different** model from the generator to avoid
+self-evaluation bias (for example **Qwen3.5-9B** generator with
+**Meta-Llama-3.1-8B-Instruct** judge in `config/config.vllm.yaml`, or
+Ollama tags such as `qwen3.5:9b` + `llama3.1:8b-instruct-fp16` in
+`ollama`/`kubeflow`). A model should not grade its own outputs.
 
 ```
 1. Build structured prompt with:
@@ -903,6 +918,8 @@ flowchart LR
 | `attempts` | integer | Comprehensiveness checker | `2` | Evaluation/regeneration rounds run. |
 | `was_regenerated` | bool | Comprehensiveness checker | `true` | Whether checker requested a rewritten question. |
 | `reason` | string | Comprehensiveness checker | `"Requires synthesis across sections 2 and 5"` | Human-readable rationale from evaluator. |
+| `accepted` | bool | Comprehensiveness checker | `true` | Same pass rule as early exit: `is_comprehensive` and `score >= comprehensiveness_min_score`. |
+| `rejection_reason` | string (optional) | Question validation stage | `"comprehensiveness_check_failed"` | Present on `question_validation` detail when strict mode rejects a slot. |
 
 #### 5.4.8 `answer_generation` fields
 
@@ -1175,8 +1192,8 @@ run:
   input_type: auto                  # not wired to converter CLI; use --input-type there
   max_files: 10                     # not read by run_qa_pipeline or converter
   num_documents: 2                  # 0 = all loaded records
-  min_content_words: 20             # not enforced by run_qa_pipeline (reserved)
-  min_content_chars: 0
+  min_content_words: 500            # skip shorter documents (0 = no minimum)
+  min_content_chars: 0              # optional character floor (both can apply)
   semantic_normalization:          # not read — use converter --semantic-normalize
     enable: false
     max_content_chars: 5000

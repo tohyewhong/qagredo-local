@@ -47,7 +47,7 @@ framework:
     semantic_fallback_threshold: 0.7
 
 run:
-  input_folder: "txt"
+  input_folder: "."
   input_file: ""
   input_glob: "*.txt"
   auto_convert: false
@@ -55,10 +55,14 @@ run:
   output_analysis_stem: document_id
   input_type: auto
   max_files: 0
-  num_documents: 10             # CHANGE ME — how many documents to process
+  num_documents: 2             # CHANGE ME — how many documents to process
+  skip_existing_outputs: false
+  resume: false
+  resume_run_dir: ""
   save_grounded_qa_pairs_only: false
+  reject_insufficient_answers: true
   minimal_qa_output: false
-  min_content_words: 20
+  min_content_words: 250
   min_content_chars: 0
   semantic_normalization:
     enable: false
@@ -66,7 +70,7 @@ run:
 
 # -------------------------------------------------------------------------
 # GENERATOR — in-container Ollama.
-# The container listens on 127.0.0.1:11434 (same as dev profile, since
+# The container listens on 127.0.0.1:11434 (same as ollama profile, since
 # `network_mode: host` isn't used here — the Ollama binary runs side-by-
 # side inside the same container via docker-entrypoint.sh).
 # -------------------------------------------------------------------------
@@ -110,6 +114,7 @@ question_generation:
     enable_comprehensiveness_check: true
     comprehensiveness_min_score: 0.6
     comprehensiveness_max_attempts: 2
+    comprehensiveness_strict: true
 
 # -------------------------------------------------------------------------
 # JUDGE — second model (must be a different Ollama tag to avoid self-grade).

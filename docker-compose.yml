@@ -29,12 +29,12 @@ services:
     # only on 127.0.0.1.
     network_mode: host
     # All LLM provider / model / URL / API-key settings live in
-    # config/config.dev.yaml — NOT here. This block only exposes
+    # config/config.ollama.yaml — NOT here. This block only exposes
     # container-runtime essentials (user mapping, offline flags, data paths).
     environment:
       TZ: ${TZ:-Asia/Singapore}
-      HOST_UID: ${HOST_UID:-1000}
-      HOST_GID: ${HOST_GID:-1000}
+      HOST_UID: ${HOST_UID:-1013}
+      HOST_GID: ${HOST_GID:-1015}
       OFFLINE_MODE: "1"
       HF_HUB_OFFLINE: "1"
       TRANSFORMERS_OFFLINE: "1"
@@ -49,7 +49,6 @@ services:
       - ${DATA_DIR:-./data}:/workspace/data:rw
       - ./output:/workspace/output:rw
       - ./hf_cache:/opt/hf_cache:rw
-      - ./models_embed:/opt/models_embed:rw
       - ./README.md:/workspace/README.md:rw
       - ./OFFLINE_GUIDE.md:/workspace/OFFLINE_GUIDE.md:rw
       - ./docs:/workspace/docs:rw
@@ -58,5 +57,5 @@ services:
       - -c
       - |
         unset TRANSFORMERS_CACHE
-        echo "[INFO] Dev profile — config/config.dev.yaml"
+        echo "[INFO] Ollama profile — config/config.ollama.yaml"
         python /workspace/run_qa_pipeline.py

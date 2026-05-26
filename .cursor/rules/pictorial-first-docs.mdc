@@ -5,6 +5,8 @@ alwaysApply: true
 
 # Pictorial-First Communication
 
+- For **chat answers** to user questions, follow **`answer-with-diagram-code.mdc`**
+  (Mermaid or similar in code fences when it helps understanding).
 - Prefer diagram-first explanations for workflows, architecture, and setup steps.
 - When updating documentation, add or refresh a relevant visual (`.png`, Mermaid, or source diagram file) before expanding prose.
 - Keep text around visuals short and scannable: what it shows, when to use it, and failure path.

@@ -1,10 +1,11 @@
 # ============================================================================
-#  config/config.yaml — LEGACY DEFAULT (mirrors config/config.dev.yaml)
+#  config/config.yaml — LEGACY DEFAULT (mirrors config/config.ollama.yaml)
 # ============================================================================
 #
 #  `bash run.sh` picks the profile YAML automatically based on the value
 #  of  QAGREDO_PROFILE  in .env:
-#       dev       → config/config.dev.yaml
+#       ollama    → config/config.ollama.yaml
+#       dev       → (alias) config/config.ollama.yaml
 #       kubeflow  → config/config.kubeflow.yaml
 #       vllm      → config/config.vllm.yaml
 #
@@ -28,7 +29,7 @@ framework:
 # INPUT / OUTPUT — folder is usually set via .env (QAGREDO_OFFLINE_*).
 # -------------------------------------------------------------------------
 run:
-  input_folder: "txt"
+  input_folder: "."
   input_file: ""
   input_glob: "*.txt"
   auto_convert: false
@@ -38,8 +39,9 @@ run:
   max_files: 0
   num_documents: 10            # CHANGE ME — how many documents to process
   save_grounded_qa_pairs_only: false
+  reject_insufficient_answers: true
   minimal_qa_output: false
-  min_content_words: 20
+  min_content_words: 250
   min_content_chars: 0
   semantic_normalization:
     enable: false
@@ -89,6 +91,7 @@ question_generation:
     enable_comprehensiveness_check: true
     comprehensiveness_min_score: 0.6
     comprehensiveness_max_attempts: 2
+    comprehensiveness_strict: true
 
 # -------------------------------------------------------------------------
 # JUDGE — second model that double-checks answers for hallucination.

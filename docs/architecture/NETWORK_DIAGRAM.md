@@ -7,7 +7,7 @@ This document describes **how QAGRedo communicates across host + containers**, w
 **Legacy:** two **vLLM** containers — **`docker-compose.vllm-stack.yml`** + GPU override files; older PNG **`diagrams/network_docker_compose.png`** matches that layout only.
 
 Port and model values come from **`.env`** and the active profile config file:
-**`config/config.dev.yaml`**, **`config/config.kubeflow.yaml`**, or **`config/config.vllm.yaml`**.
+**`config/config.ollama.yaml`**, **`config/config.kubeflow.yaml`**, or **`config/config.vllm.yaml`**.
 
 ## Causal network view (Ollama default)
 
@@ -35,7 +35,7 @@ flowchart LR
   Host["Offline server (host)\nDocker + Ollama on :11434"]
 
   subgraph Net["Docker network: qagredo_offline\nService: qagredo\nextra_hosts: host.docker.internal"]
-    Runner["Container: qagredo-runner\nrun_qa_pipeline.py\nQAGREDO_PROFILE=dev"]
+    Runner["Container: qagredo-runner\nrun_qa_pipeline.py\nQAGREDO_PROFILE=ollama"]
   end
 
   Host -->|"docker compose run"| Runner
@@ -73,7 +73,7 @@ flowchart LR
 
 ### Compose environment (reference)
 
-From `docker-compose.yml` (subset): compose enables reaching host Ollama via **`OLLAMA_*`** URLs (typically `host.docker.internal:11434`), plus `OLLAMA_MODEL` and `OLLAMA_JUDGE_MODEL`. Select **`QAGREDO_PROFILE=dev`** in `.env`.
+From `docker-compose.yml` (subset): compose enables reaching host Ollama via **`OLLAMA_*`** URLs (typically `host.docker.internal:11434`), plus `OLLAMA_MODEL` and `OLLAMA_JUDGE_MODEL`. Select **`QAGREDO_PROFILE=ollama`** in `.env`.
 
 ---
 
@@ -130,6 +130,7 @@ vLLM typically requires `Authorization: Bearer` matching the `--api-key` used to
 
 **vLLM profile (`QAGREDO_PROFILE=vllm`)**
 
+- **Startup:** same Docker image on two containers — `bash run.sh --vllm-up generator` (GPU 0, :7100), `bash run.sh --vllm-up judge` (GPU 1, :7101), then `bash run.sh --pipeline-only`; or one-shot `bash run.sh`. See **`docs/Siteserver_vLLM_Change_Guide.md`** Part D.
 - **Host can’t `curl` vLLM health:** container down or port mapping wrong.
 - **Runner DNS:** must resolve `vllm` and `vllm-judge` on the compose network.
 - **`401` / wrong model:** API key or served model name mismatch.

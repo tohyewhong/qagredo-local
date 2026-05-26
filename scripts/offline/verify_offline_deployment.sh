@@ -28,7 +28,7 @@ while (($#)); do
     --profile)   shift; REQUESTED_PROFILE="${1:-}" ;;
     --profile=*) REQUESTED_PROFILE="${1#*=}" ;;
     -h|--help)
-      echo "Usage: bash verify_offline_deployment.sh [--profile dev|kubeflow|vllm]"
+      echo "Usage: bash verify_offline_deployment.sh [--profile ollama|kubeflow|vllm]"
       exit 0
       ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
@@ -37,16 +37,20 @@ while (($#)); do
 done
 
 [[ -f "$HOST_DIR/.env" ]] && { set -a; source "$HOST_DIR/.env"; set +a; }
-PROFILE="${REQUESTED_PROFILE:-${QAGREDO_PROFILE:-dev}}"
+PROFILE="${REQUESTED_PROFILE:-${QAGREDO_PROFILE:-ollama}}"
 case "$PROFILE" in
-  dev|kubeflow|vllm) ;;
+  dev)
+    echo "[WARN] Profile 'dev' is deprecated; using 'ollama' instead." >&2
+    PROFILE="ollama"
+    ;;
+  ollama|kubeflow|vllm) ;;
   *) echo "[ERROR] Unknown profile: $PROFILE" >&2; exit 2 ;;
 esac
 
 case "$PROFILE" in
   kubeflow) COMPOSE_FILE="$HOST_DIR/docker-compose.kubeflow.yml" ;;
   vllm)     COMPOSE_FILE="$HOST_DIR/docker-compose.vllm-stack.yml" ;;
-  dev|*)    COMPOSE_FILE="$HOST_DIR/docker-compose.yml" ;;
+  ollama|*) COMPOSE_FILE="$HOST_DIR/docker-compose.yml" ;;
 esac
 
 [[ -f "$COMPOSE_FILE" ]] || {

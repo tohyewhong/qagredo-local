@@ -30,8 +30,8 @@ services:
       context: .
       dockerfile: Dockerfile.kubeflow
       args:
-        UID: ${HOST_UID:-10005}
-        GID: ${HOST_GID:-10006}
+        UID: ${HOST_UID:-1013}
+        GID: ${HOST_GID:-1015}
     image: qagredo-kubeflow:latest
     container_name: qagredo-kubeflow
     # Kubeflow / on-prem GPU passthrough. Adjust count to match the pod spec.
@@ -48,8 +48,8 @@ services:
     # directory) and the startup warning that checks the required tags exist.
     environment:
       TZ: ${TZ:-Asia/Singapore}
-      HOST_UID: ${HOST_UID:-1000}
-      HOST_GID: ${HOST_GID:-1000}
+      HOST_UID: ${HOST_UID:-1013}
+      HOST_GID: ${HOST_GID:-1015}
       OFFLINE_MODE: "1"
       HF_HUB_OFFLINE: "1"
       TRANSFORMERS_OFFLINE: "1"
@@ -59,6 +59,8 @@ services:
       QAGREDO_SERVE_OLLAMA: "1"
       OLLAMA_HOST: "127.0.0.1:11434"
       OLLAMA_MODELS: "/opt/ollama/models"
+      # Keep models resident until container stop (vLLM-like warm behavior).
+      OLLAMA_KEEP_ALIVE: "-1"
       # Only used by docker-entrypoint.sh for a "model exists?" warning.
       # Keep these matching llm.model / judge.model in config.kubeflow.yaml.
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:9b}
@@ -67,7 +69,7 @@ services:
       # ---- GPU pinning (generator vs judge) ----
       CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES:-}
 
-      # ---- Data plumbing (same names as dev profile) ----
+      # ---- Data plumbing (same names as ollama profile) ----
       QAGREDO_OFFLINE_HOST: ${QAGREDO_OFFLINE_HOST:-}
       QAGREDO_OFFLINE_INPUT: ${QAGREDO_OFFLINE_INPUT:-}
     volumes:
@@ -75,7 +77,7 @@ services:
       # /home/tyewhong/qagredo/models on the dev server, etc.
       - ${QAGREDO_MODELS_DIR:-./models}:/opt/ollama/models:rw
 
-      # Pipeline inputs / outputs / config mirror the dev profile.
+      # Pipeline inputs / outputs / config mirror the ollama profile.
       - ./run_qa_pipeline.py:/workspace/run_qa_pipeline.py:rw
       - ./utils:/workspace/utils:rw
       - ./scripts:/workspace/scripts:rw
@@ -83,7 +85,6 @@ services:
       - ${DATA_DIR:-./data}:/workspace/data:rw
       - ./output:/workspace/output:rw
       - ./hf_cache:/opt/hf_cache:rw
-      - ./models_embed:/opt/models_embed:rw
       - ./README.md:/workspace/README.md:rw
       - ./docs:/workspace/docs:rw
     command:
@@ -94,4 +95,5 @@ services:
         echo "[INFO] OLLAMA_MODELS=$${OLLAMA_MODELS}"
         echo "[INFO] Generator model: $${OLLAMA_MODEL}"
         echo "[INFO] Judge model    : $${OLLAMA_JUDGE_MODEL}"
-        python /workspace/run_qa_pipeline.py
+        echo "[INFO] Ollama warm container is up; run pipeline via: docker compose exec qagredo python /workspace/run_qa_pipeline.py"
+        exec tail -f /dev/null

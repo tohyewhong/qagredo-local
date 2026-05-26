@@ -6,27 +6,27 @@ set -euo pipefail
 #                                Kubeflow server, in one place.
 # ============================================================================
 #
-# Produces (in ./offline_out/ by default):
+# Produces (in /data/tyewhong/qagredo/ by default):
 #
 #   qagredo_bundle.tar.gz          Repo code + configs + compose files
-#   qagredo-v1.tar                 Docker image for the dev profile
+#   qagredo-v1.tar                 Docker image for the ollama profile
 #   qagredo-kubeflow.tar           Docker image for the kubeflow profile
 #   models_ollama.tar.gz           Ollama GGUF store (for dev / kubeflow)
 #   models_vllm.tar.gz             HuggingFace model dirs (for vllm profile)
-#   vllm-openai_<tag>.rootfs.tar   vLLM runtime image (for vllm profile)
+#   <tag>.rootfs.tar               vLLM runtime image (for vllm profile; default qwen35-localcuda.rootfs.tar)
 #
 # Each tarball is optional — pass flags to pick the ones you actually need.
 # Which tarballs to ship to the offline server:
 #
 #   Profile on offline server | Tarballs you must copy over
 #   --------------------------+-------------------------------------------------
-#   dev                       | qagredo_bundle.tar.gz, qagredo-v1.tar,
+#   ollama                    | qagredo_bundle.tar.gz, qagredo-v1.tar,
 #                             |  models_ollama.tar.gz (unless Ollama on the
 #                             |  offline host already has the tags)
 #   kubeflow                  | qagredo_bundle.tar.gz, qagredo-kubeflow.tar,
 #                             |  models_ollama.tar.gz
 #   vllm                      | qagredo_bundle.tar.gz, qagredo-v1.tar,
-#                             |  vllm-openai_<tag>.rootfs.tar, models_vllm.tar.gz
+#                             |  qwen35-localcuda.rootfs.tar (or save_vllm script name), models_vllm.tar.gz
 #
 # Usage:
 #   bash scripts/make_offline_tarballs.sh --all
@@ -35,7 +35,8 @@ set -euo pipefail
 # ============================================================================
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUT_DIR="${QAGREDO_OFFLINE_OUT:-$REPO_DIR/offline_out}"
+ARCHIVE_DIR="${QAGREDO_ARCHIVE_DIR:-/data/tyewhong/qagredo}"
+OUT_DIR="${QAGREDO_OFFLINE_OUT:-$ARCHIVE_DIR}"
 
 DO_BUNDLE=0
 DO_IMAGE_DEV=0
@@ -43,18 +44,19 @@ DO_IMAGE_KUBEFLOW=0
 DO_MODELS_OLLAMA=0
 DO_MODELS_OLLAMA_SPLIT=0
 DO_MODELS_VLLM=0
+DO_MODELS_VLLM_SPLIT=0
 DO_IMAGE_VLLM=0
 
 # Defaults for model sources (override with env vars or flags).
 OLLAMA_STORE_SRC="${OLLAMA_STORE_SRC:-/data/ollama/models}"
-# Must match llm.model / judge.model in config/config.dev.yaml and config/config.kubeflow.yaml
+# Must match llm.model / judge.model in config/config.ollama.yaml and config/config.kubeflow.yaml
 OLLAMA_SPLIT_TAGS_DEFAULT=("qwen3.5:9b" "llama3.1:8b-instruct-fp16")
 VLLM_MODELS_SRC="${VLLM_MODELS_SRC:-/home/tyewhong/qagredo/models_llm}"
-VLLM_MODEL_DIRS_DEFAULT=("Meta-Llama-3.1-8B-Instruct" "Qwen3-8B")
+VLLM_MODEL_DIRS_DEFAULT=("Qwen3.5-9B" "Meta-Llama-3.1-8B-Instruct")
 
 QAGREDO_IMAGE="${QAGREDO_IMAGE:-qagredo-v1:latest}"
 QAGREDO_KUBEFLOW_IMAGE="${QAGREDO_KUBEFLOW_IMAGE:-qagredo-kubeflow:latest}"
-VLLM_IMAGE="${VLLM_IMAGE:-vllm/vllm-openai:v0.5.3.post1}"
+VLLM_IMAGE="${VLLM_IMAGE:-qagredo-vllm:qwen35-localcuda}"
 
 _log()  { echo "[make-offline] $*"; }
 _warn() { echo "[make-offline][WARN] $*" >&2; }
@@ -70,9 +72,9 @@ Output directory:  ${OUT_DIR}
 Flags (select what to build — use --all for everything):
   --all                    Build every tarball below
   --bundle                 qagredo_bundle.tar.gz        (repo code + configs)
-  --image-dev              qagredo-v1.tar               (docker save ${QAGREDO_IMAGE})
+  --image-dev              qagredo-v1.tar (ollama profile runner; legacy flag name)
   --image-kubeflow         qagredo-kubeflow.tar         (docker save ${QAGREDO_KUBEFLOW_IMAGE})
-  --image-vllm             vllm-openai_<tag>.rootfs.tar (docker save ${VLLM_IMAGE})
+  --image-vllm             <tag>.rootfs.tar from VLLM_IMAGE (default qagredo-vllm:qwen35-localcuda)
   --models-ollama          models_ollama.tar.gz         (from ${OLLAMA_STORE_SRC})
   --models-ollama-split[=TAGS]
                            models_ollama_<tag>.tar.gz per tag (from ${OLLAMA_STORE_SRC})
@@ -82,6 +84,10 @@ Flags (select what to build — use --all for everything):
                             LIST is an optional comma-separated list of
                             subdirectories to include (default:
                             ${VLLM_MODEL_DIRS_DEFAULT[*]}).
+  --models-vllm-split[=LIST]
+                           models_vllm_<dir>.tar.gz per HF folder (same LIST
+                           syntax; default ${VLLM_MODEL_DIRS_DEFAULT[*]}).
+                           Use when the offline host already has some models.
 
 Other:
   --out PATH               Write outputs to PATH (default ${OUT_DIR})
@@ -113,7 +119,12 @@ USAGE
 }
 
 MODELS_VLLM_OVERRIDE=""
+MODELS_VLLM_SPLIT_OVERRIDE=""
 MODELS_OLLAMA_SPLIT_OVERRIDE=""
+
+_safe_vllm_dir_slug() {
+  echo "$1" | tr '.:/' '_' | tr -cd 'A-Za-z0-9._-'
+}
 while (($#)); do
   case "$1" in
     --all)
@@ -129,6 +140,8 @@ while (($#)); do
     --models-ollama-split=*) DO_MODELS_OLLAMA_SPLIT=1; MODELS_OLLAMA_SPLIT_OVERRIDE="${1#*=}" ;;
     --models-vllm)      DO_MODELS_VLLM=1 ;;
     --models-vllm=*)    DO_MODELS_VLLM=1; MODELS_VLLM_OVERRIDE="${1#*=}" ;;
+    --models-vllm-split) DO_MODELS_VLLM_SPLIT=1 ;;
+    --models-vllm-split=*) DO_MODELS_VLLM_SPLIT=1; MODELS_VLLM_SPLIT_OVERRIDE="${1#*=}" ;;
     --out)              shift; OUT_DIR="$1" ;;
     --out=*)            OUT_DIR="${1#*=}" ;;
     -h|--help)          usage; exit 0 ;;
@@ -137,7 +150,7 @@ while (($#)); do
   shift
 done
 
-if [[ $((DO_BUNDLE + DO_IMAGE_DEV + DO_IMAGE_KUBEFLOW + DO_IMAGE_VLLM + DO_MODELS_OLLAMA + DO_MODELS_OLLAMA_SPLIT + DO_MODELS_VLLM)) -eq 0 ]]; then
+if [[ $((DO_BUNDLE + DO_IMAGE_DEV + DO_IMAGE_KUBEFLOW + DO_IMAGE_VLLM + DO_MODELS_OLLAMA + DO_MODELS_OLLAMA_SPLIT + DO_MODELS_VLLM + DO_MODELS_VLLM_SPLIT)) -eq 0 ]]; then
   usage
   _die "No build flag given (pick one or use --all)."
 fi
@@ -149,9 +162,7 @@ mkdir -p "$OUT_DIR"
 # ---------------------------------------------------------------------------
 if [[ "$DO_BUNDLE" -eq 1 ]]; then
   _log "Building qagredo_bundle.tar.gz ..."
-  ( cd "$REPO_DIR" && bash scripts/make_qagredo_bundle.sh )
-  mv -f "$REPO_DIR/qagredo_bundle.tar.gz" "$OUT_DIR/"
-  mv -f "$REPO_DIR/qagredo_bundle.tar.gz.sha256" "$OUT_DIR/"
+  ( cd "$REPO_DIR" && QAGREDO_ARCHIVE_DIR="$OUT_DIR" bash scripts/make_qagredo_bundle.sh )
   _log "  -> $OUT_DIR/qagredo_bundle.tar.gz"
 fi
 
@@ -191,7 +202,7 @@ if [[ "$DO_IMAGE_KUBEFLOW" -eq 1 ]]; then
 fi
 
 if [[ "$DO_IMAGE_VLLM" -eq 1 ]]; then
-  # Normalize to a filename: vllm/vllm-openai:v0.5.3.post1 -> vllm-openai_v0.5.3.post1.rootfs.tar
+  # Normalize to a filename: qagredo-vllm:qwen35-localcuda -> qwen35-localcuda.rootfs.tar
   _vllm_fname="$(echo "${VLLM_IMAGE##*/}" | tr ':' '_').rootfs.tar"
   _save_image_if_present "$VLLM_IMAGE" "$OUT_DIR/$_vllm_fname" "vllm image"
 fi
@@ -355,6 +366,32 @@ Adjust via --models-vllm=dir1,dir2 or VLLM_MODELS_SRC."
   fi
   _log "  -> $_out  ($(du -h "$_out" | cut -f1))"
   sha256sum "$_out" > "${_out}.sha256"
+fi
+
+if [[ "$DO_MODELS_VLLM_SPLIT" -eq 1 ]]; then
+  if [[ ! -d "$VLLM_MODELS_SRC" ]]; then
+    _die "vLLM models source not found: VLLM_MODELS_SRC=${VLLM_MODELS_SRC}"
+  fi
+  if [[ -n "$MODELS_VLLM_SPLIT_OVERRIDE" ]]; then
+    IFS=',' read -r -a _dirs <<<"$MODELS_VLLM_SPLIT_OVERRIDE"
+  else
+    _dirs=("${VLLM_MODEL_DIRS_DEFAULT[@]}")
+  fi
+  _log "Creating split vLLM model archives from: $VLLM_MODELS_SRC"
+  _log "  (dirs: ${_dirs[*]})"
+  for d in "${_dirs[@]}"; do
+    [[ -d "$VLLM_MODELS_SRC/$d" ]] || _die "Missing vLLM model dir: $VLLM_MODELS_SRC/$d"
+    _slug="$(_safe_vllm_dir_slug "$d")"
+    _out="$OUT_DIR/models_vllm_${_slug}.tar.gz"
+    _log "  packing $d -> $(basename "$_out")"
+    if command -v pigz >/dev/null 2>&1; then
+      tar --use-compress-program=pigz -cf "$_out" -C "$VLLM_MODELS_SRC" "$d"
+    else
+      tar -czf "$_out" -C "$VLLM_MODELS_SRC" "$d"
+    fi
+    _log "  -> $_out  ($(du -h "$_out" | cut -f1))"
+    sha256sum "$_out" > "${_out}.sha256"
+  done
 fi
 
 # ---------------------------------------------------------------------------

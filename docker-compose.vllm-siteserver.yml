@@ -1,9 +1,9 @@
-# Optional redserver override for 4-GPU vLLM comparison runs.
+# Optional siteserver override for 4-GPU vLLM comparison runs.
 #
 # Use together with docker-compose.vllm-stack.yml through run.sh:
 #
 #   QAGREDO_PROFILE=vllm \
-#   QAGREDO_VLLM_COMPOSE_EXTRA=docker-compose.vllm-redserver.yml \
+#   QAGREDO_VLLM_COMPOSE_EXTRA=docker-compose.vllm-siteserver.yml \
 #   VLLM_TP_SIZE=2 \
 #   VLLM_JUDGE_TP_SIZE=2 \
 #   bash run.sh

@@ -16,12 +16,17 @@ set -euo pipefail
 # Expected files (copy whichever apply to the profile you will run):
 #
 #   qagredo_bundle.tar.gz              Always needed
-#   qagredo-v1.tar                     dev / vllm profile (runner image)
+#   qagredo-v1.tar                     ollama / vllm profile (runner image)
 #   qagredo-kubeflow.tar               kubeflow profile  (all-in-one image)
-#   models_ollama.tar.gz               dev / kubeflow profiles (combined store)
-#   models_ollama_<tag>.tar.gz         dev / kubeflow profiles (split by model tag)
-#   models_vllm.tar.gz                 vllm profile
-#   vllm-openai_*.rootfs.tar           vllm profile
+#   models_ollama.tar.gz               ollama / kubeflow profiles (combined store)
+#   models_ollama_<tag>.tar.gz         ollama / kubeflow profiles (split by model tag)
+#   models_vllm.tar.gz                 vllm profile (combined)
+#   models_vllm_<model>.tar.gz         vllm profile (per-model split, e.g. models_vllm_Qwen3_5-9B.tar.gz)
+#   models_llama.tar.gz                vllm judge weights (legacy name; Meta-Llama-3.1-8B-Instruct)
+#   Archives are also searched under QAGREDO_ARCHIVE_DIR (default /data/tyewhong/qagredo).
+#   vllm-qwen35-localcuda.rootfs.tar   vllm profile (Qwen3.5; preferred)
+#   qwen35-localcuda.rootfs.tar        alternate name from make_offline_tarballs --image-vllm
+#   vllm-openai_*.rootfs.tar           legacy vLLM image
 #
 # Typical workflow on the offline host:
 #     tar xzf qagredo_bundle.tar.gz      # → qagredo_host/
@@ -31,7 +36,7 @@ set -euo pipefail
 #     bash run.sh
 #
 # Options:
-#     --profile <dev|kubeflow|vllm>   Tell setup which profile you will run
+#     --profile <ollama|kubeflow|vllm>   Tell setup which profile you will run
 #                                     (controls which checks are required).
 #                                     Default: auto-detect from .env.
 #     --skip-images                   Skip docker load (images already loaded)
@@ -61,6 +66,13 @@ done
 HOST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PARENT_DIR="$(cd "$HOST_DIR/.." && pwd)"
 
+ARCHIVE_DIR="${QAGREDO_ARCHIVE_DIR:-/data/tyewhong/qagredo}"
+if [[ -f "$HOST_DIR/.env" ]]; then
+  _ad="$(grep -E '^[[:space:]]*QAGREDO_ARCHIVE_DIR=' "$HOST_DIR/.env" \
+        | tail -n1 | cut -d= -f2- | tr -d '[:space:]"'"'"'')"
+  [[ -n "$_ad" ]] && ARCHIVE_DIR="$_ad"
+fi
+
 _pass() { echo "[PASS]  $*"; }
 _fail() { echo "[FAIL]  $*"; }
 _info() { echo "[INFO]  $*"; }
@@ -84,6 +96,7 @@ _check() {
 _find_file() {
   local name="$1"
   for candidate in \
+      "$ARCHIVE_DIR/$name" \
       "$PARENT_DIR/$name" \
       "$HOST_DIR/$name" \
       "$PARENT_DIR"/*/"$name" \
@@ -110,6 +123,25 @@ _image_exists() {
   docker image inspect "$1" >/dev/null 2>&1
 }
 
+_vllm_models_host_dir() {
+  local d="$HOST_DIR/models_llm"
+  if [[ -f "$HOST_DIR/.env" ]]; then
+    local hm
+    hm="$(grep -E '^[[:space:]]*QAGREDO_MODELS_LLM_HOST=' "$HOST_DIR/.env" \
+          | tail -n1 | cut -d= -f2- | tr -d '[:space:]"'"'"'')"
+    [[ -n "$hm" ]] && d="$hm"
+  elif [[ "${PROFILE:-}" == "vllm" ]]; then
+    d="/data/models"
+  fi
+  printf '%s' "$d"
+}
+
+_vllm_models_populated() {
+  local d
+  d="$(_vllm_models_host_dir)"
+  [[ -n "$(ls -A "$d" 2>/dev/null)" ]]
+}
+
 # ---------------------------------------------------------------------------
 # Profile resolution
 # ---------------------------------------------------------------------------
@@ -119,16 +151,20 @@ resolve_profile() {
     prof="$(grep -E '^[[:space:]]*QAGREDO_PROFILE=' "$HOST_DIR/.env" \
              | tail -n1 | cut -d= -f2- | tr -d '[:space:]"'"'"'')"
   fi
-  prof="${prof:-dev}"
+  prof="${prof:-ollama}"
   case "$prof" in
-    dev|kubeflow|vllm) echo "$prof" ;;
-    *) _warn "Unknown QAGREDO_PROFILE='${prof}', falling back to dev."; echo "dev" ;;
+    ollama|kubeflow|vllm) echo "$prof" ;;
+    dev)
+      _warn "Profile 'dev' is deprecated; using 'ollama'."
+      echo "ollama"
+      ;;
+    *) _warn "Unknown QAGREDO_PROFILE='${prof}', falling back to ollama."; echo "ollama" ;;
   esac
 }
 
 PROFILE="$(resolve_profile)"
 _step "Profile: ${PROFILE}"
-_info "Override with: bash setup_offline.sh --profile <dev|kubeflow|vllm>"
+_info "Override with: bash setup_offline.sh --profile <ollama|kubeflow|vllm>"
 
 # ---------------------------------------------------------------------------
 # Phase 1: Discover tarballs (all optional — warn, don't fail)
@@ -140,13 +176,32 @@ QAGREDO_TAR="$(_find_file qagredo-v1.tar || true)"
 KUBEFLOW_TAR="$(_find_file qagredo-kubeflow.tar || true)"
 MODELS_OLLAMA_TGZ="$(_find_file models_ollama.tar.gz || true)"
 MODELS_OLLAMA_SPLIT_TGZ=()
-for _cand in "$PARENT_DIR"/models_ollama_*.tar.gz "$HOST_DIR"/models_ollama_*.tar.gz; do
+for _cand in \
+    "$ARCHIVE_DIR"/models_ollama_*.tar.gz \
+    "$PARENT_DIR"/models_ollama_*.tar.gz \
+    "$HOST_DIR"/models_ollama_*.tar.gz; do
   [[ -f "$_cand" ]] && MODELS_OLLAMA_SPLIT_TGZ+=("$_cand")
 done
 MODELS_VLLM_TGZ="$(_find_file models_vllm.tar.gz || true)"
-VLLM_ROOTFS_TAR="$(_find_file "vllm-openai_v0.5.3.post1.rootfs.tar" || true)"
+MODELS_VLLM_SPLIT_TGZ=()
+for _cand in \
+    "$ARCHIVE_DIR"/models_vllm_*.tar.gz \
+    "$PARENT_DIR"/models_vllm_*.tar.gz \
+    "$HOST_DIR"/models_vllm_*.tar.gz; do
+  [[ -f "$_cand" ]] || continue
+  [[ "$(basename "$_cand")" == "models_vllm.tar.gz" ]] && continue
+  MODELS_VLLM_SPLIT_TGZ+=("$_cand")
+done
+MODELS_LLAMA_TGZ="$(_find_file models_llama.tar.gz || true)"
+VLLM_ROOTFS_TAR="$(_find_file "vllm-qwen35-localcuda.rootfs.tar" || true)"
 if [[ -z "$VLLM_ROOTFS_TAR" ]]; then
-  # Accept any vllm-openai_*.rootfs.tar lying next to us.
+  VLLM_ROOTFS_TAR="$(_find_file "qwen35-localcuda.rootfs.tar" || true)"
+fi
+if [[ -z "$VLLM_ROOTFS_TAR" ]]; then
+  VLLM_ROOTFS_TAR="$(_find_file "vllm-openai_v0.5.3.post1.rootfs.tar" || true)"
+fi
+if [[ -z "$VLLM_ROOTFS_TAR" ]]; then
+  # Legacy: any vllm-openai_*.rootfs.tar lying next to us.
   VLLM_ROOTFS_TAR="$(ls "$PARENT_DIR"/vllm-openai_*.rootfs.tar 2>/dev/null | head -1 || true)"
 fi
 
@@ -159,7 +214,17 @@ if [[ ${#MODELS_OLLAMA_SPLIT_TGZ[@]} -gt 0 ]]; then
 else
   _info "models_ollama_*    : <none found>"
 fi
+_info "Archive search dir : ${ARCHIVE_DIR}"
 _info "models_vllm.tar    : ${MODELS_VLLM_TGZ:-<not found>}"
+if [[ ${#MODELS_VLLM_SPLIT_TGZ[@]} -gt 0 ]]; then
+  _info "models_vllm_*      : ${#MODELS_VLLM_SPLIT_TGZ[@]} split archives found"
+  for _s in "${MODELS_VLLM_SPLIT_TGZ[@]}"; do
+    _info "  - $(basename "$_s")"
+  done
+else
+  _info "models_vllm_*      : <none found>"
+fi
+_info "models_llama.tar   : ${MODELS_LLAMA_TGZ:-<not found>}"
 _info "vllm rootfs tar    : ${VLLM_ROOTFS_TAR:-<not found>}"
 
 # ---------------------------------------------------------------------------
@@ -169,13 +234,13 @@ _step "Phase 2: Loading Docker images"
 
 QAGREDO_IMAGE="${QAGREDO_IMAGE:-qagredo-v1:latest}"
 QAGREDO_KUBEFLOW_IMAGE="${QAGREDO_KUBEFLOW_IMAGE:-qagredo-kubeflow:latest}"
-VLLM_IMAGE="${VLLM_IMAGE:-vllm/vllm-openai:v0.5.3.post1}"
+VLLM_IMAGE="${VLLM_IMAGE:-qagredo-vllm:qwen35-localcuda}"
 
 if [[ "$SKIP_IMAGES" -eq 1 ]]; then
   _info "Skipping image loads (--skip-images)"
 else
-  # dev / vllm image
-  if [[ "$PROFILE" == "dev" || "$PROFILE" == "vllm" ]]; then
+  # ollama / vllm image
+  if [[ "$PROFILE" == "ollama" || "$PROFILE" == "vllm" ]]; then
     if _image_exists "$QAGREDO_IMAGE"; then
       _info "${QAGREDO_IMAGE} already loaded."
     elif [[ -n "$QAGREDO_TAR" ]]; then
@@ -206,7 +271,7 @@ else
       _info "Loading $VLLM_ROOTFS_TAR ..."
       docker load -i "$VLLM_ROOTFS_TAR"
     else
-      _warn "No vllm-openai_*.rootfs.tar found and ${VLLM_IMAGE} not loaded."
+      _warn "No vLLM image tar found (vllm-qwen35-localcuda.rootfs.tar / qwen35-localcuda.rootfs.tar / vllm-openai_*.rootfs.tar) and ${VLLM_IMAGE} not loaded."
     fi
   fi
 fi
@@ -220,7 +285,7 @@ _step "Phase 3: Preparing model stores for profile '${PROFILE}'"
 mkdir -p "$HOST_DIR/output" "$HOST_DIR/hf_cache" "$HOST_DIR/hf_cache_judge" \
          "$HOST_DIR/data" 2>/dev/null || true
 
-if [[ "$PROFILE" == "dev" || "$PROFILE" == "kubeflow" ]]; then
+if [[ "$PROFILE" == "ollama" || "$PROFILE" == "kubeflow" ]]; then
   # --- Ollama GGUF store ---
   OLLAMA_DEST="$HOST_DIR/models"
   if [[ -d "$OLLAMA_DEST/blobs" && -d "$OLLAMA_DEST/manifests" && "$FORCE" -ne 1 ]]; then
@@ -265,25 +330,51 @@ if [[ "$PROFILE" == "dev" || "$PROFILE" == "kubeflow" ]]; then
     _warn "  Point QAGREDO_MODELS_DIR at a valid store before 'bash run.sh'."
   else
     _info "No models_ollama*.tar.gz found — assuming Ollama on the host already"
-    _info "has the tags listed in config/config.dev.yaml (check with 'ollama list')."
+  _info "has the tags listed in config/config.ollama.yaml (check with 'ollama list')."
   fi
 fi
 
 if [[ "$PROFILE" == "vllm" ]]; then
   # --- vLLM HuggingFace model tree ---
   VLLM_DEST="$HOST_DIR/models_llm"
-  if [[ -d "$VLLM_DEST" && "$(ls -A "$VLLM_DEST" 2>/dev/null)" && "$FORCE" -ne 1 ]]; then
+  VLLM_HOST_ROOT="$(_vllm_models_host_dir)"
+  _vllm_have_archives=0
+  [[ -n "$MODELS_VLLM_TGZ" || ${#MODELS_VLLM_SPLIT_TGZ[@]} -gt 0 || -n "$MODELS_LLAMA_TGZ" ]] && _vllm_have_archives=1
+
+  if _vllm_models_populated && [[ "$FORCE" -ne 1 ]] && [[ "$_vllm_have_archives" -eq 0 ]]; then
+    _info "vLLM models already present at $VLLM_HOST_ROOT (from manual extract)."
+    _info "  No models_vllm*.tar.gz / models_llama.tar.gz needed under $ARCHIVE_DIR."
+  elif [[ -d "$VLLM_DEST" && "$(ls -A "$VLLM_DEST" 2>/dev/null)" && "$FORCE" -ne 1 && "$_vllm_have_archives" -eq 0 ]]; then
     _info "vLLM models directory exists at $VLLM_DEST (use --force to overwrite)."
-  elif [[ -n "$MODELS_VLLM_TGZ" ]]; then
-    _info "Extracting $MODELS_VLLM_TGZ into $VLLM_DEST ..."
-    rm -rf "$VLLM_DEST"
-    mkdir -p "$VLLM_DEST"
-    tar -xzf "$MODELS_VLLM_TGZ" -C "$VLLM_DEST"
-    _info "vLLM models ready: $VLLM_DEST"
+  elif [[ "$_vllm_have_archives" -eq 1 ]]; then
+    VLLM_EXTRACT_DEST="$VLLM_HOST_ROOT"
+    _info "Extracting vLLM model archive(s) into $VLLM_EXTRACT_DEST ..."
+    if [[ "$VLLM_EXTRACT_DEST" == "$VLLM_DEST" && "$FORCE" -eq 1 ]]; then
+      rm -rf "$VLLM_DEST"
+    fi
+    mkdir -p "$VLLM_EXTRACT_DEST"
+    if [[ -n "$MODELS_VLLM_TGZ" ]]; then
+      _info "  extracting $(basename "$MODELS_VLLM_TGZ")"
+      tar -xzf "$MODELS_VLLM_TGZ" -C "$VLLM_EXTRACT_DEST"
+    fi
+    for _split in "${MODELS_VLLM_SPLIT_TGZ[@]}"; do
+      _info "  extracting $(basename "$_split")"
+      tar -xzf "$_split" -C "$VLLM_EXTRACT_DEST"
+    done
+    if [[ -n "$MODELS_LLAMA_TGZ" ]]; then
+      _info "  extracting $(basename "$MODELS_LLAMA_TGZ") (judge)"
+      tar -xzf "$MODELS_LLAMA_TGZ" -C "$VLLM_EXTRACT_DEST"
+    fi
+    _info "vLLM models ready: $VLLM_EXTRACT_DEST"
+    _info "  Set QAGREDO_MODELS_LLM_HOST=$VLLM_EXTRACT_DEST in .env (template uses this for vllm)."
+  elif _vllm_models_populated; then
+    _info "vLLM models present at $VLLM_HOST_ROOT (manual install OK)."
   else
-    _warn "No models_vllm.tar.gz found and $VLLM_DEST is empty."
-    _warn "  The vllm profile needs HuggingFace-format model dirs. Copy them to"
-    _warn "  $VLLM_DEST or set QAGREDO_MODELS_LLM_HOST in .env."
+    _warn "No models_vllm.tar.gz, models_vllm_*.tar.gz, or models_llama.tar.gz found under:"
+    _warn "  $ARCHIVE_DIR, $PARENT_DIR, or $HOST_DIR"
+    _warn "  Place archives in $ARCHIVE_DIR (e.g. models_vllm_Qwen3_5-9B.tar.gz), or extract to"
+    _warn "  QAGREDO_MODELS_LLM_HOST in .env (e.g. /data/models) and re-run."
+    _warn "  Expected empty dir was: $VLLM_DEST (script default); your .env may use $VLLM_HOST_ROOT"
   fi
 fi
 
@@ -332,11 +423,15 @@ elif [[ -f "$DOTENV_TEMPLATE" ]]; then
 import pathlib, sys
 template_path, env_path, host_dir, uid, gid, profile = sys.argv[1:7]
 text = pathlib.Path(template_path).read_text(encoding="utf-8")
+models_llm_host = (
+    "/data/models" if profile == "vllm" else f"{host_dir}/models_llm"
+)
 for k, v in {
     "@QAGREDO_HOST_DIR@": host_dir,
     "@HOST_UID@": uid,
     "@HOST_GID@": gid,
     "@QAGREDO_PROFILE@": profile,
+    "@QAGREDO_MODELS_LLM_HOST@": models_llm_host,
 }.items():
     text = text.replace(k, v)
 pathlib.Path(env_path).write_text(text, encoding="utf-8")
@@ -354,18 +449,17 @@ _step "Phase 6: Smoke tests"
 _check "Docker is available" docker info
 
 case "$PROFILE" in
-  dev)
-    _check "dev image present" _image_exists "$QAGREDO_IMAGE"
+  ollama)
+    _check "ollama/runner image present" _image_exists "$QAGREDO_IMAGE"
     ;;
   kubeflow)
     _check "kubeflow image present" _image_exists "$QAGREDO_KUBEFLOW_IMAGE"
     _check "Ollama store present at ./models" test -d "$HOST_DIR/models/blobs"
     ;;
   vllm)
-    _check "dev/runner image present" _image_exists "$QAGREDO_IMAGE"
+    _check "runner image present" _image_exists "$QAGREDO_IMAGE"
     _check "vLLM runtime image present" _image_exists "$VLLM_IMAGE"
-    _check "vLLM models directory populated" \
-      bash -c '[[ -n "$(ls -A '"$HOST_DIR"'/models_llm 2>/dev/null)" ]]'
+    _check "vLLM models directory populated ($(_vllm_models_host_dir))" _vllm_models_populated
     ;;
 esac
 
@@ -378,7 +472,7 @@ _check "run_qa_pipeline.py exists"   test -f "$HOST_DIR/run_qa_pipeline.py"
 _check "docker-compose.yml"          test -f "$HOST_DIR/docker-compose.yml"
 _check "docker-compose.kubeflow.yml" test -f "$HOST_DIR/docker-compose.kubeflow.yml"
 _check "docker-compose.vllm-stack.yml" test -f "$HOST_DIR/docker-compose.vllm-stack.yml"
-_check "docker-compose.vllm-redserver.yml" test -f "$HOST_DIR/docker-compose.vllm-redserver.yml"
+_check "docker-compose.vllm-siteserver.yml" test -f "$HOST_DIR/docker-compose.vllm-siteserver.yml"
 
 if command -v nvidia-smi >/dev/null 2>&1; then
   _check "NVIDIA GPU available" nvidia-smi

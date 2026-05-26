@@ -1,0 +1,28 @@
+digraph SiteserverVllmChange {
+  rankdir=TB;
+  bgcolor="white";
+  node [shape=box, style="rounded,filled", fillcolor="#f8fafc", color="#334155", fontname="Arial"];
+  edge [color="#475569", fontname="Arial"];
+
+  A [label="Check current state"];
+  B [label="Qwen3.5 vLLM image\nalready on host?", shape=diamond, fillcolor="#eef2ff"];
+  C [label="Reuse existing endpoint/image"];
+  D [label="Build/load qagredo-vllm:\nqwen35-localcuda"];
+  E [label="Update QAGRedo config/env"];
+  F [label="Restart stack"];
+  G [label="Health checks + test run"];
+  H [label="Pass?", shape=diamond, fillcolor="#eef2ff"];
+  I [label="Done", fillcolor="#ecfdf5"];
+  J [label="Rollback to previous image/config", fillcolor="#fef2f2"];
+
+  A -> B;
+  B -> C [label="Yes"];
+  B -> D [label="No"];
+  C -> E;
+  D -> E;
+  E -> F;
+  F -> G;
+  G -> H;
+  H -> I [label="Yes"];
+  H -> J [label="No"];
+}

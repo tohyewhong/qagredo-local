@@ -315,7 +315,14 @@ def _call_vllm_llm(
             system_prompt=system_prompt,
         )
 
+    from utils.openai_helpers import (
+        openai_chat_extra_body,
+        openai_message_text,
+        qwen_no_thinking_system_suffix,
+    )
+
     client = openai.OpenAI(base_url=base_url, api_key=api_key, timeout=timeout)
+    system_prompt = system_prompt + qwen_no_thinking_system_suffix(model)
 
     for attempt in range(max_retries):
         try:
@@ -330,13 +337,14 @@ def _call_vllm_llm(
                 ],
                 temperature=temperature,
                 max_tokens=max_tokens,
+                extra_body=openai_chat_extra_body(model),
             )
-            content = (
-                response.choices[0].message.content
-                if response.choices
-                else None
+            if not response.choices:
+                return ""
+            return openai_message_text(
+                response.choices[0].message,
+                for_question=True,
             )
-            return (content or "").strip()
         except Exception as e:
             if attempt < max_retries - 1:
                 time.sleep(retry_delay * (attempt + 1))
@@ -392,7 +400,7 @@ def _call_ollama_chat_native(
             content = str(msg.get("content", "")).strip()
             if content:
                 return content
-            return str(msg.get("thinking", "")).strip()
+            return ""
         except Exception as e:
             if attempt < max_retries - 1:
                 time.sleep(retry_delay * (attempt + 1))
@@ -414,6 +422,12 @@ def _call_openai_llm(
 ) -> str:
     import openai
 
+    from utils.openai_helpers import (
+        openai_chat_extra_body,
+        openai_message_text,
+        qwen_no_thinking_system_suffix,
+    )
+
     api_key = llm_section.get("api_key")
     if not api_key:
         raise RuntimeError(
@@ -430,6 +444,7 @@ def _call_openai_llm(
     if base_url:
         client_kwargs["base_url"] = base_url
     client = openai.OpenAI(**client_kwargs)
+    system_prompt = system_prompt + qwen_no_thinking_system_suffix(model)
 
     for attempt in range(max_retries):
         try:
@@ -444,13 +459,14 @@ def _call_openai_llm(
                 ],
                 temperature=temperature,
                 max_tokens=max_tokens,
+                extra_body=openai_chat_extra_body(model),
             )
-            content = (
-                response.choices[0].message.content
-                if response.choices
-                else None
+            if not response.choices:
+                return ""
+            return openai_message_text(
+                response.choices[0].message,
+                for_question=True,
             )
-            return (content or "").strip()
         except Exception as e:
             if attempt < max_retries - 1:
                 time.sleep(retry_delay * (attempt + 1))
@@ -638,9 +654,27 @@ def _parse_questions(response: str, num_questions: int = 3) -> List[str]:
 def _parse_questions_with_framework(
     response: str, num_questions: int, config: Dict[str, Any]
 ) -> List[str]:
+    from utils.minimal_text import (
+        _clean_question_candidate,
+        sanitize_llm_question_response,
+    )
+
+    cleaned = sanitize_llm_question_response(
+        response,
+        max_items=num_questions,
+    )
+    if cleaned:
+        return cleaned
     if _use_langchain_features(config):
-        return parse_questions_langchain(response)[:num_questions]
-    return _parse_questions(response, num_questions=num_questions)
+        legacy = parse_questions_langchain(response)[:num_questions]
+    else:
+        legacy = _parse_questions(response, num_questions=num_questions)
+    out: List[str] = []
+    for q in legacy:
+        c = _clean_question_candidate(q)
+        if c and c not in out:
+            out.append(c)
+    return out[:num_questions]
 
 
 def _validate_and_regenerate_question(
@@ -700,9 +734,11 @@ Previous Question (REJECTED):
 Generate a NEW question grounded ONLY in the document. Provide only the question."""  # noqa: E501
 
         regenerated = _call_llm(regeneration_prompt, config).strip()
-        # Keep previous question if regeneration returned empty
         if regenerated:
-            current_question = regenerated
+            from utils.minimal_text import sanitize_llm_question_response
+
+            cleaned = sanitize_llm_question_response(regenerated, max_items=1)
+            current_question = cleaned[0] if cleaned else regenerated
         if current_question and not current_question.endswith("?"):
             current_question += "?"
 
@@ -801,6 +837,15 @@ def _parse_comprehensiveness_result(response: str) -> Dict[str, Any]:
     return result
 
 
+def comprehensiveness_passed(
+    comp_info: Dict[str, Any], min_score: float
+) -> bool:
+    """True when the question passed the comprehensiveness threshold."""
+    return bool(comp_info.get("is_comprehensive")) and float(
+        comp_info.get("score", 0.0)
+    ) >= min_score
+
+
 def _check_question_comprehensiveness(
     question: str,
     document_content: str,
@@ -816,6 +861,7 @@ def _check_question_comprehensiveness(
     comp_info: Dict[str, Any] = {
         "score": 0.0,
         "is_comprehensive": False,
+        "accepted": False,
         "attempts": 0,
         "was_regenerated": False,
         "reason": "",
@@ -857,6 +903,9 @@ Evaluate this question and respond with EXACTLY this JSON format (no other text)
                 "reason"
             ] = "comprehensiveness check failed — keeping question as-is"
             comp_info["score"] = 0.5
+            comp_info["accepted"] = comprehensiveness_passed(
+                comp_info, min_score
+            )
             return current_question, comp_info
 
         comp_info["score"] = parsed["score"]
@@ -864,6 +913,7 @@ Evaluate this question and respond with EXACTLY this JSON format (no other text)
         comp_info["reason"] = parsed["reason"]
 
         if parsed["is_comprehensive"] and parsed["score"] >= min_score:
+            comp_info["accepted"] = True
             return current_question, comp_info
 
         # Regenerate if we still have attempts left
@@ -890,12 +940,21 @@ Provide ONLY the new question, nothing else."""
             try:
                 regenerated = _call_llm(regen_prompt, config).strip()
                 if regenerated:
-                    current_question = regenerated
+                    from utils.minimal_text import sanitize_llm_question_response
+
+                    cleaned = sanitize_llm_question_response(
+                        regenerated,
+                        max_items=1,
+                    )
+                    current_question = (
+                        cleaned[0] if cleaned else regenerated
+                    )
                     if not current_question.endswith("?"):
                         current_question += "?"
             except Exception:
                 pass
 
+    comp_info["accepted"] = comprehensiveness_passed(comp_info, min_score)
     return current_question, comp_info
 
 
@@ -1005,6 +1064,9 @@ def generate_questions(
                 comp_max_attempts = validation_config.get(
                     "comprehensiveness_max_attempts", 2
                 )
+                comp_strict = validation_config.get(
+                    "comprehensiveness_strict", False
+                )
 
                 validated_questions = []
                 for q_idx, question in enumerate(questions, 1):
@@ -1040,9 +1102,34 @@ def generate_questions(
                         )
                         detail["comprehensiveness_check"] = comp_info
 
+                    from utils.minimal_text import _clean_question_candidate
+
+                    cleaned_final = _clean_question_candidate(final_question)
+                    if cleaned_final:
+                        final_question = cleaned_final
                     detail["final_question"] = final_question
-                    validated_questions.append(final_question)
+
+                    rejected = False
+                    if (
+                        comp_strict
+                        and enable_comp_check
+                        and isinstance(detail.get("comprehensiveness_check"), dict)
+                        and not comprehensiveness_passed(
+                            detail["comprehensiveness_check"],
+                            comp_min_score,
+                        )
+                    ):
+                        rejected = True
+                        detail["accepted"] = False
+                        detail["rejection_reason"] = (
+                            "comprehensiveness_check_failed"
+                        )
+                    else:
+                        detail["accepted"] = True
+
                     question_validation_details.append(detail)
+                    if not rejected:
+                        validated_questions.append(final_question)
 
                 questions = validated_questions
 

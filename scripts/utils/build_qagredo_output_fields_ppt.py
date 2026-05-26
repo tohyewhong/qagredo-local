@@ -757,7 +757,7 @@ def _add_is_grounded_methods_slide(prs: Presentation) -> None:
     _slide_heading(
         slide,
         "is_grounded & confidence — by hallucination.method",
-        "config.yaml → hallucination.method; answer gate uses "
+        "config.<profile>.yaml → hallucination.method; answer gate uses "
         "answer_generation.min_confidence_threshold (default 0.7).",
     )
     nmeth = 4

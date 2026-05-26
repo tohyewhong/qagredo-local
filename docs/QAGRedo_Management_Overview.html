@@ -101,6 +101,32 @@ flowchart TB
       </div>
     </section>
     <section>
+      <h2>Runtime profiles</h2>
+      <ul class="simple">
+        <li><strong>ollama</strong> — Ollama on the host; edit
+        <code>config/config.ollama.yaml</code>.</li>
+        <li><strong>kubeflow</strong> — Ollama inside one container; edit
+        <code>config/config.kubeflow.yaml</code>.</li>
+        <li><strong>vllm</strong> — Two GPU services (generator + judge); edit
+        <code>config/config.vllm.yaml</code>.</li>
+      </ul>
+      <p class="hint">
+        Set <code>QAGREDO_PROFILE</code> in <code>.env</code>. The old name
+        <code>dev</code> still works but is deprecated.
+      </p>
+    </section>
+    <section>
+      <h2>Resume a partial run</h2>
+      <p class="hint" style="margin-top:0;">
+        Skip documents that already have <code>*_analysis.json</code> in a prior
+        run folder. Use <code>bash run.sh -- --resume</code> to append to the
+        latest folder, or <code>run.skip_existing_outputs</code> /
+        <code>run.resume</code> in the profile YAML. See
+        <a href="../README.md">README.md</a> and
+        <a href="OFFLINE_SETUP_GUIDE.md">OFFLINE_SETUP_GUIDE.md</a> §8.
+      </p>
+    </section>
+    <section>
       <h2>Deliverable</h2>
       <ul class="simple">
         <li>Timestamped <strong>output folder</strong> with one analysis JSON per

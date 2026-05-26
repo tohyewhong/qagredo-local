@@ -41,6 +41,20 @@
   </div>
 
   <div class="note" style="margin-top: 16px;">
+    <strong>Profiles:</strong> <code>QAGREDO_PROFILE=ollama</code> (host Ollama),
+    <code>kubeflow</code> (in-container Ollama), or <code>vllm</code> (dual GPU).
+    Config files: <code>config/config.ollama.yaml</code>,
+    <code>config.kubeflow.yaml</code>, <code>config.vllm.yaml</code>.
+  </div>
+
+  <div class="note" style="margin-top: 16px;">
+    <strong>Resume partial runs:</strong>
+    <code>bash run.sh -- --resume</code> skips documents that already have
+    <code>*_analysis.json</code> and reuses the latest run folder under
+    <code>output/</code>.
+  </div>
+
+  <div class="note" style="margin-top: 16px;">
     <strong>Offline deployment:</strong> Keep <code>qagredo_bundle.tar.gz</code> and <code>qagredo-v1.tar</code> aligned with <code>requirements.txt</code>. After <code>docker load</code>, run <code>bash verify_offline_deployment.sh</code> in <code>qagredo_host/</code>. Details: <code>docs/OFFLINE_SETUP_GUIDE.md</code>.
   </div>
 </body>

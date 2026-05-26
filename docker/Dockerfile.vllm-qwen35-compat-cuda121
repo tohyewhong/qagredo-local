@@ -1,0 +1,129 @@
+# QAGRedo: Qwen3.5 compatibility on CUDA-12.1-era vLLM base
+#
+# Goal: keep the host driver compatible with CUDA 12.2 by using the older
+# vLLM runtime image (v0.5.3.post1) which ships a CUDA-12.1 PyTorch build.
+# Then, upgrade Transformers inside the image so HF can recognize the
+# checkpoint's model_type `qwen3_5` (requires Transformers 5.4+).
+#
+# Notes:
+# - This does NOT change the CUDA runtime libraries inside the base image.
+# - If vLLM v0.5.3's model executor lacks any Qwen3.5-specific integration,
+#   the server may still fail after Transformers succeeds. We'll validate by
+#   actually starting the OpenAI server in the host experiment.
+#
+# Build example:
+#   docker build -f docker/Dockerfile.vllm-qwen35-compat-cuda121 -t <tag> .
+
+FROM vllm/vllm-openai:v0.5.3.post1
+
+# Optional: use the repo's cert bundle for offline/airgapped HTTPS.
+COPY certbundle/certbundle.crt /etc/ssl/certs/qagredo-certbundle.crt
+ENV SSL_CERT_FILE=/etc/ssl/certs/qagredo-certbundle.crt
+ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/qagredo-certbundle.crt
+ENV CURL_CA_BUNDLE=/etc/ssl/certs/qagredo-certbundle.crt
+
+# Stock vLLM images ship older Transformers that do not recognize model_type
+# `qwen3_5`. Qwen3.5 checkpoints require Transformers 5.4+.
+RUN python3 -m pip install --no-cache-dir --upgrade \
+    # Transformers 5.4.x is the minimum that recognizes checkpoint `model_type=qwen3_5`,
+    # but newer 5.5+ drops `LogitsWarper`, which breaks v0.5.3's guided-decoding deps.
+    # We patch lm-format-enforcer below to be compatible with this.
+    "transformers==5.5.4" \
+    "mistral-common>=1.8.0" \
+    && python3 -c "from mistral_common.protocol.instruct.request import ReasoningEffort"
+
+# Patch lm-format-enforcer's Transformers integration to survive
+# Transformers 5.5 where `LogitsWarper` was removed.
+RUN python3 - <<'PY'
+import os
+import lmformatenforcer
+
+base = os.path.dirname(lmformatenforcer.__file__)
+p = os.path.join(base, "integrations", "transformers.py")
+txt = open(p, "r", encoding="utf-8").read()
+
+needle = "from transformers.generation.logits_process import LogitsWarper, PrefixConstrainedLogitsProcessor"
+replacement = (
+    "from transformers.generation.logits_process import PrefixConstrainedLogitsProcessor\n"
+    "    try:\n"
+    "        from transformers.generation.logits_process import LogitsWarper\n"
+    "    except ImportError:\n"
+    "        # Transformers 5.5+ removed LogitsWarper; LogitsProcessor is compatible.\n"
+    "        from transformers.generation.logits_process import LogitsProcessor as LogitsWarper"
+)
+
+if needle not in txt:
+    raise SystemExit(f"Expected snippet not found in {p}")
+
+txt2 = txt.replace(needle, replacement)
+open(p, "w", encoding="utf-8").write(txt2)
+print("Patched:", p)
+PY
+
+# Transformers 5.5 also moved PreTrainedTokenizerBase.
+RUN python3 - <<'PY'
+import os
+import lmformatenforcer
+
+base = os.path.dirname(lmformatenforcer.__file__)
+p = os.path.join(base, "integrations", "transformers.py")
+txt = open(p, "r", encoding="utf-8").read()
+
+needle = "from transformers.tokenization_utils import PreTrainedTokenizerBase"
+replacement = "from transformers.tokenization_utils_base import PreTrainedTokenizerBase"
+if needle not in txt:
+    raise SystemExit(f"Expected snippet not found in {p}")
+
+txt2 = txt.replace(needle, replacement)
+open(p, "w", encoding="utf-8").write(txt2)
+print("Patched:", p)
+PY
+
+# vLLM v0.5.3 assumes `rope_scaling` always includes a `factor`.
+# Qwen3.5's config shape differs, so we default the factor to 1.0 instead
+# of crashing at startup.
+RUN python3 - <<'PY'
+import vllm.config as cfg
+p = cfg.__file__
+txt = open(p, "r", encoding="utf-8").read()
+
+old = (
+    '            assert "factor" in rope_scaling\n'
+    '            scaling_factor = rope_scaling["factor"]'
+)
+new = '            scaling_factor = rope_scaling.get("factor", 1.0)'
+
+if old not in txt:
+    raise SystemExit(f"Expected snippet not found in {p}")
+
+txt2 = txt.replace(old, new)
+open(p, "w", encoding="utf-8").write(txt2)
+print("Patched:", p)
+PY
+
+# vLLM v0.5.3 expects `tokenizer.all_special_tokens_extended`, which was
+# removed/renamed in newer Transformers. Fall back to `all_special_tokens`.
+RUN python3 - <<'PY'
+import re
+import vllm.transformers_utils.tokenizer as t
+
+p = t.__file__
+txt = open(p, "r", encoding="utf-8").read()
+
+pattern = (
+    r"tokenizer_all_special_tokens_extended\s*=\s*\(\s*"
+    r"tokenizer\.all_special_tokens_extended\s*\)"
+)
+replacement = (
+    'tokenizer_all_special_tokens_extended = getattr('
+    'tokenizer, "all_special_tokens_extended", tokenizer.all_special_tokens)'
+)
+
+txt2, n = re.subn(pattern, replacement, txt, count=1, flags=re.MULTILINE)
+if n != 1:
+    raise SystemExit(f"Expected 1 patch for {p}, got {n}")
+
+open(p, "w", encoding="utf-8").write(txt2)
+print("Patched:", p)
+PY
+

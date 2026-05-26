@@ -12,8 +12,8 @@ set -e
 # We avoid `exec gosu` so an EXIT trap can run the final chown.
 # =============================================================================
 
-TARGET_UID="${HOST_UID:-1000}"
-TARGET_GID="${HOST_GID:-1000}"
+TARGET_UID="${HOST_UID:-1013}"
+TARGET_GID="${HOST_GID:-1015}"
 USERNAME="qagredo"
 
 # Must match folders mounted in docker-compose.yml.

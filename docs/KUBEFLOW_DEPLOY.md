@@ -9,9 +9,9 @@ The other two profiles:
 
 | Profile    | Use when                                              | Compose file                                                      |
 | ---------- | ------------------------------------------------------ | ----------------------------------------------------------------- |
-| `dev`      | Default. Host Ollama + runner container.               | `docker-compose.yml`                                              |
+| `ollama`   | Default. Host Ollama + runner container.               | `docker-compose.yml`                                              |
 | `kubeflow` | Kubeflow (or any single-image constraint). This guide.| `docker-compose.kubeflow.yml` + `Dockerfile.kubeflow`             |
-| `vllm`     | Dual vLLM GPU services (generator + judge).            | `docker-compose.vllm-stack.yml` (+ optional `docker-compose.vllm-redserver.yml`) |
+| `vllm`     | Dual vLLM GPU services (generator + judge).            | `docker-compose.vllm-stack.yml` (+ optional `docker-compose.vllm-siteserver.yml`) |
 
 See **`docs/HANDOVER.md`** for how profiles are selected (`QAGREDO_PROFILE` in `.env`).
 
@@ -34,7 +34,7 @@ See **`docs/HANDOVER.md`** for how profiles are selected (`QAGREDO_PROFILE` in `
                                       ▼
                host path set via QAGREDO_MODELS_DIR
                e.g. /home/jovyan/models        (Kubeflow)
-                    /home/tyewhong/qagredo/models (dev)
+                    /home/tyewhong/qagredo/models (ollama / kubeflow)
 ```
 
 Why this layout:
@@ -105,10 +105,11 @@ QAGREDO_PROFILE=kubeflow bash run.sh
 
 What happens:
 
-1. `run.sh` picks `docker-compose.kubeflow.yml` and builds `qagredo-kubeflow:latest` (the first time).
-2. Compose starts one container with 2 GPUs (override `QAGREDO_GPU_COUNT`).
+1. `run.sh` picks `docker-compose.kubeflow.yml` and reuses `qagredo-kubeflow:latest` (no default rebuild).
+2. Compose keeps one warm container up with 2 GPUs (override `QAGREDO_GPU_COUNT`).
 3. The entrypoint runs `ollama serve` in the background against `/opt/ollama/models`.
-4. The pipeline starts; generator + judge both hit `http://127.0.0.1:11434/v1`.
+4. Each `bash run.sh` executes the pipeline inside the same warm container; generator + judge both hit `http://127.0.0.1:11434/v1`.
+5. `bash run.sh --down` stops the container and releases GPU memory.
 
 Override model tags:
 
@@ -208,8 +209,8 @@ No image push, no CI round-trip.
 
 ## 6. When to use each profile
 
-- **Use `dev`** locally, when you already run `ollama serve` on your machine.
+- **Use `ollama`** locally, when you already run `ollama serve` on your machine.
 - **Use `kubeflow`** in any environment that accepts a single image (Kubeflow, Argo, SLURM container, etc.) and/or requires air-gapped execution.
-- **Use `vllm`** when you need maximum single-GPU throughput with a stable vLLM image (v0.5.3.post1) and your host CUDA allows it.
+- **Use `vllm`** when you need maximum throughput on dedicated GPUs with HuggingFace weights. Default stack: **Qwen3.5-9B** generator + **Llama 3.1** judge on `qagredo-vllm:qwen35-localcuda` (see `docs/Siteserver_vLLM_Change_Guide.md`). Legacy Qwen2.5 + `v0.5.3.post1` remains supported for older CUDA hosts.
 
-Each profile uses its own config file (`config/config.dev.yaml`, `config/config.kubeflow.yaml`, `config/config.vllm.yaml`). Strict LLM-as-judge remains the default hallucination checker regardless of profile.
+Each profile uses its own config file (`config/config.ollama.yaml`, `config/config.kubeflow.yaml`, `config/config.vllm.yaml`). Strict LLM-as-judge remains the default hallucination checker regardless of profile.

@@ -75,6 +75,114 @@ def get_run_folder_segment() -> str:
     return get_run_timestamp()
 
 
+def normalize_provider_model_segments(provider: str, model: str) -> tuple[str, str]:
+    """Filesystem segments under output/<provider>/<model>/."""
+    prov = provider.lower().replace(" ", "-").replace("_", "-")
+    mdl = model.lower().replace("/", "-").replace(" ", "-").replace("_", "-")
+    return prov, mdl
+
+
+def default_output_base_dir() -> Path:
+    return Path(__file__).parent.parent / "output"
+
+
+def get_provider_model_dir(
+    provider: str,
+    model: str,
+    base_dir: Optional[Path] = None,
+) -> Path:
+    if base_dir is None:
+        base_dir = default_output_base_dir()
+    else:
+        base_dir = Path(base_dir)
+    prov, mdl = normalize_provider_model_segments(provider, model)
+    return base_dir / prov / mdl
+
+
+def list_run_directories(
+    provider: str,
+    model: str,
+    base_dir: Optional[Path] = None,
+) -> list[Path]:
+    """Run folders under output/<provider>/<model>/ (sorted by name)."""
+    root = get_provider_model_dir(provider, model, base_dir)
+    if not root.is_dir():
+        return []
+    return sorted(
+        (p for p in root.iterdir() if p.is_dir()),
+        key=lambda p: p.name,
+    )
+
+
+def find_latest_run_directory(
+    provider: str,
+    model: str,
+    base_dir: Optional[Path] = None,
+) -> Optional[Path]:
+    dirs = list_run_directories(provider, model, base_dir)
+    if not dirs:
+        return None
+    return dirs[-1]
+
+
+def resolve_resume_run_directory(
+    provider: str,
+    model: str,
+    resume_run_dir: Optional[str] = None,
+    base_dir: Optional[Path] = None,
+) -> Optional[Path]:
+    """
+    Resolve an existing run directory for resume / skip checks.
+
+    ``resume_run_dir`` may be:
+    - empty / ``latest`` / ``last`` → newest folder under provider/model
+    - a run folder segment name (e.g. ``2026-05-26_093000``)
+    - a filesystem path to an existing run directory
+    """
+    raw = str(resume_run_dir or "").strip()
+    if raw.lower() in ("", "latest", "last"):
+        return find_latest_run_directory(provider, model, base_dir)
+
+    candidate = Path(raw)
+    if candidate.is_dir():
+        return candidate.resolve()
+
+    if not candidate.is_absolute():
+        rel = (Path.cwd() / candidate).resolve()
+        if rel.is_dir():
+            return rel
+
+    pm = get_provider_model_dir(provider, model, base_dir)
+    seg = _safe_output_filename_stem(raw)
+    under = pm / seg
+    if under.is_dir():
+        return under
+    return None
+
+
+def analysis_json_path(run_dir: Path, output_stem: str) -> Path:
+    """Path to per-document analysis JSON inside a run folder."""
+    stem = _safe_output_filename_stem(output_stem)
+    return Path(run_dir) / f"{stem}.json"
+
+
+def analysis_output_exists(run_dir: Path, output_stem: str) -> bool:
+    """True if this document's analysis file already exists in ``run_dir``."""
+    run_dir = Path(run_dir)
+    exact = analysis_json_path(run_dir, output_stem)
+    if exact.is_file():
+        return True
+    stem = _safe_output_filename_stem(output_stem)
+    doc_base = stem
+    if doc_base.endswith("_analysis"):
+        doc_base = doc_base[: -len("_analysis")]
+    doc_base = _safe_output_filename_stem(doc_base)
+    for path in run_dir.glob(f"{doc_base}*_analysis.json"):
+        if path.is_file():
+            return True
+    return False
+
+
 def get_output_path(
     provider: str,
     model: str,

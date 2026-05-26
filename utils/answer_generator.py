@@ -137,7 +137,12 @@ Previous Answer (REJECTED):
 {current_answer}
 
 Generate a NEW answer using ONLY the document. Provide only the answer."""
-        current_answer = _call_llm(regeneration_prompt, config)
+        raw = _call_llm(regeneration_prompt, config)
+        from utils.minimal_text import sanitize_llm_answer_response
+
+        current_answer, _ = sanitize_llm_answer_response(raw)
+        if not current_answer.strip():
+            current_answer = raw.strip()
 
         check_result = check_hallucination(
             answer=current_answer,
@@ -317,7 +322,9 @@ Answer: [revised answer]
 Supporting evidence: [quotes from the document supporting the revised answer]"""  # noqa: E501
 
     revised_raw = _call_llm(prompt, config)
-    return _parse_structured_answer(revised_raw)
+    from utils.minimal_text import sanitize_llm_answer_response
+
+    return sanitize_llm_answer_response(revised_raw)
 
 
 def _call_llm(prompt: str, config: Dict[str, Any]) -> str:
@@ -365,7 +372,17 @@ def _call_vllm_llm(
             system_prompt="Answer using ONLY the given document.",
         )
 
+    from utils.openai_helpers import (
+        openai_chat_extra_body,
+        openai_message_text,
+        qwen_no_thinking_system_suffix,
+    )
+
     client = openai.OpenAI(base_url=base_url, api_key=api_key, timeout=timeout)
+    system = (
+        "Answer using ONLY the given document."
+        + qwen_no_thinking_system_suffix(model)
+    )
 
     for attempt in range(max_retries):
         try:
@@ -374,19 +391,20 @@ def _call_vllm_llm(
                 messages=[
                     {
                         "role": "system",
-                        "content": "Answer using ONLY the given document.",
+                        "content": system,
                     },
                     {"role": "user", "content": prompt},
                 ],
                 temperature=temperature,
                 max_tokens=max_tokens,
+                extra_body=openai_chat_extra_body(model),
             )
-            content = (
-                response.choices[0].message.content
-                if response.choices
-                else None
+            if not response.choices:
+                return ""
+            return openai_message_text(
+                response.choices[0].message,
+                for_question=False,
             )
-            return (content or "").strip()
         except Exception as e:
             if attempt < max_retries - 1:
                 time.sleep(retry_delay * (attempt + 1))
@@ -438,7 +456,7 @@ def _call_ollama_chat_native(
             content = str(msg.get("content", "")).strip()
             if content:
                 return content
-            return str(msg.get("thinking", "")).strip()
+            return ""
         except Exception as e:
             if attempt < max_retries - 1:
                 time.sleep(retry_delay * (attempt + 1))
@@ -453,6 +471,12 @@ def _call_openai_llm(
     prompt: str, config: Dict[str, Any], max_retries: int, retry_delay: float
 ) -> str:
     import openai
+
+    from utils.openai_helpers import (
+        openai_chat_extra_body,
+        openai_message_text,
+        qwen_no_thinking_system_suffix,
+    )
 
     api_key = config["llm"].get("api_key")
     if not api_key:
@@ -473,18 +497,26 @@ def _call_openai_llm(
 
     for attempt in range(max_retries):
         try:
+            system = (
+                "Answer using ONLY the given document."
+                + qwen_no_thinking_system_suffix(model)
+            )
             response = client.chat.completions.create(
                 model=model,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt},
+                ],
                 temperature=temperature,
                 max_tokens=max_tokens,
+                extra_body=openai_chat_extra_body(model),
             )
-            content = (
-                response.choices[0].message.content
-                if response.choices
-                else None
+            if not response.choices:
+                return ""
+            return openai_message_text(
+                response.choices[0].message,
+                for_question=False,
             )
-            return (content or "").strip()
         except Exception as e:
             if attempt < max_retries - 1:
                 time.sleep(retry_delay * (attempt + 1))
@@ -542,9 +574,11 @@ def generate_answers(
             prompt = _create_answer_prompt(question, document_content, config)
             raw_answer = _call_llm(prompt, config)
 
-            # Parse structured response: separate answer from supporting
-            # evidence
-            answer, evidence = _parse_structured_answer(raw_answer)
+            from utils.minimal_text import sanitize_llm_answer_response
+
+            answer, evidence = sanitize_llm_answer_response(raw_answer)
+            if not answer.strip():
+                answer = "Insufficient information in the document."
 
             answer_cfg = config.get("answer_generation", {}).get(
                 "multi_turn", {}

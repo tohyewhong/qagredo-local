@@ -13,33 +13,33 @@ set -euo pipefail
 #   * run.sh                                      (main launcher)
 #   * run_qa_pipeline.py, requirements.txt         (pipeline entry)
 #   * utils/, scripts/                             (Python + helper scripts)
-#   * config/config.dev.yaml                       (profile YAML)
+#   * config/config.ollama.yaml                    (profile YAML)
 #   * config/config.kubeflow.yaml                  (profile YAML)
 #   * config/config.vllm.yaml                      (profile YAML)
 #   * config/config.yaml                           (legacy default — kept)
-#   * docker-compose.yml                           (dev profile)
+#   * docker-compose.yml                           (ollama profile)
 #   * docker-compose.kubeflow.yml                  (kubeflow profile)
 #   * docker-compose.vllm-stack.yml                (vllm profile)
-#   * docker-compose.vllm-redserver.yml            (optional 4-GPU override)
+#   * docker-compose.vllm-siteserver.yml            (optional 4-GPU override)
 #   * Dockerfile, Dockerfile.kubeflow              (for rebuilds on-site)
-#   * docs/ (includes HANDOVER.md), README.md, OFFLINE_GUIDE.md, .env.example
+#   * docs/ (includes HANDOVER.md), README.md, OFFLINE_GUIDE.md, .env
 #   * scripts/offline/setup_offline.sh + run.sh + verify + dotenv.template
 #
 # NOT in the bundle (ship as separate tars — see make_offline_tarballs.sh):
-#   * qagredo-v1.tar                 Docker image for dev profile
+#   * qagredo-v1.tar                 Docker image for ollama profile
 #   * qagredo-kubeflow.tar           Docker image for kubeflow profile
 #   * models_ollama.tar.gz           Ollama GGUF store (dev / kubeflow)
 #   * models_vllm.tar.gz             HuggingFace model dirs (vllm profile)
-#   * vllm-openai_*.rootfs.tar       vLLM runtime image (vllm profile)
+#   * vllm-qwen35-localcuda.rootfs.tar  vLLM runtime image (vllm profile; Qwen3.5)
 #
 # Usage:
 #   cd /path/to/qagredo
 #   bash scripts/make_qagredo_bundle.sh
 #   bash scripts/make_qagredo_bundle.sh --include-data    # also bundle data/
 #
-# Output:
-#   ./qagredo_bundle.tar.gz          (extracts to qagredo_host/)
-#   ./qagredo_bundle.tar.gz.sha256
+# Output (default /data/tyewhong/qagredo/ — override with QAGREDO_ARCHIVE_DIR):
+#   qagredo_bundle.tar.gz          (extracts to qagredo_host/)
+#   qagredo_bundle.tar.gz.sha256
 # ============================================================================
 
 INCLUDE_HOST_DATA=0
@@ -63,9 +63,10 @@ USAGE
 done
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ARCHIVE_DIR="${QAGREDO_ARCHIVE_DIR:-/data/tyewhong/qagredo}"
 BUNDLE_NAME="qagredo_host"
 STAGING_DIR="${REPO_DIR}/.bundle_staging_${BUNDLE_NAME}"
-OUTPUT_TGZ="${REPO_DIR}/qagredo_bundle.tar.gz"
+OUTPUT_TGZ="${ARCHIVE_DIR}/qagredo_bundle.tar.gz"
 OUTPUT_SHA="${OUTPUT_TGZ}.sha256"
 
 die()  { echo "[ERROR] $*" >&2; exit 1; }
@@ -95,22 +96,23 @@ main() {
   [[ -f "$REPO_DIR/docker-compose.yml" ]] || die "Missing: $REPO_DIR/docker-compose.yml"
   [[ -f "$REPO_DIR/docker-compose.kubeflow.yml" ]] || die "Missing: $REPO_DIR/docker-compose.kubeflow.yml"
   [[ -f "$REPO_DIR/docker-compose.vllm-stack.yml" ]] || die "Missing: $REPO_DIR/docker-compose.vllm-stack.yml"
-  [[ -f "$REPO_DIR/docker-compose.vllm-redserver.yml" ]] || die "Missing: $REPO_DIR/docker-compose.vllm-redserver.yml"
-  [[ -f "$REPO_DIR/config/config.dev.yaml" ]] || die "Missing: config/config.dev.yaml"
+  [[ -f "$REPO_DIR/docker-compose.vllm-siteserver.yml" ]] || die "Missing: $REPO_DIR/docker-compose.vllm-siteserver.yml"
+  [[ -f "$REPO_DIR/config/config.ollama.yaml" ]] || die "Missing: config/config.ollama.yaml"
   [[ -f "$REPO_DIR/config/config.kubeflow.yaml" ]] || die "Missing: config/config.kubeflow.yaml"
   [[ -f "$REPO_DIR/config/config.vllm.yaml" ]] || die "Missing: config/config.vllm.yaml"
 
   info "Repo dir : $REPO_DIR"
   info "Output   : $OUTPUT_TGZ"
+  mkdir -p "$ARCHIVE_DIR"
 
   rm -rf "$STAGING_DIR"
   mkdir -p "$STAGING_DIR"
 
-  info "Copying launcher (run.sh, .env.example) ..."
+  info "Copying launcher (run.sh, .env) ..."
   cp "$REPO_DIR/run.sh" "$STAGING_DIR/run.sh"
   chmod +x "$STAGING_DIR/run.sh"
   if [[ -f "$REPO_DIR/.env" ]]; then
-    cp "$REPO_DIR/.env" "$STAGING_DIR/.env.example"
+    cp "$REPO_DIR/.env" "$STAGING_DIR/.env"
   fi
 
   info "Copying offline helper scripts ..."
@@ -124,7 +126,7 @@ main() {
   _strip_build_block < "$REPO_DIR/docker-compose.yml" > "$STAGING_DIR/docker-compose.yml"
   _strip_build_block < "$REPO_DIR/docker-compose.kubeflow.yml" > "$STAGING_DIR/docker-compose.kubeflow.yml"
   _strip_build_block < "$REPO_DIR/docker-compose.vllm-stack.yml" > "$STAGING_DIR/docker-compose.vllm-stack.yml"
-  _strip_build_block < "$REPO_DIR/docker-compose.vllm-redserver.yml" > "$STAGING_DIR/docker-compose.vllm-redserver.yml"
+  _strip_build_block < "$REPO_DIR/docker-compose.vllm-siteserver.yml" > "$STAGING_DIR/docker-compose.vllm-siteserver.yml"
 
   info "Copying Dockerfiles (for on-site rebuilds if ever needed) ..."
   cp "$REPO_DIR/Dockerfile" "$STAGING_DIR/Dockerfile"
@@ -146,7 +148,7 @@ main() {
 
   info "Copying profile configs ..."
   mkdir -p "$STAGING_DIR/config"
-  cp "$REPO_DIR/config/config.dev.yaml"      "$STAGING_DIR/config/"
+  cp "$REPO_DIR/config/config.ollama.yaml"   "$STAGING_DIR/config/"
   cp "$REPO_DIR/config/config.kubeflow.yaml" "$STAGING_DIR/config/"
   cp "$REPO_DIR/config/config.vllm.yaml"     "$STAGING_DIR/config/"
   if [[ -f "$REPO_DIR/config/config.yaml" ]]; then

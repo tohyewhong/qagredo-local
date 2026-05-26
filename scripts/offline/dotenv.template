@@ -13,7 +13,7 @@
 #
 #  Everything else (models, temperatures, number of questions, etc.) lives
 #  in the profile YAML:
-#        config/config.dev.yaml        (when profile = dev)
+#        config/config.ollama.yaml     (when profile = ollama)
 #        config/config.kubeflow.yaml   (when profile = kubeflow)
 #        config/config.vllm.yaml       (when profile = vllm)
 # =============================================================================
@@ -23,7 +23,7 @@
 # [1] PROFILE   —   CHANGE ME
 # -----------------------------------------------------------------------------
 #  Pick ONE of:
-#     dev       → Ollama already running on this machine      (simplest)
+#     ollama    → Ollama already running on this machine      (simplest)
 #     kubeflow  → One container that runs Ollama inside it    (for Kubeflow)
 #     vllm      → Two separate vLLM GPU containers            (advanced)
 #
@@ -85,35 +85,41 @@ QAGREDO_MODELS_DIR=@QAGREDO_HOST_DIR@/models
 #      (e.g. Meta-Llama-3.1-8B-Instruct/, Qwen3-8B/).
 #      Mounted as /models inside the vLLM containers.
 #
-QAGREDO_MODELS_LLM_HOST=@QAGREDO_HOST_DIR@/models_llm
+QAGREDO_MODELS_LLM_HOST=@QAGREDO_MODELS_LLM_HOST@
+
+# Large .tar / .tar.gz build artifacts (setup_offline.sh searches here first)
+QAGREDO_ARCHIVE_DIR=/data/tyewhong/qagredo
 
 
 # -----------------------------------------------------------------------------
 # [5] FILE OWNERSHIP   —   LEAVE ALONE unless you know why
 # -----------------------------------------------------------------------------
+#  Offline siteserver default: HOST_UID=1013  HOST_GID=1015
+#  (setup_offline.sh fills @HOST_UID@ / @HOST_GID@ from id -u / id -g)
 HOST_UID=@HOST_UID@
 HOST_GID=@HOST_GID@
 
 
 # =============================================================================
 #  Everything below is OPTIONAL and applies only to profile=vllm.
-#  Ignored for dev/kubeflow (those use Ollama tags from config.*.yaml).
+#  Ignored for ollama/kubeflow (those use Ollama tags from config.*.yaml).
 # =============================================================================
 
-# ---- vLLM container image ----
-# VLLM_IMAGE=vllm/vllm-openai:v0.5.3.post1
+# ---- vLLM container image (Qwen3.5 needs qwen35 build, not v0.5.3.post1) ----
+# Build: bash scripts/docker_build_vllm_qwen35_compat.sh
+VLLM_IMAGE=qagredo-vllm:qwen35-localcuda
 
-# ---- Generator (vLLM) ----
-VLLM_MODEL=/models/Meta-Llama-3.1-8B-Instruct
-VLLM_SERVED_MODEL_NAME=meta-llama/Meta-Llama-3.1-8B-Instruct
+# ---- Generator (vLLM) — Qwen3.5 on GPU 0, port 7100 ----
+VLLM_MODEL=/models/Qwen3.5-9B
+VLLM_SERVED_MODEL_NAME=Qwen/Qwen3.5-9B
 VLLM_TP_SIZE=1
 VLLM_MAX_MODEL_LEN=8192
 VLLM_GPU_UTIL=0.90
 VLLM_API_KEY=llama-local
 
-# ---- Judge (vLLM) ----
-VLLM_JUDGE_MODEL=/models/Qwen2.5-7B-Instruct
-VLLM_JUDGE_SERVED_NAME=Qwen/Qwen2.5-7B-Instruct
+# ---- Judge (vLLM) — Llama 3.1 on GPU 1, port 7101 ----
+VLLM_JUDGE_MODEL=/models/Meta-Llama-3.1-8B-Instruct
+VLLM_JUDGE_SERVED_NAME=meta-llama/Meta-Llama-3.1-8B-Instruct
 VLLM_JUDGE_TP_SIZE=1
 VLLM_JUDGE_MAX_MODEL_LEN=8192
 VLLM_JUDGE_GPU_UTIL=0.90

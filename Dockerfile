@@ -14,8 +14,8 @@ USER root
 
 # Synchronize container runtime user/group with host (so mounted folders are writable).
 # docker-compose.yml passes these build args.
-ARG UID=10005
-ARG GID=10006
+ARG UID=1013
+ARG GID=1015
 ARG USERNAME=qagredo
 
 RUN apt-get update && apt-get install -y --no-install-recommends \

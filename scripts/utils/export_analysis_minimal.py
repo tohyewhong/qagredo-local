@@ -3,7 +3,8 @@
 
 Reads files like ``.../foo_0001_analysis.json`` and writes
 ``.../foo_0001_analysis_minimal.json`` with only ``document.content`` and
-``qa_pairs`` rows ``{question, answer}``, matching ``run.minimal_qa_output``.
+``qa_pairs`` rows ``{question, answer}`` (reasoning/thinking stripped from Q/A
+text), matching ``run.minimal_qa_output``.
 
 Example::
 

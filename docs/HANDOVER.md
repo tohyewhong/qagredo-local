@@ -1,6 +1,6 @@
 # QAGRedo — Maintainer handover
 
-This document is the **single onboarding index** for a new owner: what the system is, where to change behavior, and which other files to read. Keep it updated when architecture or entrypoints change.
+This document is the maintainer cheat sheet: what the system does, where to change behavior, and what to verify before release. Keep it updated when architecture or entrypoints change.
 
 ## What this system does
 
@@ -30,22 +30,23 @@ Failure path: if the judge is unreachable or returns invalid output where requir
 
 ---
 
-## Documentation map
+## First read order
 
-Read in this order for day-one orientation:
+For day-one orientation, read in this order:
 
 | Order | Document | Purpose |
 |-------|----------|---------|
-| 1 | `docs/README.md` | Documentation hub: what to read by role. |
+| 1 | `docs/README.md` | Docs hub by role. |
 | 2 | `README.md` | Quick start, profiles, tarball commands. |
-| 3 | `docs/SERVER_MODEL_PROFILES.md` | Which profile fits greenserver / Opserver / redserver. |
-| 4 | `docs/OFFLINE_SETUP_GUIDE.md` | Offline host runbook and step-by-step configure guide. |
-| 5 | `docs/ONLINE_SETUP_GUIDE.md` | Build machine: bundles, checksums, archive layout. |
-| 6 | `docs/ALGORITHM_REPORT.md` | Algorithm and design rationale (deep). |
-| 7 | `docs/architecture/NETWORK_DIAGRAM.md` | Host/container URLs and ports. |
-| 8 | `docs/KUBEFLOW_DEPLOY.md` | `kubeflow` profile only (in-container Ollama). |
+| 3 | `docs/SERVER_MODEL_PROFILES.md` | Server-to-profile mapping. |
+| 4 | `docs/OFFLINE_SETUP_GUIDE.md` | Offline host setup and operations. |
+| 5 | `docs/ONLINE_SETUP_GUIDE.md` | Build machine and archive workflow. |
+| 5b | `docs/Siteserver_vLLM_Change_Guide.md` | vLLM / Qwen3.5 on siteserver (when `QAGREDO_PROFILE=vllm`). |
+| 6 | `docs/architecture/NETWORK_DIAGRAM.md` | Host/container URLs and ports. |
+| 7 | `docs/ALGORITHM_REPORT.md` | Pipeline algorithm and design rationale. |
+| 8 | `docs/KUBEFLOW_DEPLOY.md` | `kubeflow` profile only. |
 
-Stakeholder-friendly HTML (optional): `docs/QAGRedo_Management_Overview.html`, `docs/QAGRedo_Pipeline_Flowchart_Drawn.html`, `docs/architecture/diagrams/QAGRedo_Sequence_Final_7step_VIEW_IN_BROWSER.html`.
+Visual overview docs: `docs/QAGRedo_Management_Overview.html` (profiles + resume), `docs/QAGRedo_Pipeline_Flowchart_Drawn.html`, `docs/architecture/diagrams/QAGRedo_Sequence_Final_7step_VIEW_IN_BROWSER.html`. Regenerate PPTX from `scripts/utils/build_*.py` after editing those scripts.
 
 ---
 
@@ -55,15 +56,15 @@ Selection is **profile-based** (`QAGREDO_PROFILE` in `.env`). Do not use legacy 
 
 | Profile | Compose | LLM backend |
 |---------|---------|-------------|
-| `dev` | `docker-compose.yml` | **Host Ollama** — `ollama` must exist on the host. |
-| `kubeflow` | `docker-compose.kubeflow.yml` | **In-container Ollama** — image `qagredo-kubeflow`; models on disk via `QAGREDO_MODELS_DIR`. |
-| `vllm` | `docker-compose.vllm-stack.yml` (+ optional `docker-compose.vllm-redserver.yml`) | **Two vLLM services** — generator and judge; HF weights under `QAGREDO_MODELS_LLM_HOST`. |
+| `ollama` | `docker-compose.yml` | **Host Ollama** — `ollama` must exist on the host. (`dev` is a deprecated alias.) |
+| `kubeflow` | `docker-compose.kubeflow.yml` | **In-container Ollama** — image `qagredo-kubeflow`; models on disk via `QAGREDO_MODELS_DIR`; `run.sh` reuses loaded image and keeps a warm container until `run.sh --down`. |
+| `vllm` | `docker-compose.vllm-stack.yml` (+ optional `docker-compose.vllm-siteserver.yml`) | **Two vLLM services** — generator (GPU 0, :7100) and judge (GPU 1, :7101); same `VLLM_IMAGE` tag on both. Run via **`--vllm-up`** + **`--pipeline-only`** or one-shot **`bash run.sh`**. |
 
-Match **Ollama store** (`blobs/`, `manifests/`) to `dev`/`kubeflow`; match **HF directories** to `vllm`. Formats are not interchangeable.
+Match **Ollama store** (`blobs/`, `manifests/`) to `ollama`/`kubeflow`; match **HF directories** to `vllm`. Formats are not interchangeable.
 
 ---
 
-## Where to change behavior
+## Change points
 
 | Concern | Primary location |
 |---------|------------------|
@@ -71,13 +72,13 @@ Match **Ollama store** (`blobs/`, `manifests/`) to `dev`/`kubeflow`; match **HF 
 | Model tags, question counts, YAML tuning | `config/config.<profile>.yaml` |
 | Generator vs judge **env overrides** (optional) | `.env` — `OLLAMA_*`, `OLLAMA_JUDGE_*`, `VLLM_*`, `VLLM_JUDGE_*`, etc. (see `utils/config_manager.py`) |
 | vLLM GPU mapping (2-GPU default) | `docker-compose.vllm-stack.yml` |
-| 4-GPU split (redserver) | `QAGREDO_VLLM_COMPOSE_EXTRA=docker-compose.vllm-redserver.yml` + `.env` TP sizes |
+| 4-GPU split (siteserver) | `QAGREDO_VLLM_COMPOSE_EXTRA=docker-compose.vllm-siteserver.yml` + `.env` TP sizes |
 
 Daily runs should **not** rely on `config/config.yaml` alone — use the profile files above.
 
 ---
 
-## Code map (Python)
+## Code map
 
 | Area | Path | Notes |
 |------|------|------|
@@ -87,47 +88,50 @@ Daily runs should **not** rely on `config/config.yaml` alone — use the profile
 | Answers | `utils/answer_generator.py` | Structured answers, retries. |
 | Judge | `utils/hallucination_checker.py` | Routes by `judge.provider` (Ollama native vs OpenAI-compatible). |
 | Ollama detection | `utils/ollama_urls.py` | URL helpers. |
-| Host entry | `run.sh` | Profile selection, compose, ownership guard for `HOST_UID`/`HOST_GID`. |
+| Host entry | `run.sh` | Profile launcher; shortcuts `--down`, `--status`, `--logs`, `--show-config`, `--minimise`, `--resume` / `--skip-existing-outputs`; **vllm-only:** `--vllm-up generator\|judge\|all`, `--pipeline-only` (see **`Siteserver_vLLM_Change_Guide.md`** Part D). |
 
-Tests: `tests/` — e.g. `tests/test_backend_selection.py` for provider routing.
+Tests live in `tests/`; `tests/test_backend_selection.py` covers provider routing.
 
 ---
 
-## Docker images and offline artifacts
+## Offline artifacts
 
 | Artifact | Role |
 |----------|------|
 | `qagredo_bundle.tar.gz` | Code + compose + configs into `qagredo_host/` (from `scripts/make_qagredo_bundle.sh`). |
-| `qagredo-v1.tar` | Default runner image for `dev` / `vllm`. |
+| `qagredo-v1.tar` | Default runner image for `ollama` / `vllm`. |
 | `qagredo-kubeflow.tar` | All-in-one image for `kubeflow`. |
 | `models_ollama*.tar.gz` | Ollama model store. |
 | `models_vllm.tar.gz` | HF trees for vLLM. |
+| `vllm-qwen35-localcuda.rootfs.tar` | Qwen3.5-compatible vLLM image (`VLLM_IMAGE=qagredo-vllm:qwen35-localcuda`). |
 
-Build: `bash scripts/make_offline_tarballs.sh --all` (outputs default under `offline_out/`; large archives often staged under `/data/tyewhong/qagredo/` per project convention).
+Build with `bash scripts/make_offline_tarballs.sh --all` (default output: `/data/tyewhong/qagredo/`; set `QAGREDO_ARCHIVE_DIR` / `QAGREDO_OFFLINE_OUT` to override).
 
 ---
 
-## Diagrams (sources of truth)
+## Diagram sources
 
 | Format | Location |
 |--------|----------|
-| Graphviz | `docs/*.dot`, `docs/architecture/diagrams/*.dot` |
+| Graphviz | `docs/*.dot`, `docs/architecture/diagrams/*.dot` (e.g. `docs/siteserver_vllm_change_flow.dot` → `siteserver_vllm_change_flow.png`) |
 | PlantUML | `docs/architecture/diagrams/QAGRedo_Pipeline_Flowchart.puml` |
-| Regenerate PNG | Example: `dot -Tpng docs/architecture/diagrams/network_docker_compose_ollama.dot -o docs/architecture/diagrams/network_docker_compose_ollama.png` |
+| Regenerate PNG | `dot -Tpng docs/architecture/diagrams/network_docker_compose_ollama.dot -o docs/architecture/diagrams/network_docker_compose_ollama.png` |
 
-Raster assets live next to sources (e.g. `docs/qagredo_input_prep_explained_16x9.png`). Prefer updating **source** then re-exporting PNG.
+Raster assets live next to sources (for example `docs/qagredo_input_prep_explained_16x9.png`). Prefer updating the source first, then re-exporting PNG.
 
 ---
 
-## Regression checks before release
+## Release checks
 
 ```bash
 bash run.sh --status
+bash run.sh --minimise
+bash run.sh -- --resume   # after a partial run: skip docs with *_analysis.json
 python3 -m unittest discover -s tests -p 'test_*.py'
 ```
 
 ---
 
-## Contact points for updates
+## Update rules
 
-When adding a feature, update **this file** if documentation hierarchy changes, and touch **`README.md`** if user-facing quick start changes. Keep **`docs/SERVER_MODEL_PROFILES.md`** aligned with real hardware assumptions.
+When adding a feature, update this file if maintainer navigation changes, and update `README.md` if user-facing quick start changes. Keep `docs/SERVER_MODEL_PROFILES.md` aligned with real hardware assumptions.

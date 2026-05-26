@@ -1,15 +1,24 @@
 ---
-description: Store transferable tar archives in /data path
+description: Store all .tar and .tar.gz archives under /data/tyewhong/qagredo
 alwaysApply: true
 ---
 
 # Archive Output Location
 
-- Place all generated or moved archive artifacts in `/data/tyewhong/qagredo/`.
-- This applies to:
-  - `*.tar`
-  - `*.tar.gz`
-  - `*.tar.gz.sha256`
-- Do not keep these archive artifacts in `/home/tyewhong/qagredo/` after creation.
-- When providing commands, default output paths should target `/data/tyewhong/qagredo/`.
-- When the same archive filename exists in both locations, replace the `/data/tyewhong/qagredo/` copy only if the source in `/home/tyewhong/qagredo/offline_out/` is newer.
+All QAGRedo **`.tar`** and **`.tar.gz`** artifacts (and their **`.sha256`** sidecars) belong in:
+
+**`/data/tyewhong/qagredo/`**
+
+## Scripts (defaults)
+
+- `scripts/make_qagredo_bundle.sh` → `QAGREDO_ARCHIVE_DIR` (default above)
+- `scripts/make_offline_tarballs.sh` → `QAGREDO_OFFLINE_OUT` (defaults to same dir)
+- `scripts/save_vllm_qwen35_image.sh` → `OUT_DIR` / `QAGREDO_ARCHIVE_DIR`
+
+Set in `.env`: `QAGREDO_ARCHIVE_DIR=/data/tyewhong/qagredo`
+
+## Agent behavior
+
+- Never leave `.tar` / `.tar.gz` in `/home/tyewhong/qagredo/` or `offline_out/` after building; move or write directly to `/data/tyewhong/qagredo/`.
+- When giving manual `docker save` or `tar czf` commands, use `/data/tyewhong/qagredo/` as the output directory.
+- `.zip` archives are not covered by this rule (may live next to datasets, e.g. pathfinder).

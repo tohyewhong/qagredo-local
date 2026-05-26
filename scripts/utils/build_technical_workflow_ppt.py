@@ -1206,7 +1206,7 @@ def build():
     add_title_box(
         s,
         "15. Configuration Knobs That Matter",
-        "Operational tuning from config/config.yaml",
+        "Operational tuning from config/config.<profile>.yaml",
     )
     add_image(s, IMG["config"], 6.7, 1.5, 6.2, 5.3)
     # On-image labels make slider visual directly explainable.
@@ -1495,6 +1495,7 @@ def build():
             "Model split archives: models_llama.tar.gz (Llama HF tree, typical vLLM-judge) and models_qwen.tar.gz (Qwen HF tree, typical vLLM generator, e.g. Qwen3.5-9B).",  # noqa: E501
             "setup_offline.sh prepares links, loads containers, and validates runtime.",  # noqa: E501
             "run.sh executes pipeline with reproducible directory structure and outputs.",  # noqa: E501
+            "Partial runs: bash run.sh -- --resume skips docs with existing *_analysis.json.",  # noqa: E501
             "Design supports regulated environments with no external network dependency and incremental bundle updates.",  # noqa: E501
         ],
         x=7.2,

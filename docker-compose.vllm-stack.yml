@@ -28,7 +28,6 @@
 #   DATA_DIR *  → /workspace/data       (your input documents — see .env)
 #   output/     → /workspace/output     (results)
 #   QAGREDO_MODELS_LLM_HOST (default /data/models) → /models (generator + judge)
-#   models_embed/ → /opt/models_embed   (small embedding model)
 #   hf_cache/   → Hugging Face cache
 #
 # * DATA_DIR comes from .env + run.sh (preset 1–4) or defaults to ./data.
@@ -67,7 +66,7 @@ name: qagredo_offline
 services:
   # Generator: model from VLLM_MODEL / VLLM_SERVED_MODEL_NAME (.env), GPU via overlay, port 7100
   vllm:
-    image: ${VLLM_IMAGE:-vllm/vllm-openai:v0.5.3.post1}
+    image: ${VLLM_IMAGE:-qagredo-vllm:qwen35-localcuda}
     container_name: qagredo-vllm
     ports:
       - "7100:7100"
@@ -87,9 +86,9 @@ services:
       - "7100"
       # Defaults are one possible layout; override in .env to match your models/CUDA.
       - --model
-      - ${VLLM_MODEL:-/models/Qwen2.5-7B-Instruct}
+      - ${VLLM_MODEL:-/models/Qwen3.5-9B}
       - --served-model-name
-      - ${VLLM_SERVED_MODEL_NAME:-Qwen/Qwen2.5-7B-Instruct}
+      - ${VLLM_SERVED_MODEL_NAME:-Qwen/Qwen3.5-9B}
       - --tokenizer-mode
       - ${VLLM_TOKENIZER_MODE:-auto}
       # How many GPUs this service uses (must match device_ids list below).
@@ -104,6 +103,9 @@ services:
       - --api-key
       - ${VLLM_API_KEY:-llama-local}
       - --trust-remote-code
+      # Qwen3.5-9B is a VL checkpoint; text-only QA skips vision encoder profiling.
+      - --language-model-only
+      - --enforce-eager
     # GPU reservation for the generator. Edit device_ids to use a different
     # GPU (e.g. ["1"]) or add more for tensor-parallel (e.g. ["0","1"] with
     # VLLM_TP_SIZE=2). The judge has its own block further down.
@@ -123,7 +125,7 @@ services:
 
   # Judge: model from VLLM_JUDGE_* (.env); should differ from generator to reduce self-bias.
   vllm-judge:
-    image: ${VLLM_IMAGE:-vllm/vllm-openai:v0.5.3.post1}
+    image: ${VLLM_IMAGE:-qagredo-vllm:qwen35-localcuda}
     container_name: qagredo-vllm-judge
     ports:
       - "7101:7101"
@@ -191,8 +193,8 @@ services:
     environment:
       TZ: ${TZ:-Asia/Singapore}
       # Your Linux user id — files written to disk match your login.
-      HOST_UID: ${HOST_UID:-1000}
-      HOST_GID: ${HOST_GID:-1000}
+      HOST_UID: ${HOST_UID:-1013}
+      HOST_GID: ${HOST_GID:-1015}
       # No internet AI — everything local / your vLLM boxes only.
       OFFLINE_MODE: "1"
       HF_HUB_OFFLINE: "1"
@@ -218,7 +220,6 @@ services:
       - ${DATA_DIR:-./data}:/workspace/data:rw
       - ./output:/workspace/output:rw
       - ./hf_cache:/opt/hf_cache:rw
-      - ./models_embed:/opt/models_embed:rw
       # Docs (optional)
       - ./README.md:/workspace/README.md:rw
       - ./OFFLINE_GUIDE.md:/workspace/OFFLINE_GUIDE.md:rw

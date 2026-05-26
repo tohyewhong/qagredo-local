@@ -15,7 +15,8 @@ From repo root:
 
 ```bash
 bash run.sh --status
-bash run.sh --num-documents 2
+bash run.sh -- --num-documents 2
+bash run.sh --minimise
 ```
 
 Edit only:
@@ -27,7 +28,7 @@ Edit only:
 
 ## 2) Profile model rules
 
-### `dev` / `kubeflow` (Ollama)
+### `ollama` / `kubeflow` (Ollama)
 
 - `llm.model` and `judge.model` are Ollama tags.
 - Model storage format is Ollama store (`blobs/` + `manifests/`).
@@ -39,6 +40,16 @@ Edit only:
   - `VLLM_SERVED_MODEL_NAME`
   - `VLLM_JUDGE_SERVED_NAME`
 
+Local validation (after `QAGREDO_PROFILE=vllm` in `.env`):
+
+```bash
+bash run.sh --status
+bash run.sh --vllm-up generator
+bash run.sh --vllm-up judge
+bash run.sh --pipeline-only --num-documents 1
+# or all-in-one: bash run.sh -- --num-documents 1
+```
+
 ---
 
 ## 3) Build offline tarballs
@@ -49,14 +60,17 @@ Use the unified script:
 # all artifacts
 bash scripts/make_offline_tarballs.sh --all
 
-# dev
+# ollama (--image-dev = runner image for ollama profile)
 bash scripts/make_offline_tarballs.sh --bundle --image-dev --models-ollama
 
 # kubeflow
 bash scripts/make_offline_tarballs.sh --bundle --image-kubeflow --models-ollama
 
-# vllm
+# vllm (combined models)
 bash scripts/make_offline_tarballs.sh --bundle --image-dev --image-vllm --models-vllm
+
+# vllm (per-model split — e.g. ship only Qwen3.5-9B if judge HF tree exists on target)
+bash scripts/make_offline_tarballs.sh --models-vllm-split=Qwen3.5-9B
 ```
 
 For large-file limits, split Ollama model tarballs:
@@ -72,7 +86,7 @@ bash scripts/make_offline_tarballs.sh \
 
 Default output directory:
 
-- `offline_out/`
+- `/data/tyewhong/qagredo/` (all `.tar` / `.tar.gz`; see `.cursor/rules/archive-output-location.mdc`)
 
 Override:
 
@@ -86,7 +100,7 @@ Generated files include matching `.sha256`. Large transfer archives are often st
 
 ## 5) Recommended archive sets by target runtime
 
-### Offline `dev`
+### Offline `ollama`
 
 - `qagredo_bundle.tar.gz`
 - `qagredo-v1.tar`
@@ -102,7 +116,7 @@ Generated files include matching `.sha256`. Large transfer archives are often st
 
 - `qagredo_bundle.tar.gz`
 - `qagredo-v1.tar`
-- `vllm-openai_*.rootfs.tar`
+- `vllm-qwen35-localcuda.rootfs.tar` (from `scripts/save_vllm_qwen35_image.sh`; default `VLLM_IMAGE=qagredo-vllm:qwen35-localcuda`)
 - `models_vllm.tar.gz`
 
 ---
@@ -111,10 +125,10 @@ Generated files include matching `.sha256`. Large transfer archives are often st
 
 ```bash
 # ensure bundle exists
-ls -lh offline_out/qagredo_bundle.tar.gz
+ls -lh /data/tyewhong/qagredo/qagredo_bundle.tar.gz
 
 # verify checksums
-cd offline_out
+cd /data/tyewhong/qagredo
 sha256sum -c *.sha256
 ```
 
@@ -122,10 +136,11 @@ sha256sum -c *.sha256
 
 ## 7) Important compatibility note
 
-If your vLLM runtime is pinned to older stack versions, Qwen3 checkpoints may fail with model-type errors. In that case:
+If Qwen3.5 fails on vLLM (for example `qwen3_5` not recognized), you are still on an old runtime image. Fix:
 
-- use Qwen2.5 for `vllm` profile, or
-- use `dev`/`kubeflow` with Ollama for Qwen3.
+- build and set `VLLM_IMAGE=qagredo-vllm:qwen35-localcuda` (`bash scripts/docker_build_vllm_qwen35_compat.sh`), or
+- use `ollama`/`kubeflow` with Ollama for Qwen3.5 GGUF, or
+- use Qwen2.5-7B-Instruct with `vllm/vllm-openai:v0.5.3.post1` for a faster, older vLLM stack.
 
 ---
 
@@ -142,15 +157,15 @@ docker load -i /data/tyewhong/qagredo/qagredo-v1.tar
 docker load -i /data/tyewhong/qagredo/qagredo-kubeflow.tar   # kubeflow profile only
 ```
 
-vLLM rootfs import (when using `vllm` profile):
+vLLM image load (when using `vllm` profile with Qwen3.5):
 
 ```bash
-docker import \
-  --change 'WORKDIR /vllm-workspace' \
-  --change 'ENTRYPOINT ["python3","-m","vllm.entrypoints.openai.api_server"]' \
-  /data/tyewhong/qagredo/vllm-openai_v0.5.3.post1.rootfs.tar \
-  vllm/vllm-openai:v0.5.3.post1
+# Preferred: docker save/load from build machine
+docker load -i /data/tyewhong/qagredo/vllm-qwen35-localcuda.rootfs.tar
+docker images qagredo-vllm:qwen35-localcuda
 ```
+
+Build on a connected machine if needed: `bash scripts/docker_build_vllm_qwen35_compat.sh` then `bash scripts/save_vllm_qwen35_image.sh`.
 
 Then extract the bundle and run **`setup_offline.sh`** (see **`docs/OFFLINE_SETUP_GUIDE.md`**).
 

@@ -1,7 +1,7 @@
 # QAGRedo Server Model Profiles
 
 This guide maps QAGRedo runtime profiles to the three server roles:
-greenserver, Opserver, and redserver.
+greenserver, Opserver, and siteserver.
 
 For the full documentation index and code layout, see **`docs/HANDOVER.md`**.
 
@@ -11,14 +11,14 @@ For the full documentation index and code layout, see **`docs/HANDOVER.md`**.
 flowchart TD
   server["Choose server"] --> greenserver["greenserver: online, 2x24GB"]
   server --> opserver["Opserver: offline, 2x24GB"]
-  server --> redserver["redserver: offline, 4 GPUs"]
+  server --> siteserver["siteserver: offline, 4 GPUs"]
 
-  greenserver --> greenOllama["Use dev profile with host Ollama"]
+  greenserver --> greenOllama["Use ollama profile with host Ollama"]
   greenserver --> greenVllm["Use vllm profile for older under-10B HF models"]
-  opserver --> opDev["Use dev profile if host Ollama is installed"]
+  opserver --> opDev["Use ollama profile if host Ollama is installed"]
   opserver --> opKubeflow["Use kubeflow profile for bundled Ollama"]
-  redserver --> redOllama["Use dev or kubeflow for Ollama comparison"]
-  redserver --> redVllm["Use vllm plus redserver override"]
+  siteserver --> redOllama["Use ollama or kubeflow for Ollama comparison"]
+  siteserver --> redVllm["Use vllm plus siteserver override"]
 
   greenOllama --> run["QAGRedo pipeline"]
   greenVllm --> run
@@ -42,15 +42,15 @@ because it can run newer model families more comfortably on this hardware.
 Use host Ollama:
 
 ```bash
-QAGREDO_PROFILE=dev
+QAGREDO_PROFILE=ollama
 ollama serve
 ollama pull qwen3.5:9b
 ollama pull llama3.1:8b-instruct-fp16
 bash run.sh --show-config
-bash run.sh --num-documents 2
+bash run.sh -- --num-documents 2
 ```
 
-Edit `config/config.dev.yaml`:
+Edit `config/config.ollama.yaml`:
 
 ```yaml
 llm:
@@ -72,9 +72,9 @@ server. Do not rely on pulls from Hugging Face or Ollama registries at run time.
 For host Ollama offline testing:
 
 ```bash
-bash setup_offline.sh --profile dev
-QAGREDO_PROFILE=dev bash run.sh --show-config
-QAGREDO_PROFILE=dev bash run.sh --num-documents 2
+bash setup_offline.sh --profile ollama
+QAGREDO_PROFILE=ollama bash run.sh --show-config
+QAGREDO_PROFILE=ollama bash run.sh -- --num-documents 2
 ```
 
 Required artifacts:
@@ -88,7 +88,7 @@ For an all-in-one container where Ollama runs inside QAGRedo:
 ```bash
 bash setup_offline.sh --profile kubeflow
 QAGREDO_PROFILE=kubeflow bash run.sh --show-config
-QAGREDO_PROFILE=kubeflow bash run.sh --num-documents 2
+QAGREDO_PROFILE=kubeflow bash run.sh -- --num-documents 2
 ```
 
 Required artifacts:
@@ -97,38 +97,59 @@ Required artifacts:
 - `qagredo-kubeflow.tar`
 - `models_ollama.tar.gz` or split `models_ollama_<tag>.tar.gz`
 
-Failure path: if the profile is `dev`, `ollama` must already run on the host.
+Failure path: if the profile is `ollama`, `ollama` must already run on the host.
 If the profile is `kubeflow`, `QAGREDO_MODELS_DIR` must point to an Ollama
-store containing `blobs/` and `manifests/`.
+store containing `blobs/` and `manifests/`. In this profile, `run.sh` reuses
+the loaded image (no default rebuild) and keeps Ollama warm until
+`bash run.sh --down`.
 
-## redserver
+## siteserver
 
-redserver is offline and has 4 GPUs. Use it for the main performance comparison:
+siteserver is offline and has 4 GPUs. Use it for the main performance comparison:
 newer GGUF models through Ollama versus HuggingFace models through vLLM.
 
-For Ollama comparison runs, use the same `dev` or `kubeflow` guidance as
-Opserver, but choose the newer model tags in `config/config.dev.yaml` or
+For Ollama comparison runs, use the same `ollama` or `kubeflow` guidance as
+Opserver, but choose the newer model tags in `config/config.ollama.yaml` or
 `config/config.kubeflow.yaml`.
 
-For 4-GPU vLLM runs, use the redserver compose override:
+For 4-GPU vLLM runs, use the siteserver compose override:
 
 ```bash
 QAGREDO_PROFILE=vllm \
-QAGREDO_VLLM_COMPOSE_EXTRA=docker-compose.vllm-redserver.yml \
+QAGREDO_VLLM_COMPOSE_EXTRA=docker-compose.vllm-siteserver.yml \
 VLLM_TP_SIZE=2 \
 VLLM_JUDGE_TP_SIZE=2 \
 bash run.sh --show-config
 ```
 
-Then run:
+Then run (pick one mode):
+
+**Split** (start each vLLM service, then pipeline — same image on GPUs 0–1 and 2–3):
 
 ```bash
 QAGREDO_PROFILE=vllm \
-QAGREDO_VLLM_COMPOSE_EXTRA=docker-compose.vllm-redserver.yml \
-VLLM_TP_SIZE=2 \
-VLLM_JUDGE_TP_SIZE=2 \
-bash run.sh --num-documents 2
+QAGREDO_VLLM_COMPOSE_EXTRA=docker-compose.vllm-siteserver.yml \
+VLLM_TP_SIZE=2 VLLM_JUDGE_TP_SIZE=2 \
+bash run.sh --vllm-up generator
+bash run.sh --vllm-up judge
+bash run.sh --pipeline-only --num-documents 2
 ```
+
+**All-in-one:**
+
+```bash
+QAGREDO_PROFILE=vllm \
+QAGREDO_VLLM_COMPOSE_EXTRA=docker-compose.vllm-siteserver.yml \
+VLLM_TP_SIZE=2 VLLM_JUDGE_TP_SIZE=2 \
+bash run.sh -- --num-documents 2
+```
+
+```bash
+bash run.sh --minimise    # optional: minimal JSON from latest run (no vLLM rerun)
+```
+
+**Default 2-GPU siteserver** (no compose override): use the same split commands without
+`QAGREDO_VLLM_COMPOSE_EXTRA` — generator on GPU 0, judge on GPU 1. Details: **`docs/Siteserver_vLLM_Change_Guide.md`** Part D.
 
 The override maps:
 
@@ -138,22 +159,24 @@ The override maps:
 `VLLM_TP_SIZE` must match the number of generator GPUs, and
 `VLLM_JUDGE_TP_SIZE` must match the number of judge GPUs.
 
-Required artifacts:
+Required artifacts (build on online host under **`/data/tyewhong/qagredo/`**, then copy to siteserver):
 
 - `qagredo_bundle.tar.gz`
 - `qagredo-v1.tar`
-- `vllm-openai_*.rootfs.tar`
+- `vllm-qwen35-localcuda.rootfs.tar` (Qwen3.5 stack; `VLLM_IMAGE=qagredo-vllm:qwen35-localcuda`)
 - `models_vllm.tar.gz`
 
-Failure path: if vLLM reports a model type error for Qwen3 or another newer
-architecture, switch that test to Ollama or rebuild the vLLM image with a
-compatible Transformers/vLLM stack.
+On siteserver after copy: `docker load -i /data/tyewhong/qagredo/vllm-qwen35-localcuda.rootfs.tar` (and `qagredo-v1.tar` if needed). Runbook: **`docs/Siteserver_vLLM_Change_Guide.md`**.
+
+Failure path: if vLLM reports `qwen3_5` or similar model-type errors, you need
+`qagredo-vllm:qwen35-localcuda` (see `docs/Siteserver_vLLM_Change_Guide.md`), or
+switch that test to Ollama, or use Qwen2.5 with the legacy `v0.5.3.post1` image.
 
 ## Model Format Rules
 
 ```mermaid
 flowchart LR
-  ollamaStore["Ollama store: blobs and manifests"] --> ollamaProfiles["dev or kubeflow"]
+  ollamaStore["Ollama store: blobs and manifests"] --> ollamaProfiles["ollama or kubeflow"]
   hfDirs["HuggingFace model directories"] --> vllmProfile["vllm"]
   wrongFormat["Wrong model format"] --> fail["Model not found or load failure"]
 ```
@@ -165,13 +188,13 @@ profile, and served model names first.
 Build common offline artifact sets on the online/build machine:
 
 ```bash
-# Opserver or redserver Ollama package
+# Opserver or siteserver Ollama package
 bash scripts/make_offline_tarballs.sh --bundle --image-dev --models-ollama
 
-# Opserver or redserver in-container Ollama package
+# Opserver or siteserver in-container Ollama package
 bash scripts/make_offline_tarballs.sh --bundle --image-kubeflow --models-ollama
 
-# redserver vLLM package
+# siteserver vLLM package
 bash scripts/make_offline_tarballs.sh --bundle --image-dev --image-vllm --models-vllm
 ```
 

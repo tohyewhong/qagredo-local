@@ -26,11 +26,14 @@ from utils import (  # noqa: E402
     generate_questions,
     save_results,
 )
-from utils.question_generator import _extract_text_content  # noqa: E402
+from utils.question_generator import _call_llm, _extract_text_content  # noqa: E402
 from utils.output_manager import (  # noqa: E402
     _safe_output_filename_stem,
+    analysis_json_path,
+    analysis_output_exists,
     init_run_timestamp,
     input_file_output_segment,
+    resolve_resume_run_directory,
 )
 from utils.hallucination_checker import (  # noqa: E402
     apply_grounding_why_when_no_citations,
@@ -322,6 +325,88 @@ def _normalize_document_list(
     )
 
 
+def _expected_analysis_output_stem(
+    document: Dict[str, Any],
+    idx: int,
+    total: int,
+    run_cfg: Dict[str, Any],
+    input_path: str,
+) -> str:
+    """Mirror per-document save naming (``*_analysis.json`` stem)."""
+    doc_id = document.get("id", document.get("title", f"doc_{idx}"))
+    stem_mode = str(
+        run_cfg.get("output_analysis_stem") or "document_id"
+    ).strip().lower()
+    multi = total > 1
+    if stem_mode in ("input_file", "input", "file", "filename"):
+        base = _safe_output_filename_stem(Path(input_path).stem)
+        if multi:
+            return f"{base}_{idx:04d}_analysis"
+        return f"{base}_analysis"
+    base = _safe_output_filename_stem(str(doc_id))
+    if multi:
+        return f"{base}_{idx:04d}_analysis"
+    return f"{base}_analysis"
+
+
+def _resolve_output_provider_model(
+    config: Dict[str, Any],
+    settings: Dict[str, Any],
+) -> Tuple[str, str]:
+    llm_cfg = config.get("llm", {}) or {}
+    provider = settings.get("provider") or llm_cfg.get("provider", "openai")
+    model = settings.get("model") or llm_cfg.get("model", "gpt-4")
+    output_cfg = (
+        (config.get("output") or {})
+        if isinstance(config, dict)
+        else {}
+    )
+    selected_profile_id = _get_selected_profile_id(config)
+    if "scheme" in output_cfg:
+        output_scheme = str(output_cfg.get("scheme", "default")).lower()
+    else:
+        output_scheme = "profile" if selected_profile_id else "default"
+    output_provider = provider
+    profile_schemes = {
+        "profile",
+        "profiles",
+        "profile_id",
+        "profile-id",
+    }
+    numeric_schemes = {"numeric", "numeric_profile", "numeric-profiles"}
+    if output_scheme in profile_schemes and selected_profile_id:
+        output_provider = selected_profile_id
+    elif output_scheme in numeric_schemes:
+        output_provider = _infer_numeric_output_profile(
+            provider=str(provider),
+            model=str(model),
+        )
+    return str(output_provider), str(model)
+
+
+def _pipeline_resume_options(
+    config: Dict[str, Any],
+    settings: Dict[str, Any],
+    run_cfg: Dict[str, Any],
+) -> Dict[str, Any]:
+    resume_mode = _config_bool(settings.get("resume")) or _config_bool(
+        run_cfg.get("resume")
+    )
+    skip_existing = (
+        resume_mode
+        or _config_bool(settings.get("skip_existing_outputs"))
+        or _config_bool(run_cfg.get("skip_existing_outputs"))
+    )
+    resume_run_dir = settings.get("resume_run_dir")
+    if resume_run_dir is None:
+        resume_run_dir = run_cfg.get("resume_run_dir")
+    return {
+        "resume_mode": resume_mode,
+        "skip_existing": skip_existing,
+        "resume_run_dir": resume_run_dir,
+    }
+
+
 def _get_selected_profile_id(config: Dict[str, Any]) -> str | None:
     run_raw = config.get("run", {})
     run_cfg = run_raw if isinstance(run_raw, dict) else {}
@@ -556,6 +641,48 @@ def _document_plain_text(doc: Dict[str, Any]) -> str:
         return ""
 
 
+def _count_words(text: str) -> int:
+    """Word count for run.min_content_words (whitespace-separated tokens)."""
+    return len([part for part in (text or "").split() if part.strip()])
+
+
+def _document_content_metrics(document: Dict[str, Any]) -> Tuple[int, int]:
+    """Return (word_count, char_count) for plain document body."""
+    body = _document_plain_text(document).strip()
+    return _count_words(body), len(body)
+
+
+def _document_skip_reason_for_min_length(
+    document: Dict[str, Any],
+    run_cfg: Dict[str, Any],
+) -> Optional[str]:
+    """
+    If run.min_content_words / min_content_chars are set, return a skip reason
+    when the document is too short; otherwise None (process document).
+    """
+    try:
+        min_words = int(run_cfg.get("min_content_words") or 0)
+    except (TypeError, ValueError):
+        min_words = 0
+    try:
+        min_chars = int(run_cfg.get("min_content_chars") or 0)
+    except (TypeError, ValueError):
+        min_chars = 0
+    if min_words <= 0 and min_chars <= 0:
+        return None
+    words, chars = _document_content_metrics(document)
+    if min_words > 0 and words < min_words:
+        return (
+            f"word count {words} is below run.min_content_words ({min_words})"
+        )
+    if min_chars > 0 and chars < min_chars:
+        return (
+            f"character count {chars} is below "
+            f"run.min_content_chars ({min_chars})"
+        )
+    return None
+
+
 def _snapshot_document_for_output(
     document: Dict[str, Any],
     doc_id: Any,
@@ -659,7 +786,30 @@ def build_qa_pairs(
             )
         qlist = qr_q
         alist = qa_a
+    from utils.minimal_text import (
+        plain_text_for_minimal_output,
+        sanitize_llm_answer_response,
+        sanitize_llm_question_response,
+    )
+
     for i, (question, answer) in enumerate(zip(qlist, alist)):
+        q_str = str(question) if question is not None else ""
+        a_str = str(answer) if answer is not None else ""
+        qs = sanitize_llm_question_response(q_str, max_items=1)
+        if qs:
+            q_str = qs[0]
+        else:
+            q_clean = plain_text_for_minimal_output(q_str, field="question")
+            if q_clean:
+                q_str = q_clean
+        ans, _ = sanitize_llm_answer_response(a_str)
+        if ans:
+            a_str = ans
+        else:
+            a_clean = plain_text_for_minimal_output(a_str, field="answer")
+            if a_clean:
+                a_str = a_clean
+        question, answer = q_str, a_str
         ev = evidence_list[i] if i < len(evidence_list) else ""
         spans, notes = _evidence_to_citation_spans(content, ev)
         if not spans and str(ev).strip():
@@ -719,10 +869,49 @@ def _merge_pair_grading_from_checks(
             pair["hallucination_check"] = cr
 
 
+def _comprehensiveness_strict_enabled(config: Dict[str, Any]) -> bool:
+    """When true, failed comprehensiveness slots are omitted (no answers)."""
+    qcfg = config.get("question_generation")
+    if not isinstance(qcfg, dict):
+        return False
+    val = qcfg.get("validation")
+    if not isinstance(val, dict):
+        return False
+    return bool(val.get("comprehensiveness_strict", False))
+
+
+def _slot_questions_for_pipeline(
+    seed_questions: List[str],
+    base_q_count: int,
+    *,
+    comprehensiveness_strict: bool,
+) -> List[str]:
+    """Questions to run through the answer/grade slot loop."""
+    if comprehensiveness_strict:
+        return list(seed_questions)
+    if not seed_questions:
+        return []
+    return [
+        seed_questions[i] if i < len(seed_questions) else seed_questions[-1]
+        for i in range(base_q_count)
+    ]
+
+
+def _answer_is_insufficient(answer: Any) -> bool:
+    """True when the model refused with the standard insufficient-info phrase."""
+    return "insufficient information" in str(answer or "").strip().lower()
+
+
 def _pair_passes_grounding_gate(
     pair: Dict[str, Any], min_confidence: float
 ) -> bool:
     """Match multi-round retry logic: grounded and confidence >= threshold."""
+    # Treat explicit "Insufficient information" answers as a hard failure so
+    # that the pipeline regenerates a new question for this slot instead of
+    # accepting an unanswerable one.
+    if _answer_is_insufficient(pair.get("answer")):
+        return False
+
     grading = _qa_pair_hallucination_check(pair)
     if not isinstance(grading, dict):
         return False
@@ -767,10 +956,18 @@ def _minimal_qa_pairs_for_output(
             continue
         q = p.get("question")
         a = p.get("answer")
+        from utils.minimal_text import plain_text_for_minimal_output
+
         out.append(
             {
-                "question": "" if q is None else str(q),
-                "answer": "" if a is None else str(a),
+                "question": plain_text_for_minimal_output(
+                    "" if q is None else str(q),
+                    field="question",
+                ),
+                "answer": plain_text_for_minimal_output(
+                    "" if a is None else str(a),
+                    field="answer",
+                ),
             }
         )
     return out
@@ -956,12 +1153,64 @@ def _preflight_llm_judge(config: Dict[str, Any]) -> None:
         )
 
 
+def _probe_reply_is_ready(reply: Any) -> bool:
+    """Accept plain READY or Qwen-style replies whose last line is READY."""
+    text = str(reply or "").strip()
+    if text.upper() == "READY":
+        return True
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    return bool(lines) and lines[-1].upper() == "READY"
+
+
+def _preflight_llm_generator(config: Dict[str, Any]) -> None:
+    """
+    Validate generator endpoint/model before processing input documents.
+
+    This keeps first-question failures (often surfaced as Ollama 500s under
+    model cold-start or GPU pressure) in a clear preflight stage.
+    """
+    probe_prompt = "Reply with exactly: READY"
+    probe_reply = _call_llm(probe_prompt, config)
+    if not _probe_reply_is_ready(probe_reply):
+        raise RuntimeError(
+            "Generator preflight failed: unexpected model response "
+            f"({probe_reply!r})."
+        )
+
+
 def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
     input_path = settings["input_file"]
     run_cfg = config.get("run") if isinstance(config.get("run"), dict) else {}
+    output_provider, output_model = _resolve_output_provider_model(
+        config, settings
+    )
+    resume_opts = _pipeline_resume_options(config, settings, run_cfg)
+    skip_check_dir = None
+    if resume_opts["skip_existing"]:
+        skip_check_dir = resolve_resume_run_directory(
+            output_provider,
+            output_model,
+            resume_opts["resume_run_dir"],
+        )
+        if skip_check_dir is None:
+            print(
+                "[INFO] skip_existing_outputs: no prior run folder found "
+                "under output/ — nothing to skip yet.\n"
+            )
+
     ofn = str(run_cfg.get("output_folder") or "input_basename").strip().lower()
     batch_lbl = settings.get("input_label_for_output")
-    if ofn in ("timestamp", "time", "ts", "dated"):
+    if resume_opts["resume_mode"] and skip_check_dir is not None:
+        run_ts = init_run_timestamp(skip_check_dir.name)
+        print(
+            f"[INFO] Resume: reusing run folder {skip_check_dir}\n"
+        )
+    elif ofn in ("timestamp", "time", "ts", "dated"):
+        if resume_opts["resume_mode"]:
+            print(
+                "[WARN] --resume: no prior run folder found; "
+                "starting a new timestamped run.\n"
+            )
         run_ts = init_run_timestamp(None)
     else:
         if batch_lbl:
@@ -1000,6 +1249,13 @@ def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
     nd_disp = str(nd) if isinstance(nd, int) and nd > 0 else "all"
     print(f"Documents to run: {nd_disp}")
     print(f"Run folder      : {run_ts}")
+    if resume_opts["skip_existing"]:
+        if skip_check_dir is not None:
+            print(f"Skip existing   : yes (check {skip_check_dir})")
+        else:
+            print("Skip existing   : yes (no prior run folder yet)")
+    if resume_opts["resume_mode"]:
+        print("Resume mode     : yes (append to run folder when it exists)")
     print("=" * 80)
     print()
 
@@ -1020,6 +1276,9 @@ def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
         allow_semantic_fallback = False
     if halluc_method in ("llm", "hybrid"):
         set_llm_config(config)
+    print("Generator preflight: checking LLM generator availability...")
+    _preflight_llm_generator(config)
+    print("[OK] Generator preflight passed.\n")
     if halluc_method == "llm" and judge_required:
         print("Judge preflight: checking LLM judge availability...")
         _preflight_llm_judge(config)
@@ -1040,10 +1299,38 @@ def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
     save_grounded_only = bool(
         run_cfg.get("save_grounded_qa_pairs_only", False)
     )
+    reject_insufficient = bool(
+        run_cfg.get("reject_insufficient_answers", False)
+    )
     if save_grounded_only:
         print(
             "[INFO] run.save_grounded_qa_pairs_only is true - "
             "saving only grounded Q&A rows.\n"
+        )
+    if reject_insufficient:
+        print(
+            "[INFO] run.reject_insufficient_answers is true - "
+            "slots whose final answer is 'Insufficient information in the "
+            "document.' are omitted from qa_pairs.\n"
+        )
+
+    try:
+        min_content_words = int(run_cfg.get("min_content_words") or 0)
+    except (TypeError, ValueError):
+        min_content_words = 0
+    try:
+        min_content_chars = int(run_cfg.get("min_content_chars") or 0)
+    except (TypeError, ValueError):
+        min_content_chars = 0
+    if min_content_words > 0 or min_content_chars > 0:
+        parts = []
+        if min_content_words > 0:
+            parts.append(f"min_content_words={min_content_words}")
+        if min_content_chars > 0:
+            parts.append(f"min_content_chars={min_content_chars}")
+        print(
+            "[INFO] Document length filter active "
+            f"({', '.join(parts)}) — shorter documents are skipped.\n"
         )
 
     minimal_qa_output = bool(run_cfg.get("minimal_qa_output", False))
@@ -1054,8 +1341,40 @@ def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
             "qa_pairs (question + answer per row only).\n"
         )
 
+    skipped_short = 0
+    skipped_existing = 0
+    total_docs = len(documents)
     for idx, document in enumerate(documents, 1):
         doc_id = document.get("id", document.get("title", f"doc_{idx}"))
+
+        if resume_opts["skip_existing"] and skip_check_dir is not None:
+            out_stem = _expected_analysis_output_stem(
+                document,
+                idx,
+                total_docs,
+                run_cfg,
+                input_path,
+            )
+            if analysis_output_exists(skip_check_dir, out_stem):
+                skipped_existing += 1
+                existing = analysis_json_path(skip_check_dir, out_stem)
+                print("=" * 80)
+                print(
+                    f"Skipping Document {idx}/{total_docs}: {doc_id} "
+                    "(analysis already exists)"
+                )
+                print("=" * 80)
+                print(f"[INFO] Existing output: {existing}\n")
+                continue
+
+        skip_reason = _document_skip_reason_for_min_length(document, run_cfg)
+        if skip_reason:
+            skipped_short += 1
+            print("=" * 80)
+            print(f"Skipping Document {idx}/{len(documents)}: {doc_id}")
+            print("=" * 80)
+            print(f"[WARN] {skip_reason}\n")
+            continue
 
         print("=" * 80)
         print(f"Processing Document {idx}/{len(documents)}: {doc_id}")
@@ -1117,18 +1436,27 @@ def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
         base_question_metadata = dict(
             base_question_result.get("generation_metadata", {})
         )
+        comp_strict = _comprehensiveness_strict_enabled(config)
+        slot_questions = _slot_questions_for_pipeline(
+            seed_questions,
+            base_q_count,
+            comprehensiveness_strict=comp_strict,
+        )
+        if comp_strict and len(slot_questions) < base_q_count:
+            dropped = base_q_count - len(slot_questions)
+            print(
+                f"[INFO] Comprehensiveness strict: {dropped} question(s) "
+                f"rejected; {len(slot_questions)} slot(s) will receive answers."
+            )
         print(f"[OK] Questions ready in {qtime:.1f} seconds\n")
 
-        for slot_idx in range(base_q_count):
-            if slot_idx < len(seed_questions):
-                current_question = seed_questions[slot_idx]
-            else:
-                current_question = seed_questions[-1]
+        slot_total = len(slot_questions)
+        for slot_idx, current_question in enumerate(slot_questions):
             slot_pair: Optional[Dict[str, Any]] = None
             current_question_metadata = dict(base_question_metadata)
 
             print(
-                f"[INFO] Slot {slot_idx + 1}/{base_q_count}: "
+                f"[INFO] Slot {slot_idx + 1}/{slot_total}: "
                 "answer trials for current question."
             )
             for replace_idx in range(max_q_rounds + 1):
@@ -1302,8 +1630,26 @@ def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
                     detail = dict(picked)
                     detail["question_index"] = slot_idx + 1
                     detail["final_question"] = current_question
+                    if (
+                        reject_insufficient
+                        and _answer_is_insufficient(slot_pair.get("answer"))
+                    ):
+                        detail["accepted"] = False
+                        detail["rejection_reason"] = (
+                            "insufficient_information_answer"
+                        )
                     slot_question_validation.append(detail)
-                final_pairs.append(slot_pair)
+
+                if (
+                    reject_insufficient
+                    and _answer_is_insufficient(slot_pair.get("answer"))
+                ):
+                    print(
+                        f"[INFO] Slot {slot_idx + 1}: insufficient-information "
+                        "answer rejected; slot omitted from qa_pairs."
+                    )
+                else:
+                    final_pairs.append(slot_pair)
 
         if not final_pairs:
             print(
@@ -1312,7 +1658,8 @@ def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
             )
             continue
 
-        trimmed_pairs = list(final_pairs[:base_q_count])
+        trim_limit = len(slot_questions) if comp_strict else base_q_count
+        trimmed_pairs = list(final_pairs[:trim_limit])
         if save_grounded_only:
             qa_pairs_out, val_f = (
                 _filter_pairs_and_validation_by_grounding_gate(
@@ -1330,20 +1677,21 @@ def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
                 continue
         else:
             qa_pairs_out = trimmed_pairs
-            while len(qa_pairs_out) < base_q_count:
-                qa_pairs_out.append(
-                    {
-                        "question": "(No question)",
-                        "answer": "(No answer)",
-                        "hallucination_check": None,
-                        "citation_spans": [],
-                        "citation_notes": [],
-                        "source_doc_id": str(doc_id),
-                        "source_title": str(
-                            document.get("title") or doc_id
-                        ),
-                    }
-                )
+            if not comp_strict:
+                while len(qa_pairs_out) < base_q_count:
+                    qa_pairs_out.append(
+                        {
+                            "question": "(No question)",
+                            "answer": "(No answer)",
+                            "hallucination_check": None,
+                            "citation_spans": [],
+                            "citation_notes": [],
+                            "source_doc_id": str(doc_id),
+                            "source_title": str(
+                                document.get("title") or doc_id
+                            ),
+                        }
+                    )
 
         # Saved JSON name (no redundant doc_*doc* doubling from old scheme).
         stem_mode = str(
@@ -1437,36 +1785,6 @@ def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
             f"model: {model}"
         )
 
-        # Output path scheme (does not change which LLM is called).
-        output_cfg = (
-            (config.get("output") or {})
-            if isinstance(config, dict)
-            else {}
-        )
-        selected_profile_id = _get_selected_profile_id(config)
-
-        # Profile id routes output folders unless output.scheme is set.
-        if "scheme" in output_cfg:
-            output_scheme = str(output_cfg.get("scheme", "default")).lower()
-        else:
-            output_scheme = "profile" if selected_profile_id else "default"
-
-        output_provider = provider
-        profile_schemes = {
-            "profile",
-            "profiles",
-            "profile_id",
-            "profile-id",
-        }
-        numeric_schemes = {"numeric", "numeric_profile", "numeric-profiles"}
-        if output_scheme in profile_schemes and selected_profile_id:
-            output_provider = selected_profile_id
-        elif output_scheme in numeric_schemes:
-            output_provider = _infer_numeric_output_profile(
-                provider=provider, model=model
-            )
-        # else: keep provider/model scheme (default)
-
         combined_path = save_results(
             combined_result,
             provider=output_provider,
@@ -1477,6 +1795,16 @@ def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
         print(f"[OK] Saved combined analysis to: {combined_path}\n")
 
     print("=" * 80)
+    if skipped_short:
+        print(
+            f"[INFO] Skipped {skipped_short} document(s) below "
+            "run.min_content_words / min_content_chars."
+        )
+    if skipped_existing:
+        print(
+            f"[INFO] Skipped {skipped_existing} document(s) with existing "
+            "*_analysis.json in the resume check folder."
+        )
     print("[OK] All documents processed!")
     print("=" * 80)
 
@@ -1519,6 +1847,32 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Set run.minimal_qa_output true: saved JSON is only "
             "document.content plus qa_pairs (question/answer per row)."
+        ),
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help=(
+            "Reuse the latest run folder (or run.resume_run_dir) and skip "
+            "documents that already have *_analysis.json there."
+        ),
+    )
+    parser.add_argument(
+        "--skip-existing-outputs",
+        action="store_true",
+        help=(
+            "Skip documents whose *_analysis.json already exists in the "
+            "latest run folder (or run.resume_run_dir). Writes new outputs "
+            "to a new run folder unless --resume is also set."
+        ),
+    )
+    parser.add_argument(
+        "--resume-run-dir",
+        default=None,
+        metavar="DIR",
+        help=(
+            "Run folder for --resume / skip checks: path, folder name under "
+            "output/<provider>/<model>/, or 'latest' (default when omitted)."
         ),
     )
     return parser.parse_args()
@@ -1592,6 +1946,12 @@ def main() -> None:
             effective_config["run"] = {"minimal_qa_output": True}
         else:
             run_block["minimal_qa_output"] = True
+    if args.resume:
+        settings["resume"] = True
+    if args.skip_existing_outputs:
+        settings["skip_existing_outputs"] = True
+    if args.resume_run_dir is not None and str(args.resume_run_dir).strip():
+        settings["resume_run_dir"] = str(args.resume_run_dir).strip()
     run_pipeline(effective_config, settings)
 
 

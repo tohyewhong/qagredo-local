@@ -15,6 +15,8 @@ BODY = """• requirements.txt in the bundle must match packages inside qagredo-
 • In qagredo_host/: bash verify_offline_deployment.sh after docker load
 • make_qagredo_bundle.sh checks bundle vs local qagredo-v1:latest when the image exists
 • Pipeline uses /usr/local/bin/python inside the container (see run.sh)
+• Profiles: QAGREDO_PROFILE=ollama | kubeflow | vllm (config/config.<profile>.yaml)
+• Partial runs: bash run.sh -- --resume (skip existing *_analysis.json)
 
 Authoritative guide: docs/OFFLINE_SETUP_GUIDE.md"""
 

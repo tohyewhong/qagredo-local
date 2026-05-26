@@ -521,7 +521,7 @@ def build():
         4.75,
         (245, 248, 255),
     )
-    add_source_ref(s, "utils/answer_generator.py + config/config.yaml")
+    add_source_ref(s, "utils/answer_generator.py + config/config.<profile>.yaml")
     add_takeaway(s, "Tune answer controls as a quality-latency dial, not as independent toggles.")
 
     # 9. Value proposition

@@ -2,20 +2,25 @@
 set -euo pipefail
 
 # ============================================================================
-# run.sh — host Ollama (default) or legacy vLLM stack + QAGRedo pipeline
+# run.sh — profile-driven QAGRedo runner (ollama | kubeflow | vllm)
 # ============================================================================
 #
 # Stay in the folder that contains this script, docker-compose.yml, and .env.
-# Default: Ollama on the host (port 11434). Start it yourself (`ollama serve`).
-#
-# Legacy GPU vLLM (two containers): set QAGREDO_USE_VLLM_STACK=1 in .env and
-# use docker-compose.vllm-stack.yml (see comments in .env).
+# `ollama`: host Ollama on port 11434 (`ollama serve` on host).
+# `kubeflow`: in-container Ollama, warm persistent container; released by --down.
+# `vllm`: dual vLLM GPU services (generator + judge).
 #
 # Common commands:
-#   bash run.sh              # run pipeline (waits for Ollama on host)
+#   bash run.sh              # run pipeline for active profile
 #   bash run.sh --down       # stop compose project containers
 #   bash run.sh --logs       # tail qagredo / vLLM logs
 #   bash run.sh --status     # compose ps + backend health
+#   bash run.sh --vllm-up generator|judge|all   # vllm profile: start vLLM step-by-step
+#   bash run.sh --pipeline-only [--num-documents N]     # vllm: run pipeline only
+#   bash run.sh -- --resume                             # skip docs with output; reuse latest run folder
+#   bash run.sh -- --skip-existing-outputs              # skip only; new run folder unless --resume
+#   bash run.sh --summarize --latest
+#   bash run.sh --minimise   # write *_analysis_minimal.json from latest run
 #
 # Where to put settings:
 #   .env                           — host paths + QAGREDO_PROFILE selector
@@ -105,14 +110,15 @@ export OLLAMA_HOST_PORT="${OLLAMA_HOST_PORT:-11434}"
 export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://localhost:${OLLAMA_HOST_PORT}/v1}"
 export OLLAMA_MODEL="${OLLAMA_MODEL:-qwen3.5:9b}"
 export OLLAMA_JUDGE_BASE_URL="${OLLAMA_JUDGE_BASE_URL:-http://localhost:${OLLAMA_HOST_PORT}/v1}"
-# Must match judge.model in config/config.dev.yaml and config/config.kubeflow.yaml
+# Must match judge.model in config/config.ollama.yaml and config/config.kubeflow.yaml
 export OLLAMA_JUDGE_MODEL="${OLLAMA_JUDGE_MODEL:-llama3.1:8b-instruct-fp16}"
 
 # ---------------------------------------------------------------------------
-# Profile selection: one of dev | kubeflow | vllm
-#   dev      (default) host Ollama + runner container  (docker-compose.yml)
-#   kubeflow single all-in-one image; Ollama runs inside the container and
-#            reads models from QAGREDO_MODELS_DIR (e.g. /home/jovyan/models).
+# Profile selection: one of ollama | kubeflow | vllm
+#   ollama   (default) host Ollama + runner container  (docker-compose.yml)
+#   kubeflow single all-in-one image; Ollama runs inside a persistent container
+#            and reads models from QAGREDO_MODELS_DIR (e.g. /home/jovyan/models).
+#            `bash run.sh --down` releases warm container + GPU memory.
 #   vllm     legacy dual-GPU vLLM stack (docker-compose.vllm-stack.yml).
 #
 # If QAGREDO_PROFILE is unset but QAGREDO_USE_VLLM_STACK=1, we map to vllm for
@@ -122,15 +128,20 @@ if [[ -z "${QAGREDO_PROFILE:-}" ]]; then
   if [[ "${QAGREDO_USE_VLLM_STACK:-0}" == "1" ]]; then
     QAGREDO_PROFILE=vllm
   else
-    QAGREDO_PROFILE=dev
+    QAGREDO_PROFILE=ollama
   fi
 fi
 export QAGREDO_PROFILE
 
 case "${QAGREDO_PROFILE}" in
-  dev|kubeflow|vllm) : ;;
+  ollama|kubeflow|vllm) : ;;
+  dev)
+    echo "[run][WARN] QAGREDO_PROFILE=dev is deprecated; use QAGREDO_PROFILE=ollama instead."
+    QAGREDO_PROFILE=ollama
+    export QAGREDO_PROFILE
+    ;;
   *)
-    die "Unknown QAGREDO_PROFILE='${QAGREDO_PROFILE}' (expected dev | kubeflow | vllm)"
+    die "Unknown QAGREDO_PROFILE='${QAGREDO_PROFILE}' (expected ollama | kubeflow | vllm)"
     ;;
 esac
 
@@ -139,8 +150,8 @@ export QAGREDO_MODELS_DIR="${QAGREDO_MODELS_DIR:-$HOST_DIR/models}"
 export QAGREDO_GPU_COUNT="${QAGREDO_GPU_COUNT:-2}"
 
 # Legacy vLLM stack env (only when QAGREDO_USE_VLLM_STACK=1)
-export VLLM_MODEL="${VLLM_MODEL:-/models/Qwen2.5-7B-Instruct}"
-export VLLM_SERVED_MODEL_NAME="${VLLM_SERVED_MODEL_NAME:-Qwen/Qwen2.5-7B-Instruct}"
+export VLLM_MODEL="${VLLM_MODEL:-/models/Qwen3.5-9B}"
+export VLLM_SERVED_MODEL_NAME="${VLLM_SERVED_MODEL_NAME:-Qwen/Qwen3.5-9B}"
 export VLLM_API_KEY="${VLLM_API_KEY:-llama-local}"
 export VLLM_TP_SIZE="${VLLM_TP_SIZE:-1}"
 export VLLM_MAX_MODEL_LEN="${VLLM_MAX_MODEL_LEN:-8192}"
@@ -169,31 +180,128 @@ case "${QAGREDO_PROFILE}" in
     COMPOSE_ARGS=(-f "$HOST_DIR/docker-compose.kubeflow.yml")
     PROFILE_CONFIG_FILE="config/config.kubeflow.yaml"
     ;;
-  dev|*)
+  ollama|*)
     export QAGREDO_USE_OLLAMA=1
     export QAGREDO_USE_VLLM_STACK=0
     COMPOSE_ARGS=(-f "$HOST_DIR/docker-compose.yml")
-    PROFILE_CONFIG_FILE="config/config.dev.yaml"
+    PROFILE_CONFIG_FILE="config/config.ollama.yaml"
     ;;
 esac
 export QAGREDO_CONFIG_FILE="${PROFILE_CONFIG_FILE}"
 
-PIPELINE_ARGS=("$@")
-
-# Inject --config only if the caller didn't already specify one.
-_has_config_arg=0
-for _arg in "${PIPELINE_ARGS[@]}"; do
-  if [[ "$_arg" == "--config" || "$_arg" == --config=* ]]; then
-    _has_config_arg=1
-    break
+_ensure_pipeline_config_arg() {
+  local _has_config_arg=0
+  local _arg
+  for _arg in "${PIPELINE_ARGS[@]}"; do
+    if [[ "$_arg" == "--config" || "$_arg" == --config=* ]]; then
+      _has_config_arg=1
+      break
+    fi
+  done
+  if [[ "$_has_config_arg" -eq 0 ]]; then
+    PIPELINE_ARGS=("--config" "/workspace/${PROFILE_CONFIG_FILE}" "${PIPELINE_ARGS[@]}")
   fi
-done
-if [[ "$_has_config_arg" -eq 0 ]]; then
-  PIPELINE_ARGS=("--config" "/workspace/${PROFILE_CONFIG_FILE}" "${PIPELINE_ARGS[@]}")
-fi
+}
+
+PIPELINE_ARGS=("$@")
+_ensure_pipeline_config_arg
 
 _log() { echo "[run] $*"; }
 _warn() { echo "[run][WARN] $*" >&2; }
+
+HEALTH_TIMEOUT=300
+HEALTH_INTERVAL=5
+VLLM_HEALTH_TIMEOUT="${QAGREDO_VLLM_HEALTH_TIMEOUT:-900}"
+
+_vllm_preflight() {
+  [[ "${QAGREDO_PROFILE}" == "vllm" ]] \
+    || die "--vllm-up and --pipeline-only require QAGREDO_PROFILE=vllm in .env"
+  [[ -f "$HOST_DIR/docker-compose.vllm-stack.yml" ]] \
+    || die "Missing: $HOST_DIR/docker-compose.vllm-stack.yml"
+  docker info >/dev/null 2>&1 || die "Docker is not running or not accessible"
+  mkdir -p "$HOST_DIR/output" "$HOST_DIR/hf_cache" "$HOST_DIR/hf_cache_judge" "$DATA_DIR" \
+    2>/dev/null || true
+}
+
+_vllm_wait_generator() {
+  _log "Waiting for Generator at http://localhost:7100/health (timeout ${VLLM_HEALTH_TIMEOUT}s; Qwen3.5 may take several minutes) ..."
+  local elapsed=0
+  while true; do
+    if curl -sf http://localhost:7100/health >/dev/null 2>&1; then
+      _log "Generator is ready! (took ~${elapsed}s)"
+      return 0
+    fi
+    if [[ "$elapsed" -ge "$VLLM_HEALTH_TIMEOUT" ]]; then
+      die "Generator did not become healthy within ${VLLM_HEALTH_TIMEOUT}s. Check: docker logs qagredo-vllm --tail 50"
+    fi
+    sleep "$HEALTH_INTERVAL"
+    elapsed=$((elapsed + HEALTH_INTERVAL))
+  done
+}
+
+_vllm_wait_judge() {
+  _log "Waiting for Judge at http://localhost:7101/health (timeout ${VLLM_HEALTH_TIMEOUT}s) ..."
+  local elapsed=0
+  while true; do
+    if curl -sf http://localhost:7101/health >/dev/null 2>&1; then
+      _log "Judge is ready! (took ~${elapsed}s)"
+      return 0
+    fi
+    if [[ "$elapsed" -ge "$VLLM_HEALTH_TIMEOUT" ]]; then
+      die "Judge did not become healthy within ${VLLM_HEALTH_TIMEOUT}s. Check: docker logs qagredo-vllm-judge --tail 50"
+    fi
+    sleep "$HEALTH_INTERVAL"
+    elapsed=$((elapsed + HEALTH_INTERVAL))
+  done
+}
+
+_vllm_require_both_healthy() {
+  curl -sf http://localhost:7100/health >/dev/null 2>&1 \
+    || die "Generator not healthy on :7100. Run: bash run.sh --vllm-up generator"
+  curl -sf http://localhost:7101/health >/dev/null 2>&1 \
+    || die "Judge not healthy on :7101. Run: bash run.sh --vllm-up judge"
+}
+
+_vllm_up() {
+  local target="${1:-}"
+  case "${target}" in
+    generator)
+      _log "Starting vLLM Generator (GPU 0, port 7100) ..."
+      docker compose "${COMPOSE_ARGS[@]}" up -d vllm
+      _vllm_wait_generator
+      ;;
+    judge)
+      _log "Starting vLLM Judge (GPU 1, port 7101) ..."
+      docker compose "${COMPOSE_ARGS[@]}" up -d vllm-judge
+      _vllm_wait_judge
+      ;;
+    all)
+      _log "Starting vLLM Generator + Judge ..."
+      docker compose "${COMPOSE_ARGS[@]}" up -d vllm vllm-judge
+      _vllm_wait_generator
+      _vllm_wait_judge
+      ;;
+    *)
+      die "Usage: bash run.sh --vllm-up generator|judge|all"
+      ;;
+  esac
+}
+
+_run_vllm_pipeline() {
+  local use_no_deps="${1:-0}"
+  _log "Running QAGRedo pipeline ..."
+  if [[ "${#PIPELINE_ARGS[@]}" -gt 0 ]]; then
+    _log "Pipeline args           : ${PIPELINE_ARGS[*]}"
+  fi
+  trap fix_host_ownership EXIT
+  if [[ "$use_no_deps" == "1" ]]; then
+    docker compose "${COMPOSE_ARGS[@]}" run --rm --no-deps qagredo \
+      python /workspace/run_qa_pipeline.py "${PIPELINE_ARGS[@]}"
+  else
+    docker compose "${COMPOSE_ARGS[@]}" run --rm qagredo \
+      python /workspace/run_qa_pipeline.py "${PIPELINE_ARGS[@]}"
+  fi
+}
 
 # After Docker runs as root, fix cache/output folders so you can delete them.
 fix_host_ownership() {
@@ -294,6 +402,66 @@ case "${1:-}" in
     bash "$HOST_DIR/scripts/utils/summarize_run.sh" "$@"
     exit 0
     ;;
+  --minimise|--minimize)
+    shift
+    # Export minimal artifacts from existing *_analysis.json outputs.
+    # Default target is the latest run folder in ./output.
+    if [[ $# -eq 0 ]]; then
+      _latest_run_dir="$(
+        python3 - "$HOST_DIR/output" <<'PYTHON_LATEST'
+from pathlib import Path
+import re
+import sys
+
+base = Path(sys.argv[1])
+if not base.exists():
+    raise SystemExit(1)
+
+pat = re.compile(r"^\d{4}-\d{2}-\d{2}(_\d{6})?$")
+run_dirs = [p for p in base.rglob("*") if p.is_dir() and pat.match(p.name)]
+if not run_dirs:
+    raise SystemExit(1)
+print(max(run_dirs, key=lambda d: d.name))
+PYTHON_LATEST
+      )" || die "No run folders found under $HOST_DIR/output. Run the pipeline first or pass a path."
+      python3 "$HOST_DIR/scripts/utils/export_analysis_minimal.py" "$_latest_run_dir"
+    else
+      python3 "$HOST_DIR/scripts/utils/export_analysis_minimal.py" "$@"
+    fi
+    exit 0
+    ;;
+  --vllm-up)
+    shift
+    _vllm_target="${1:-}"
+    shift || true
+    _vllm_preflight
+    _vllm_up "${_vllm_target}"
+    _log "vLLM ready. Next: bash run.sh --pipeline-only  (or bash run.sh --vllm-up judge if you only started generator)"
+    exit 0
+    ;;
+  --pipeline-only)
+    shift
+    PIPELINE_ARGS=("$@")
+    _ensure_pipeline_config_arg
+    _vllm_preflight
+    [[ -f "$HOST_DIR/${PROFILE_CONFIG_FILE}" ]] \
+      || die "Profile config not found: $HOST_DIR/${PROFILE_CONFIG_FILE}"
+    [[ -f "$HOST_DIR/run_qa_pipeline.py" ]] \
+      || die "Missing: $HOST_DIR/run_qa_pipeline.py"
+    _vllm_require_both_healthy
+    _log "==========================================="
+    _log "QAGRedo Pipeline (vLLM already running)"
+    _log "  Generator             : $VLLM_MODEL @ port 7100"
+    _log "  Judge                 : $VLLM_JUDGE_MODEL @ port 7101"
+    _log "==========================================="
+    _run_vllm_pipeline 1
+    PIPELINE_EXIT=$?
+    if [[ "$PIPELINE_EXIT" -ne 0 ]]; then
+      _warn "Pipeline exited with code $PIPELINE_EXIT"
+    fi
+    _log "Done! Outputs are in: $HOST_DIR/output/"
+    exit "$PIPELINE_EXIT"
+    ;;
   --convert)
     shift
     if [[ $# -lt 2 ]]; then
@@ -319,7 +487,7 @@ FIRST-TIME USERS — DO THIS:
      models path + UID/GID). Each section is labelled "CHANGE ME" or
      "LEAVE ALONE".
 
-  2. Open  config/config.<profile>.yaml  (dev / kubeflow / vllm) and
+  2. Open  config/config.<profile>.yaml  (ollama / kubeflow / vllm) and
      check the four lines marked "CHANGE ME":
        • run.num_documents
        • question_generation.num_questions
@@ -338,25 +506,41 @@ EVERYDAY COMMANDS
   bash run.sh --down                   Stop everything.
   bash run.sh --show-config            Print active profile YAML + .env.
   bash run.sh --summarize --latest     Summarise the most recent run.
+  bash run.sh --minimise               Write *_analysis_minimal.json for latest run.
+
+  vllm profile — split startup (dual GPU, optional):
+  bash run.sh --vllm-up generator      Start Qwen vLLM on GPU 0 (:7100), wait for health.
+  bash run.sh --vllm-up judge          Start Llama judge vLLM on GPU 1 (:7101), wait for health.
+  bash run.sh --vllm-up all            Start both (same as default bash run.sh vLLM phase).
+  bash run.sh --pipeline-only          Run pipeline only (both vLLM must already be healthy).
+  bash run.sh --pipeline-only --num-documents 2
+  bash run.sh -- --resume              Skip docs with *_analysis.json; reuse latest run folder.
+  bash run.sh -- --skip-existing-outputs
+                                     Skip docs already in latest run; write to new folder.
+
+  Example 3-step workflow:
+    bash run.sh --vllm-up generator
+    bash run.sh --vllm-up judge
+    bash run.sh --pipeline-only --num-documents 1
 
 
 PROFILES — set in .env  ( QAGREDO_PROFILE=... )
 -----------------------------------------------
-  dev        Ollama already running on this host (start it with: ollama serve).
+  ollama     Ollama already running on this host (start it with: ollama serve).
              Simplest; what you usually want on a laptop or dev server.
   kubeflow   One container that bundles Ollama + QAGRedo. Models are
              mounted from QAGREDO_MODELS_DIR on the host.
              Example for Kubeflow: QAGREDO_MODELS_DIR=/home/jovyan/models
   vllm       Two vLLM GPU containers (generator + judge). Advanced.
              Optional 4-GPU override:
-             QAGREDO_VLLM_COMPOSE_EXTRA=docker-compose.vllm-redserver.yml
+             QAGREDO_VLLM_COMPOSE_EXTRA=docker-compose.vllm-siteserver.yml
              with VLLM_TP_SIZE=2 and VLLM_JUDGE_TP_SIZE=2.
 
 
 EVERYTHING WORTH EDITING — AT A GLANCE
 --------------------------------------
   .env                           → host paths, profile, UID/GID
-  config/config.dev.yaml         → dev profile (Ollama on host)
+  config/config.ollama.yaml      → ollama profile (Ollama on host)
   config/config.kubeflow.yaml    → kubeflow profile (Ollama in container)
   config/config.vllm.yaml        → vllm profile (dual GPU)
   data/                          → your input documents go here
@@ -400,7 +584,7 @@ docker info >/dev/null 2>&1 || die "Docker is not running or not accessible"
 
 if [[ ! -f "$HOST_DIR/${PROFILE_CONFIG_FILE}" ]]; then
   die "Profile config file not found: $HOST_DIR/${PROFILE_CONFIG_FILE}
-  Expected one of: config/config.dev.yaml, config/config.kubeflow.yaml,
+  Expected one of: config/config.ollama.yaml, config/config.kubeflow.yaml,
   config/config.vllm.yaml. If you deleted it, re-extract from the bundle:
     tar xzf qagredo_bundle.tar.gz"
 fi
@@ -436,8 +620,8 @@ case "${QAGREDO_PROFILE}" in
     _log "  Judge model           : ${OLLAMA_JUDGE_MODEL}"
     _log "  GPUs requested        : ${QAGREDO_GPU_COUNT}"
     ;;
-  dev|*)
-    _log "  Profile               : dev (host Ollama)"
+  ollama|*)
+    _log "  Profile               : ollama (host Ollama)"
     _log "  Ollama port           : ${OLLAMA_HOST_PORT}"
     _log "  Generator model       : ${OLLAMA_MODEL}"
     _log "  Judge model           : ${OLLAMA_JUDGE_MODEL}"
@@ -449,42 +633,15 @@ _log "==========================================="
 
 mkdir -p "$HOST_DIR/hf_cache_judge" 2>/dev/null || true
 
-HEALTH_TIMEOUT=300
-HEALTH_INTERVAL=5
-
 if [[ "${QAGREDO_PROFILE}" == "kubeflow" ]]; then
-  _log "Kubeflow profile: starting in-container Ollama + runner ..."
-  # Build-once — cached afterwards.
-  docker compose "${COMPOSE_ARGS[@]}" build qagredo
+  _log "Kubeflow profile: starting/reusing persistent in-container Ollama runner ..."
+  # Reuse preloaded image (do not rebuild by default).
+  # If you need a rebuild, run:
+  #   docker compose "${COMPOSE_ARGS[@]}" build qagredo
+  # Keep Ollama/GPU allocations warm until `bash run.sh --down`.
+  docker compose "${COMPOSE_ARGS[@]}" up -d qagredo
 elif [[ "${QAGREDO_USE_VLLM_STACK:-0}" == "1" ]]; then
-  _log "Starting vLLM Generator + Judge ..."
-  docker compose "${COMPOSE_ARGS[@]}" up -d vllm vllm-judge
-  _log "Waiting for Generator at http://localhost:7100/health ..."
-  elapsed=0
-  while true; do
-    if curl -sf http://localhost:7100/health >/dev/null 2>&1; then
-      _log "Generator is ready! (took ~${elapsed}s)"
-      break
-    fi
-    if [[ "$elapsed" -ge "$HEALTH_TIMEOUT" ]]; then
-      die "Generator did not become healthy within ${HEALTH_TIMEOUT}s. Check: docker logs qagredo-vllm --tail 50"
-    fi
-    sleep "$HEALTH_INTERVAL"
-    elapsed=$((elapsed + HEALTH_INTERVAL))
-  done
-  _log "Waiting for Judge at http://localhost:7101/health ..."
-  elapsed=0
-  while true; do
-    if curl -sf http://localhost:7101/health >/dev/null 2>&1; then
-      _log "Judge is ready! (took ~${elapsed}s)"
-      break
-    fi
-    if [[ "$elapsed" -ge "$HEALTH_TIMEOUT" ]]; then
-      die "Judge did not become healthy within ${HEALTH_TIMEOUT}s. Check: docker logs qagredo-vllm-judge --tail 50"
-    fi
-    sleep "$HEALTH_INTERVAL"
-    elapsed=$((elapsed + HEALTH_INTERVAL))
-  done
+  _vllm_up all
 else
   _log "Waiting for Ollama at http://127.0.0.1:${OLLAMA_HOST_PORT}/api/tags ..."
   elapsed=0
@@ -505,17 +662,28 @@ else
 fi
 
 # Run the Python pipeline inside Docker
-_log "Running QAGRedo pipeline ..."
-if [[ "${#PIPELINE_ARGS[@]}" -gt 0 ]]; then
-  _log "Pipeline args           : ${PIPELINE_ARGS[*]}"
+if [[ "${QAGREDO_PROFILE}" == "kubeflow" ]]; then
+  _log "Running QAGRedo pipeline ..."
+  if [[ "${#PIPELINE_ARGS[@]}" -gt 0 ]]; then
+    _log "Pipeline args           : ${PIPELINE_ARGS[*]}"
+  fi
+  trap fix_host_ownership EXIT
+  docker compose "${COMPOSE_ARGS[@]}" exec -T qagredo \
+    python /workspace/run_qa_pipeline.py "${PIPELINE_ARGS[@]}"
+  PIPELINE_EXIT=$?
+elif [[ "${QAGREDO_USE_VLLM_STACK:-0}" == "1" ]]; then
+  _run_vllm_pipeline 0
+  PIPELINE_EXIT=$?
+else
+  _log "Running QAGRedo pipeline ..."
+  if [[ "${#PIPELINE_ARGS[@]}" -gt 0 ]]; then
+    _log "Pipeline args           : ${PIPELINE_ARGS[*]}"
+  fi
+  trap fix_host_ownership EXIT
+  docker compose "${COMPOSE_ARGS[@]}" run --rm qagredo \
+    python /workspace/run_qa_pipeline.py "${PIPELINE_ARGS[@]}"
+  PIPELINE_EXIT=$?
 fi
-
-# Ensure ownership is fixed even on Ctrl+C or unexpected exit.
-trap fix_host_ownership EXIT
-
-docker compose "${COMPOSE_ARGS[@]}" run --rm qagredo \
-  python /workspace/run_qa_pipeline.py "${PIPELINE_ARGS[@]}"
-PIPELINE_EXIT=$?
 
 if [[ "$PIPELINE_EXIT" -ne 0 ]]; then
   _warn "Pipeline exited with code $PIPELINE_EXIT"
@@ -528,6 +696,7 @@ echo ""
 echo "Next steps:"
 echo "  bash run.sh --summarize --latest       Summarise this run"
 echo "  bash run.sh --summarize --latest --json Save summary as JSON"
+echo "  bash run.sh --minimise                 Export minimal JSON for latest run"
 echo "  bash run.sh --show-config               Show current settings"
 echo "  bash run.sh --down                      Stop all containers"
 echo ""

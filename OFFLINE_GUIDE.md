@@ -33,7 +33,7 @@ flowchart LR
 1) Pick profile in `.env`:
 
 ```bash
-QAGREDO_PROFILE=dev        # host Ollama
+QAGREDO_PROFILE=ollama     # host Ollama
 # QAGREDO_PROFILE=kubeflow # in-container Ollama
 # QAGREDO_PROFILE=vllm     # dual vLLM services
 ```
@@ -63,7 +63,7 @@ bash run.sh --num-documents 2
 | Profile, host paths, UID/GID | `.env` |
 | Question model, judge model, num docs/questions | `config/config.<profile>.yaml` |
 | vLLM GPU IDs (2-GPU default) | `docker-compose.vllm-stack.yml` |
-| 4-GPU vLLM split (optional) | `QAGREDO_VLLM_COMPOSE_EXTRA=docker-compose.vllm-redserver.yml` (see `docs/SERVER_MODEL_PROFILES.md`) |
+| 4-GPU vLLM split (optional) | `QAGREDO_VLLM_COMPOSE_EXTRA=docker-compose.vllm-siteserver.yml` (see `docs/SERVER_MODEL_PROFILES.md`) |
 
 Do not edit `config/config.yaml` for daily use; use profile files instead.
 
@@ -71,11 +71,11 @@ Do not edit `config/config.yaml` for daily use; use profile files instead.
 
 ## Profile behavior
 
-### `dev`
+### `ollama`
 
 - Uses host Ollama at `127.0.0.1:11434`.
 - Requires `ollama` binary on offline host.
-- Model tags come from `config/config.dev.yaml`.
+- Model tags come from `config/config.ollama.yaml`.
 
 ### `kubeflow`
 
@@ -98,7 +98,7 @@ Do not edit `config/config.yaml` for daily use; use profile files instead.
 
 ## Offline transfer checklist
 
-### A) `dev` profile
+### A) `ollama` profile
 
 - `qagredo_bundle.tar.gz`
 - `qagredo-v1.tar`
@@ -114,7 +114,7 @@ Do not edit `config/config.yaml` for daily use; use profile files instead.
 
 - `qagredo_bundle.tar.gz`
 - `qagredo-v1.tar`
-- `vllm-openai_*.rootfs.tar`
+- `vllm-qwen35-localcuda.rootfs.tar` (preferred; from `scripts/save_vllm_qwen35_image.sh`) or `qwen35-localcuda.rootfs.tar` / legacy `vllm-openai_*.rootfs.tar`
 - `models_vllm.tar.gz`
 
 ---
@@ -125,7 +125,7 @@ Do not edit `config/config.yaml` for daily use; use profile files instead.
 # all outputs
 bash scripts/make_offline_tarballs.sh --all
 
-# dev
+# ollama (--image-dev = runner image for ollama profile)
 bash scripts/make_offline_tarballs.sh --bundle --image-dev --models-ollama
 
 # kubeflow
@@ -152,11 +152,15 @@ tar xzf qagredo_bundle.tar.gz
 cd qagredo_host
 
 # 2) one-time setup
-bash setup_offline.sh --profile <dev|kubeflow|vllm>
+bash setup_offline.sh --profile <ollama|kubeflow|vllm>
 
 # 3) run
 bash run.sh --show-config
+# ollama/kubeflow:
 bash run.sh --num-documents 2
+# vllm (split — see "vllm profile — split startup" below):
+# bash run.sh --vllm-up generator && bash run.sh --vllm-up judge
+# bash run.sh --pipeline-only --num-documents 2
 ```
 
 Use `--skip-images` if image tars are already loaded.
@@ -197,15 +201,30 @@ QAGREDO_MODELS_LLM_HOST=/data/models
 1) Change `.env` `QAGREDO_PROFILE`.
 2) Make sure corresponding image tar was loaded.
 3) Make sure corresponding model format exists:
-   - Ollama store for `dev`/`kubeflow`
+   - Ollama store for `ollama`/`kubeflow`
    - HF folders for `vllm`
 4) Edit the matching config file only.
 5) Run:
 
 ```bash
 bash run.sh --status
-bash run.sh
+# ollama/kubeflow: bash run.sh
+# vllm: split startup (see "vllm profile — split startup" above) or bash run.sh
 ```
+
+---
+
+## Resume / skip already-processed documents
+
+Skip inputs that already have `*_analysis.json` in a prior run folder. Use **`--resume`** to append to the latest run folder (or `run.resume_run_dir` / `--resume-run-dir`).
+
+| Goal | Example |
+|------|---------|
+| Resume (skip + same run folder) | `bash run.sh --pipeline-only -- --resume` |
+| Skip only (new run folder) | `bash run.sh -- --skip-existing-outputs` |
+| Pin run folder | `bash run.sh -- --resume --resume-run-dir 2026-05-26_093000` |
+
+Config (`config/config.<profile>.yaml` → `run:`): `skip_existing_outputs`, `resume`, `resume_run_dir`.
 
 ---
 
@@ -213,20 +232,23 @@ bash run.sh
 
 ### `which ollama` is empty
 
-You cannot run `dev` profile. Use `kubeflow` or install Ollama.
+You cannot run `ollama` profile. Use `kubeflow` or install Ollama.
 
 ### `Ollama not reachable on port 11434`
 
-`dev` profile selected, but host Ollama API is unavailable.
+`ollama` profile selected, but host Ollama API is unavailable.
 
 ### vLLM connection errors from runner
 
 Check `config/config.vllm.yaml` base URLs. Must be Docker service names, not localhost.
 
-### `model type qwen3 not recognized` in vLLM
+### `model type qwen3_5 not recognized` in vLLM
 
-Current vLLM stack cannot load that Qwen3 checkpoint version.
-Use Qwen2.5 in vLLM profile, or use Ollama profile for Qwen3.
+You are on an old vLLM image (`v0.5.3.post1` or similar). Fix:
+
+- set `VLLM_IMAGE=qagredo-vllm:qwen35-localcuda` and load/build that image (`scripts/docker_build_vllm_qwen35_compat.sh`), or
+- use Ollama profiles for Qwen3.5 GGUF, or
+- use Qwen2.5-7B with `vllm/vllm-openai:v0.5.3.post1` for a faster legacy stack.
 
 ---
 
@@ -267,10 +289,10 @@ qagredo_host/                          <-- YOU ARE HERE
 |-- verify_offline_deployment.sh         * Verify Docker image matches requirements.txt
 |
 |-- config/
-|   |-- config.dev.yaml                * Dev profile (host Ollama) — edit this
+|   |-- config.ollama.yaml             * Ollama profile (host Ollama) — edit this
 |   |-- config.kubeflow.yaml           * Kubeflow profile (in-container Ollama)
 |   |-- config.vllm.yaml               * vLLM profile (dual GPU)
-|   +-- config.yaml                      Legacy default (kept as a copy of dev)
+|   +-- config.yaml                      Legacy default (mirrors ollama)
 |
 |-- data/
 |   +-- *.jsonl                        * Your input documents (put files here)
@@ -290,7 +312,7 @@ qagredo_host/                          <-- YOU ARE HERE
 |
 |-- run_qa_pipeline.py                   Main pipeline script
 |-- requirements.txt                     Python deps (must match qagredo-v1.tar)
-|-- docker-compose.yml                   Dev profile: runner + host Ollama
+|-- docker-compose.yml                   Ollama profile: runner + host Ollama
 |-- docker-compose.kubeflow.yml          Kubeflow: single image with in-container Ollama
 |-- docker-compose.vllm-stack.yml        vLLM: vllm + vllm-judge + runner
 |-- Dockerfile, Dockerfile.kubeflow      Source Dockerfiles (for on-site rebuilds)
@@ -309,7 +331,7 @@ qagredo_host/                          <-- YOU ARE HERE
 |-- README.md                            Project overview
 |-- .env                                 Host-side settings (edit: profile, data paths)
 |-- hf_cache/, hf_cache_judge/           HF cache (used by vLLM profile)
-|-- models/                              Ollama GGUF store (dev / kubeflow — created by setup)
+|-- models/                              Ollama GGUF store (ollama / kubeflow — created by setup)
 +-- models_llm/                          HuggingFace model dirs (vllm profile — created by setup)
 ```
 
@@ -328,7 +350,7 @@ flowchart LR
 ```
 
 1. **Default 2-GPU host:** `docker-compose.vllm-stack.yml` maps the generator to GPU `0` and the judge to GPU `1`. Use `VLLM_TP_SIZE=1` and `VLLM_JUDGE_TP_SIZE=1` unless you edit `device_ids`.
-2. **4-GPU host (2+2):** set `QAGREDO_VLLM_COMPOSE_EXTRA=docker-compose.vllm-redserver.yml`, with `VLLM_TP_SIZE=2` and `VLLM_JUDGE_TP_SIZE=2` in `.env` (see also `docs/SERVER_MODEL_PROFILES.md`).
+2. **4-GPU host (2+2):** set `QAGREDO_VLLM_COMPOSE_EXTRA=docker-compose.vllm-siteserver.yml`, with `VLLM_TP_SIZE=2` and `VLLM_JUDGE_TP_SIZE=2` in `.env` (see also `docs/SERVER_MODEL_PROFILES.md`).
 3. If `VLLM_TP_SIZE>1` for the generator, you **must** expose that many GPUs on the `vllm` service. Otherwise you get Ray / “required GPUs > available”. `run.sh` blocks TP>1 unless a matching compose override is selected or `QAGREDO_ALLOW_TP2_WITHOUT_SINGLE=1` is set after editing `device_ids`.
 
 **Failure path:** vLLM / Ray “required GPUs > available” means `device_ids` for that service does not match `VLLM_TP_SIZE` or `VLLM_JUDGE_TP_SIZE`.
@@ -362,6 +384,21 @@ bash run.sh --show-config           # Display active profile YAML + env vars
 bash run.sh --help                  # Show all options
 ```
 
+### vllm profile — split startup (dual GPU)
+
+When `QAGREDO_PROFILE=vllm`, start each vLLM container separately, then run the pipeline:
+
+```bash
+bash run.sh --vllm-up generator     # Qwen3.5 on GPU 0, port 7100
+bash run.sh --vllm-up judge         # Llama 3.1 judge on GPU 1, port 7101
+bash run.sh --pipeline-only --num-documents 1
+```
+
+One-shot (same as before): `bash run.sh` starts both vLLM services, waits for health, then runs the pipeline.
+
+Align `.env` (`VLLM_MODEL`, `VLLM_JUDGE_MODEL`, served names) and `config/config.vllm.yaml` (`llm.model`, `judge.model`).
+Qwen3.5 may require `VLLM_IMAGE=qagredo-vllm:qwen35-localcuda` — see `scripts/docker_build_vllm_qwen35_compat.sh`.
+
 ### Summarise results
 
 ```bash
@@ -369,6 +406,18 @@ bash run.sh --summarize --latest              # Summarise latest run
 bash run.sh --summarize --latest --json       # Save summary as JSON
 bash run.sh --summarize --all                 # Summarise all runs
 ```
+
+### Minimal JSON (no pipeline / vLLM rerun)
+
+After a run, strip full `*_analysis.json` to `*_analysis_minimal.json` (content + Q/A only):
+
+```bash
+bash run.sh --minimise
+# or a specific run folder:
+bash run.sh --minimise "output/vllm/qwen-qwen3.5-9b/2026-05-21_171511"
+```
+
+Does not start containers or call the LLM. Same script as `scripts/utils/export_analysis_minimal.py`.
 
 ### Convert input files
 
@@ -391,7 +440,7 @@ to **`convert_to_qagredo_jsonl.py`** (raw `content` stays unchanged). The
 
 ### Port configuration
 
-Use **`.env`** for host port overrides. For the `dev` / `kubeflow` profiles,
+Use **`.env`** for host port overrides. For the `ollama` / `kubeflow` profiles,
 Ollama listens on `OLLAMA_HOST_PORT` (default `11434`). For the `vllm`
 profile, `VLLM_HOST_PORT` (default `7100`) and `VLLM_JUDGE_HOST_PORT`
 (default `7101`) control where the generator and judge services are
@@ -416,12 +465,12 @@ python3 scripts/conversion/convert_to_qagredo_jsonl.py \
     --output data/my_input.jsonl
 ```
 
-### 2. Edit the profile config (e.g. `config/config.dev.yaml`)
+### 2. Edit the profile config (e.g. `config/config.ollama.yaml`)
 
 Open the active profile file and set input selection + run parameters:
 
 ```bash
-vi config/config.dev.yaml
+vi config/config.ollama.yaml
 # or: config/config.kubeflow.yaml / config/config.vllm.yaml — must match QAGREDO_PROFILE
 ```
 
@@ -434,7 +483,7 @@ run:
   input_type: auto                  # not wired to converter; use CLI --input-type
   max_files: 10                     # not read by current scripts
   num_documents: 5                  # how many records to process (0 = all loaded)
-  min_content_words: 20             # not enforced by run_qa_pipeline (reserved)
+  min_content_words: 500            # skip documents below this word count (0 = off)
   min_content_chars: 0
   semantic_normalization:          # not read — use converter --semantic-normalize
     enable: false
@@ -499,7 +548,7 @@ The terminal summary shows Generator, Judge, and Provider. The **run_summary.jso
 Just edit the same profile YAML and run again:
 
 ```bash
-vi config/config.dev.yaml
+vi config/config.ollama.yaml
 bash run.sh
 ```
 
@@ -583,7 +632,7 @@ run:
   input_type: auto                  # not wired to converter; use CLI --input-type
   max_files: 10                     # not read by current scripts
   num_documents: 2                  # 0 = all loaded records
-  min_content_words: 20             # not enforced by run_qa_pipeline (reserved)
+  min_content_words: 500            # skip documents below this word count (0 = off)
   min_content_chars: 0
   semantic_normalization:          # not read — use converter --semantic-normalize
     enable: false
@@ -637,6 +686,7 @@ question_generation:
     enable_comprehensiveness_check: true   # evaluate each question for depth/complexity
     comprehensiveness_min_score: 0.6       # 0.0-1.0, higher = stricter
     comprehensiveness_max_attempts: 2      # regeneration attempts for weak questions
+    comprehensiveness_strict: true       # reject failed slots (no answer for that slot)
 
 # Hallucination checking
 hallucination:
@@ -648,7 +698,7 @@ hallucination:
 All non-host settings (provider, model, temperature, retries, …) are in the
 **profile YAML**, not `.env`. Open the file for the profile you're running:
 
-- `config/config.dev.yaml` — dev profile (host Ollama)
+- `config/config.ollama.yaml` — ollama profile (host Ollama)
 - `config/config.kubeflow.yaml` — kubeflow profile (in-container Ollama)
 - `config/config.vllm.yaml` — vllm profile (dual GPU)
 
@@ -656,12 +706,22 @@ The only env vars that still matter live in `.env`:
 
 | Variable | What it does |
 |---|---|
-| `QAGREDO_PROFILE` | Which profile to run (`dev` / `kubeflow` / `vllm`) |
+| `QAGREDO_PROFILE` | Which profile to run (`ollama` / `kubeflow` / `vllm`) |
 | `QAGREDO_DATA_DIR` (or `QAGREDO_OFFLINE_HOST` + `QAGREDO_OFFLINE_INPUT`) | Where your input documents live |
 | `QAGREDO_MODELS_DIR` | (kubeflow) host path for the Ollama GGUF store |
 | `QAGREDO_MODELS_LLM_HOST` | (vllm) host path for the HuggingFace model dirs |
 | `HOST_UID`, `HOST_GID` | Owner of files written by the container |
 | `VLLM_*` | (vllm) generator/judge model paths and TP size — see `.env` |
+
+In **`config/config.<profile>.yaml`** under `run:` (not `.env`):
+
+| Key | What it does |
+|-----|----------------|
+| `skip_existing_outputs` | Skip documents that already have `*_analysis.json` in the check folder |
+| `resume` | Reuse latest (or `resume_run_dir`) run folder instead of a new timestamp |
+| `resume_run_dir` | Run folder name under `output/<provider>/<model>/`, path, or `latest` |
+
+CLI equivalents: `bash run.sh -- --resume`, `--skip-existing-outputs`, `--resume-run-dir`.
 
 ### Swapping to a bigger vLLM model (e.g. 70B)
 
@@ -673,7 +733,7 @@ The only env vars that still matter live in `.env`:
    VLLM_MODEL=/models/Meta-Llama-3.3-70B-Instruct
    VLLM_SERVED_MODEL_NAME=meta-llama/Meta-Llama-3.3-70B-Instruct
    VLLM_TP_SIZE=2
-   QAGREDO_VLLM_COMPOSE_EXTRA=docker-compose.vllm-redserver.yml
+   QAGREDO_VLLM_COMPOSE_EXTRA=docker-compose.vllm-siteserver.yml
    ```
 
 3. Edit `config/config.vllm.yaml` — set `llm.model` to match
@@ -693,7 +753,7 @@ If your LLMs (Llama, Qwen, or any other models) are already running on a
 **different machine** (e.g. "Server A"), you do not need to start vLLM locally.
 You only need to tell QAGRedo where to find those models.
 
-Edit the **active profile file** — `config/config.dev.yaml`, `config/config.kubeflow.yaml`, or `config/config.vllm.yaml` — matching **`QAGREDO_PROFILE`** in `.env`. The same `llm:` / `judge:` keys apply as in the examples below.
+Edit the **active profile file** — `config/config.ollama.yaml`, `config/config.kubeflow.yaml`, or `config/config.vllm.yaml` — matching **`QAGREDO_PROFILE`** in `.env`. The same `llm:` / `judge:` keys apply as in the examples below.
 
 ### What you need to know before editing
 
@@ -740,10 +800,10 @@ The `"id"` value is what you put in the `model:` field.
 
 ### Step-by-step: Point QAGRedo at Server A
 
-**1. Open the profile config** (example for `dev`):
+**1. Open the profile config** (example for `ollama`):
 
 ```bash
-vi config/config.dev.yaml
+vi config/config.ollama.yaml
 # or: config/config.kubeflow.yaml / config/config.vllm.yaml — must match QAGREDO_PROFILE
 ```
 
@@ -790,7 +850,7 @@ bash run.sh
 > local GPU LLM containers. Run just the pipeline container, or run on the host:
 >
 > ```bash
-> .venv/bin/python run_qa_pipeline.py --config config/config.dev.yaml
+> .venv/bin/python run_qa_pipeline.py --config config/config.ollama.yaml
 > ```
 
 ### Verify connectivity before running
@@ -945,7 +1005,7 @@ Minimal output shape:
 
 ### Post-hoc minimal files (no pipeline rerun)
 
-Use **`scripts/utils/export_analysis_minimal.py`** when full `*_analysis.json` files already exist (on-site archive, handoff, or a run made with `minimal_qa_output: false`) and you want the **minimal** JSON next to them **without** re-running `run.sh` or the LLM stack. Each source `foo_analysis.json` produces **`foo_analysis_minimal.json`** in the same directory.
+Use **`bash run.sh --minimise`** (latest run under `output/`) or **`scripts/utils/export_analysis_minimal.py`** when full `*_analysis.json` files already exist and you want **minimal** JSON next to them **without** re-running the pipeline or the LLM/vLLM stack. Each `foo_analysis.json` produces **`foo_analysis_minimal.json`** in the same directory.
 
 From the bundle root on the host (Python 3 with the repo on the path, same as running other `scripts/utils` tools):
 
@@ -1037,13 +1097,15 @@ If you cannot delete `hf_cache` or `hf_cache_judge` files (created by vLLM as ro
 
 ```bash
 # Fix vLLM generator cache
+# Use the same tag as VLLM_IMAGE in .env (default: qagredo-vllm:qwen35-localcuda)
+VLLM_IMG="${VLLM_IMAGE:-qagredo-vllm:qwen35-localcuda}"
 docker run --rm --privileged --userns=host -u 0 --entrypoint bash \
-  -v "$(pwd)/hf_cache:/hf" vllm/vllm-openai:v0.5.3.post1 \
+  -v "$(pwd)/hf_cache:/hf" "$VLLM_IMG" \
   -c "rm -rf /hf/modules /hf/hub"
 
 # Fix vLLM-judge cache
 docker run --rm --privileged --userns=host -u 0 --entrypoint bash \
-  -v "$(pwd)/hf_cache_judge:/hf" vllm/vllm-openai:v0.5.3.post1 \
+  -v "$(pwd)/hf_cache_judge:/hf" "$VLLM_IMG" \
   -c "rm -rf /hf/modules /hf/hub"
 ```
 
@@ -1159,7 +1221,7 @@ bash run.sh
 | Document | Description |
 |----------|-------------|
 | `docs/HANDOVER.md` | Maintainer onboarding: doc map, code map, profiles, artifacts. |
-| `docs/SERVER_MODEL_PROFILES.md` | greenserver / Opserver / redserver → profile mapping. |
+| `docs/SERVER_MODEL_PROFILES.md` | greenserver / Opserver / siteserver → profile mapping. |
 | `docs/ONLINE_SETUP_GUIDE.md` | Build machine: bundles, checksums, tarball workflow. |
 | `docs/OFFLINE_SETUP_GUIDE.md` | Offline host setup steps and checklist. |
 | `docs/ALGORITHM_REPORT.md` | Algorithm details: question types, answers, grading. |

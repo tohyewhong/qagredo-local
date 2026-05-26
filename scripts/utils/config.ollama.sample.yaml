@@ -1,5 +1,5 @@
 # Sample QAGRedo config for Ollama. For normal runs, prefer
-# config/config.dev.yaml or config/config.kubeflow.yaml and select the profile
+# config/config.ollama.yaml or config/config.kubeflow.yaml and select the profile
 # with QAGREDO_PROFILE in .env.
 
 offline_mode: true
@@ -24,8 +24,9 @@ run:
   max_files: 0
   num_documents: 2
   save_grounded_qa_pairs_only: false
+  reject_insufficient_answers: true
   minimal_qa_output: false
-  min_content_words: 20
+  min_content_words: 500
   min_content_chars: 0
   semantic_normalization:
     enable: false
@@ -72,6 +73,7 @@ question_generation:
     enable_comprehensiveness_check: true
     comprehensiveness_min_score: 0.6
     comprehensiveness_max_attempts: 2
+    comprehensiveness_strict: true
 
 judge:
   provider: "ollama"
