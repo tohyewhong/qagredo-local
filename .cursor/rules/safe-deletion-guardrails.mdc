@@ -1,0 +1,45 @@
+---
+description: Prevent accidental mass delete, git clean, or docker volume wipe
+alwaysApply: true
+---
+
+# Safe Deletion Guardrails
+
+Follow the user's account-level git safety rules (no `git reset --hard`,
+`git clean -fdx`, or `git push --force` unless explicitly requested).
+
+## Never delete unless asked
+
+Do not use `rm`, the Delete tool, or `git clean` on paths the user did not
+explicitly request in the current task.
+
+## Banned without explicit user words
+
+Require clear intent (`delete`, `remove`, `wipe`, `clean up all`) before:
+
+- `rm -rf` on repo root, `config/`, `utils/`, `scripts/`, `docs/`, `.cursor/`
+- `git clean -fdx`, `git reset --hard`, `git push --force`
+- `docker compose down -v`, `docker volume rm`, `docker system prune -a`
+- Deleting or truncating `/data/tyewhong/qagredo/*.tar` or `*.tar.gz` archives
+- `bash setup_offline.sh --force` (re-extracts models)
+
+## Protected paths
+
+Do not delete or overwrite without listing paths and getting confirmation:
+
+- `.env`, `certbundle/*.crt`
+- `models/`, `models_llm/`, `output/`, `hf_cache`, `hf_cache_judge`
+- `/data/tyewhong/qagredo/` (offline archives)
+- `QAGREDO_DATA_DIR` mounted data (read-only unless task is data prep)
+
+## Multi-file deletes
+
+Before deleting more than 3 files, or any protected path: list paths and
+counts; wait for user confirmation.
+
+## Prefer safe alternatives
+
+- Use `git restore` or rename to `.trash/` instead of permanent delete.
+- Use `git mv` for renames; use `git rm` only when removing from version
+  control was requested.
+- Do not bulk-delete "unused" files during refactors without listing them.

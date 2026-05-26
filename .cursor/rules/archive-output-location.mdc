@@ -19,6 +19,8 @@ Set in `.env`: `QAGREDO_ARCHIVE_DIR=/data/tyewhong/qagredo`
 
 ## Agent behavior
 
+- Never delete or truncate archives under `/data/tyewhong/qagredo/` unless the
+  user explicitly requests it (see `safe-deletion-guardrails.mdc`).
 - Never leave `.tar` / `.tar.gz` in `/home/tyewhong/qagredo/` or `offline_out/` after building; move or write directly to `/data/tyewhong/qagredo/`.
 - When giving manual `docker save` or `tar czf` commands, use `/data/tyewhong/qagredo/` as the output directory.
 - `.zip` archives are not covered by this rule (may live next to datasets, e.g. pathfinder).
