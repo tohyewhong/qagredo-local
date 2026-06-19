@@ -7,6 +7,10 @@ set -euo pipefail
 #
 # Reads all *_analysis.json files in the output directory and produces a
 # concise summary: per-document stats + overall run statistics.
+# Also auto-computes good/bad pair counts and ratios from:
+#   *_analysis_minimal_good_pairs.json
+#   *_analysis_minimal_bad_pairs.json
+# (when those files exist in the same run folder).
 #
 # Usage:
 #   bash scripts/utils/summarize_run.sh                          # latest run in ./output/
@@ -17,6 +21,7 @@ set -euo pipefail
 # Output:
 #   Prints summary to terminal, and optionally saves to a JSON file.
 #   Use --json to save: bash scripts/utils/summarize_run.sh --json
+#   No --good/--bad flags are required; ratios are auto-derived.
 # ============================================================================
 
 HOST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -36,6 +41,8 @@ for arg in "$@"; do
       echo "  --latest    Auto-find the latest date folder in output/"
       echo "  --all       Summarize all dates combined"
       echo "  --json      Also save summary as JSON file"
+      echo "             (good/bad pair ratios are auto-derived when"
+      echo "              *_analysis_minimal_{good,bad}_pairs.json exist)"
       echo "  -h, --help  Show this help"
       echo ""
       echo "Examples:"
@@ -169,6 +176,36 @@ def find_analysis_files(search_dir):
     if not p.exists():
         return []
     return sorted(p.rglob("*_analysis.json"), key=lambda f: f.name)
+
+
+def count_minimal_pairs(search_dir):
+    """Count good/bad QA pairs from minimal export JSON files."""
+    p = Path(search_dir)
+    if not p.exists():
+        return 0, 0
+
+    good_count = 0
+    bad_count = 0
+
+    for good_file in p.rglob("*_analysis_minimal_good_pairs.json"):
+        try:
+            with open(good_file, "r", encoding="utf-8") as fh:
+                payload = json.load(fh)
+        except (json.JSONDecodeError, OSError):
+            continue
+        if isinstance(payload, dict):
+            good_count += len(_as_list(payload.get("qa_pairs")))
+
+    for bad_file in p.rglob("*_analysis_minimal_bad_pairs.json"):
+        try:
+            with open(bad_file, "r", encoding="utf-8") as fh:
+                payload = json.load(fh)
+        except (json.JSONDecodeError, OSError):
+            continue
+        if isinstance(payload, dict):
+            bad_count += len(_as_list(payload.get("qa_pairs")))
+
+    return good_count, bad_count
 
 if mode == "path":
     search_dir = Path(output_dir_arg)
@@ -366,6 +403,15 @@ for d in documents:
     g = d["overall_grade"]
     grade_counts[g] = grade_counts.get(g, 0) + 1
 
+good_pairs, bad_pairs = count_minimal_pairs(search_dir)
+good_bad_total = good_pairs + bad_pairs
+if good_bad_total:
+    bad_ratio = bad_pairs / good_bad_total
+    good_ratio = good_pairs / good_bad_total
+else:
+    bad_ratio = 0.0
+    good_ratio = 0.0
+
 # ---- print summary ----
 SEP = "=" * 80
 THIN = "-" * 80
@@ -424,6 +470,9 @@ print(
     else "  Avg confidence      : N/A"
 )
 print(f"  Grade distribution  : {', '.join(f'{g}: {c}' for g, c in sorted(grade_counts.items()))}")
+print(f"  Good + bad pairs    : {good_bad_total}")
+print(f"  Bad/(good+bad)      : {bad_ratio:.4f}")
+print(f"  Good/(good+bad)     : {good_ratio:.4f}")
 print(THIN)
 print("  PIPELINE TIMINGS")
 print(THIN)
@@ -508,6 +557,11 @@ if save_json:
         "generator_model": documents[0]["model"] if documents else None,
         "judge_model": documents[0].get("judge_model", "unknown") if documents else None,
         "provider": documents[0]["provider"] if documents else None,
+        "good_pairs": good_pairs,
+        "bad_pairs": bad_pairs,
+        "good_plus_bad": good_bad_total,
+        "bad_ratio": round(bad_ratio, 4),
+        "good_ratio": round(good_ratio, 4),
         "run_metrics": {
             "timings_seconds": {
                 "question_generation_total": round(total_qgen_secs, 3),

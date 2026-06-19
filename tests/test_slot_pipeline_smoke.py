@@ -95,9 +95,9 @@ class SlotPipelineSmokeTest(unittest.TestCase):
         return Path("/tmp/mock_qagredo_output.json")
 
     def test_saves_three_pairs_when_num_questions_three(self):
-        cfg_path = _ROOT / "config" / "config.yaml"
+        cfg_path = _ROOT / "config" / "config.ollama.yaml"
         if not cfg_path.is_file():
-            self.skipTest("config/config.yaml not found")
+            self.skipTest("config/config.ollama.yaml not found")
         config = build_effective_config(cfg_path)
 
         fd, path = tempfile.mkstemp(suffix=".jsonl", text=True)

@@ -1,0 +1,93 @@
+{
+  "document": {
+    "id": "demo_collegian",
+    "title": "HBU student publication (demo)",
+    "source": null,
+    "type": null,
+    "content": "The Collegian is the bi-weekly official student publication of Houston Baptist University in Houston, Texas. It was founded in 1963 as a newsletter, and adopted the newspaper format in 1990."
+  },
+  "qa_pairs": [
+    {
+      "question": "How did the format of The Collegian change over time?",
+      "answer": "It began as a newsletter in 1963 and switched to a newspaper format in 1990.",
+      "hallucination_check": {
+        "is_grounded": true,
+        "confidence": 0.92,
+        "issues": [],
+        "grounded_sentences": [
+          "It began as a newsletter in 1963 and switched to a newspaper format in 1990."
+        ],
+        "ungrounded_sentences": [],
+        "method": "semantic"
+      },
+      "citation_spans": [
+        {
+          "start": 153,
+          "end": 189,
+          "text": "adopted the newspaper format in 1990"
+        }
+      ],
+      "citation_notes": [],
+      "source_doc_id": "demo_collegian",
+      "source_title": "HBU student publication (demo)"
+    },
+    {
+      "question": "Which other universities are named in the same city?",
+      "answer": "Rice University and Houston Baptist University are mentioned.",
+      "hallucination_check": {
+        "is_grounded": true,
+        "confidence": 0.88,
+        "issues": [],
+        "grounded_sentences": [
+          "Rice University and Houston Baptist University are mentioned."
+        ],
+        "ungrounded_sentences": [],
+        "method": "hybrid (semantic only — all passed)"
+      },
+      "citation_spans": [
+        {
+          "start": 63,
+          "end": 89,
+          "text": "Houston Baptist University"
+        }
+      ],
+      "citation_notes": [],
+      "source_doc_id": "demo_collegian",
+      "source_title": "HBU student publication (demo)"
+    }
+  ],
+  "question_generation": {
+    "model": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+    "provider": "vllm",
+    "timestamp": "2026-03-30T10:00:00+08:00",
+    "timezone": "Asia/Singapore",
+    "num_questions": 2,
+    "complexity": "high",
+    "question_types": [
+      "temporal",
+      "aggregation"
+    ],
+    "question_validation": null
+  },
+  "answer_generation": {
+    "model": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+    "provider": "vllm",
+    "timestamp": "2026-03-30T10:02:00+08:00",
+    "timezone": "Asia/Singapore",
+    "num_answers": 2
+  },
+  "grading_summary": {
+    "overall_grade": "A",
+    "overall_confidence": 0.9,
+    "grading_method": "hybrid",
+    "judge_model": "Qwen/Qwen2.5-7B-Instruct"
+  },
+  "run_metrics": {
+    "timings_seconds": {
+      "question_generation": 12.5,
+      "answer_generation": 8.2,
+      "grading": 3.1
+    },
+    "quality_counters": {}
+  }
+}

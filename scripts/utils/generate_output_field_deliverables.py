@@ -4,11 +4,8 @@
 Writes docs/QAGRedo_Output_Sample.json (from the repo sample) and rebuilds
 docs/QAGRedo_Output_Fields_Overview.pptx.
 
-For real per-document JSON, start vLLM (and judge if using hybrid), then:
-
-  python3 run_qa_pipeline.py \\
-    --input-file examples/presentation_one_doc.jsonl \\
-    --num-documents 1
+For real per-document JSON, start vLLM on :7100 and judge on :7101, then run
+`run_qa_pipeline.py` (see `docs/OFFLINE_SETUP_GUIDE.md`).
 """
 
 from __future__ import annotations

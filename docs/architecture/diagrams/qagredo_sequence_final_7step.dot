@@ -6,7 +6,7 @@ digraph QAGRedoSequenceFinal {
     pad="0.35",
     nodesep="0.45",
     ranksep="0.55",
-    dpi=200,
+    dpi=96,
     fontname="Arial",
     fontsize=11,
     labelloc=b,
@@ -60,7 +60,7 @@ digraph QAGRedoSequenceFinal {
     fontcolor="#0f172a"
   ];
   judge [
-    label="vLLM-Judge (fallback)\nGPU 1 | :7101\nIndependent grounding verification",
+    label="vLLM-Judge\nGPU 1 | :7101\nIndependent grounding verification",
     fillcolor="#fef3c7",
     color="#d97706",
     fontcolor="#0f172a"

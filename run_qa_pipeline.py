@@ -41,6 +41,7 @@ from utils.hallucination_checker import (  # noqa: E402
 )
 from utils.config_manager import (  # noqa: E402
     build_effective_config,
+    default_config_path,
 )
 from utils.data_loader import (  # noqa: E402
     resolve_data_file_path,
@@ -898,7 +899,7 @@ def _slot_questions_for_pipeline(
 
 
 def _answer_is_insufficient(answer: Any) -> bool:
-    """True when the model refused with the standard insufficient-info phrase."""
+    """True when the model refused with the insufficient-info phrase."""
     return "insufficient information" in str(answer or "").strip().lower()
 
 
@@ -923,6 +924,77 @@ def _pair_passes_grounding_gate(
     except (TypeError, ValueError):
         conf = 0.0
     return conf >= min_confidence
+
+
+def _slot_answer_validation_rejected(qa_result: Dict[str, Any]) -> bool:
+    """True when generate_answers discarded text after failed retries."""
+    meta = qa_result.get("generation_metadata")
+    if not isinstance(meta, dict):
+        return False
+    checks = meta.get("answer_quality_checks")
+    if not isinstance(checks, list) or not checks:
+        return False
+    first = checks[0]
+    if not isinstance(first, dict):
+        return False
+    val = first.get("validation")
+    return isinstance(val, dict) and val.get("accepted") is False
+
+
+def _grading_from_answer_validation(
+    qa_result: Dict[str, Any],
+    question: str,
+    halluc_method: str,
+) -> Optional[Dict[str, Any]]:
+    """Reuse answer-level judge result; skip duplicate grade_qa_results."""
+    meta = qa_result.get("generation_metadata")
+    if not isinstance(meta, dict):
+        return None
+    checks = meta.get("answer_quality_checks")
+    if not isinstance(checks, list) or not checks:
+        return None
+    first = checks[0]
+    if not isinstance(first, dict):
+        return None
+    val = first.get("validation")
+    if not isinstance(val, dict) or val.get("accepted") is not False:
+        return None
+    answers = qa_result.get("answers")
+    answer = ""
+    if isinstance(answers, list) and answers:
+        answer = str(answers[0] or "")
+    try:
+        conf = float(val.get("confidence", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        conf = 0.0
+    check_result: Dict[str, Any] = {
+        "is_grounded": val.get("is_grounded", False),
+        "confidence": conf,
+        "issues": list(val.get("issues") or []),
+        "method": halluc_method,
+    }
+    if conf >= 0.9:
+        grade = "A"
+    elif conf >= 0.8:
+        grade = "B"
+    elif conf >= 0.7:
+        grade = "C"
+    elif conf >= 0.6:
+        grade = "D"
+    else:
+        grade = "F"
+    return {
+        "hallucination_checks": [
+            {
+                "question": question,
+                "answer": answer,
+                "check_result": check_result,
+            }
+        ],
+        "overall_confidence": round(conf, 3),
+        "overall_grade": grade,
+        "grading_method": halluc_method,
+    }
 
 
 def _filter_pairs_and_validation_by_grounding_gate(
@@ -1128,7 +1200,9 @@ def _preflight_llm_judge(config: Dict[str, Any]) -> None:
     }
     graded = grade_qa_results([probe], method="llm")
     if not graded:
-        raise RuntimeError("Judge preflight failed: no grading result returned.")
+        raise RuntimeError(
+            "Judge preflight failed: no grading result returned."
+        )
     checks = graded[0].get("hallucination_checks")
     if not isinstance(checks, list) or not checks:
         raise RuntimeError(
@@ -1446,7 +1520,8 @@ def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
             dropped = base_q_count - len(slot_questions)
             print(
                 f"[INFO] Comprehensiveness strict: {dropped} question(s) "
-                f"rejected; {len(slot_questions)} slot(s) will receive answers."
+                "rejected; "
+                f"{len(slot_questions)} slot(s) will receive answers."
             )
         print(f"[OK] Questions ready in {qtime:.1f} seconds\n")
 
@@ -1485,20 +1560,27 @@ def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
 
                 analysis_info = None
                 gtime = 0.0
-                try:
-                    t_grade = time.time()
-                    # generate_answers() omits document body; grading needs
-                    # content/text for semantic + hybrid judges.
-                    grading_payload = {**document, **qa_result}
-                    graded_results = grade_qa_results(
-                        [grading_payload], method=halluc_method
+                if _slot_answer_validation_rejected(qa_result):
+                    analysis_info = _grading_from_answer_validation(
+                        qa_result,
+                        str(current_question or ""),
+                        halluc_method,
                     )
-                    if not graded_results:
-                        raise RuntimeError(
-                            "grade_qa_results returned no results"
+                try:
+                    if analysis_info is None:
+                        t_grade = time.time()
+                        # generate_answers() omits document body; grading
+                        # needs content/text for semantic + hybrid judges.
+                        grading_payload = {**document, **qa_result}
+                        graded_results = grade_qa_results(
+                            [grading_payload], method=halluc_method
                         )
-                    analysis_info = graded_results[0]
-                    gtime = time.time() - t_grade
+                        if not graded_results:
+                            raise RuntimeError(
+                                "grade_qa_results returned no results"
+                            )
+                        analysis_info = graded_results[0]
+                        gtime = time.time() - t_grade
                 except Exception as exc:
                     print(
                         f"[WARN] Could not grade {doc_id} "
@@ -1578,7 +1660,8 @@ def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
                 if replace_idx >= max_q_rounds:
                     print(
                         f"[WARN] Slot {slot_idx + 1}: max question "
-                        "replacements reached; keeping last answer."
+                        "replacements reached; slot omitted from qa_pairs "
+                        "if still ungrounded."
                     )
                     break
 
@@ -1605,14 +1688,14 @@ def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
                 if not repl_results:
                     print(
                         f"[WARN] Slot {slot_idx + 1}: replacement question "
-                        "generation failed; keeping last answer."
+                        "generation failed."
                     )
                     break
                 repl_questions = repl_results[0].get("questions", [])
                 if not repl_questions:
                     print(
                         f"[WARN] Slot {slot_idx + 1}: replacement question "
-                        "empty; keeping last answer."
+                        "empty."
                     )
                     break
                 current_question = repl_questions[0]
@@ -1645,10 +1728,19 @@ def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
                     and _answer_is_insufficient(slot_pair.get("answer"))
                 ):
                     print(
-                        f"[INFO] Slot {slot_idx + 1}: insufficient-information "
-                        "answer rejected; slot omitted from qa_pairs."
+                        f"[INFO] Slot {slot_idx + 1}: "
+                        "insufficient-information answer rejected; "
+                        "kept in qa_pairs (will be tagged bad in "
+                        "minimise-bad)."
                     )
+                    final_pairs.append(slot_pair)
+                elif _pair_passes_grounding_gate(slot_pair, min_conf):
+                    final_pairs.append(slot_pair)
                 else:
+                    print(
+                        f"[INFO] Slot {slot_idx + 1}: failed grounding "
+                        "gate; kept in qa_pairs (for minimise-bad)."
+                    )
                     final_pairs.append(slot_pair)
 
         if not final_pairs:
@@ -1816,10 +1908,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=Path,
-        default=Path("config/config.yaml"),
+        default=None,
         help=(
             "Path to configuration YAML "
-            "(default: config/config.yaml)"
+            "(default: config/config.<profile>.yaml from QAGREDO_PROFILE; "
+            "defaults to ollama when unset)"
         ),
     )
     parser.add_argument(
@@ -1880,7 +1973,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    effective_config = build_effective_config(args.config)
+    config_path = (
+        args.config if args.config is not None else default_config_path()
+    )
+    effective_config = build_effective_config(config_path)
     run_cfg = effective_config.get("run", {}) or {}
     num_docs = args.num_documents
     if num_docs is None:
@@ -1936,7 +2032,7 @@ def main() -> None:
     model_override = settings.get("model")
     if provider_override or model_override:
         effective_config = build_effective_config(
-            args.config,
+            config_path,
             provider_override=provider_override,
             model_override=model_override,
         )

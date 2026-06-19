@@ -50,7 +50,6 @@ services:
       - ./output:/workspace/output:rw
       - ./hf_cache:/opt/hf_cache:rw
       - ./README.md:/workspace/README.md:rw
-      - ./OFFLINE_GUIDE.md:/workspace/OFFLINE_GUIDE.md:rw
       - ./docs:/workspace/docs:rw
     command:
       - bash

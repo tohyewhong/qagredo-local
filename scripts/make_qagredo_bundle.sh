@@ -16,13 +16,14 @@ set -euo pipefail
 #   * config/config.ollama.yaml                    (profile YAML)
 #   * config/config.kubeflow.yaml                  (profile YAML)
 #   * config/config.vllm.yaml                      (profile YAML)
-#   * config/config.yaml                           (legacy default — kept)
+#   * config/config.<profile>.yaml (ollama, kubeflow, vllm)
+#   * config/README.md
 #   * docker-compose.yml                           (ollama profile)
 #   * docker-compose.kubeflow.yml                  (kubeflow profile)
 #   * docker-compose.vllm-stack.yml                (vllm profile)
 #   * docker-compose.vllm-siteserver.yml            (optional 4-GPU override)
 #   * Dockerfile, Dockerfile.kubeflow              (for rebuilds on-site)
-#   * docs/ (includes HANDOVER.md), README.md, OFFLINE_GUIDE.md, .env
+#   * docs/ (includes HANDOVER.md, OFFLINE_SETUP_GUIDE.md), README.md, .env
 #   * scripts/offline/setup_offline.sh + run.sh + verify + dotenv.template
 #
 # NOT in the bundle (ship as separate tars — see make_offline_tarballs.sh):
@@ -151,8 +152,8 @@ main() {
   cp "$REPO_DIR/config/config.ollama.yaml"   "$STAGING_DIR/config/"
   cp "$REPO_DIR/config/config.kubeflow.yaml" "$STAGING_DIR/config/"
   cp "$REPO_DIR/config/config.vllm.yaml"     "$STAGING_DIR/config/"
-  if [[ -f "$REPO_DIR/config/config.yaml" ]]; then
-    cp "$REPO_DIR/config/config.yaml" "$STAGING_DIR/config/config.yaml"
+  if [[ -f "$REPO_DIR/config/README.md" ]]; then
+    cp "$REPO_DIR/config/README.md" "$STAGING_DIR/config/"
   fi
 
   info "Creating empty output / cache directories ..."

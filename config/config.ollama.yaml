@@ -4,7 +4,6 @@
 #
 #  WHEN IS THIS FILE USED?
 #    Whenever .env has  QAGREDO_PROFILE=ollama  (and you run `bash run.sh`).
-#    (For backward compatibility, QAGREDO_PROFILE=dev also maps to this.)
 #
 #  LAYMAN CHEAT SHEET — the only 4 things you will ever want to change:
 #
@@ -86,6 +85,7 @@ answer_generation:
     max_answer_attempts: 3
     max_regeneration_attempts: 2
     max_question_regeneration_rounds: 3
+    reject_ungrounded_after_retries: true
   coverage_validation:
     enable: true
     min_score_threshold: 0.7

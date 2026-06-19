@@ -41,8 +41,8 @@
   </div>
 
   <div class="note" style="margin-top: 16px;">
-    <strong>Profiles:</strong> <code>QAGREDO_PROFILE=ollama</code> (host Ollama),
-    <code>kubeflow</code> (in-container Ollama), or <code>vllm</code> (dual GPU).
+    <strong>Profiles:</strong> <code>QAGREDO_PROFILE=vllm</code> (default, dual GPU),
+    <code>ollama</code> (host Ollama), or <code>kubeflow</code> (in-container Ollama).
     Config files: <code>config/config.ollama.yaml</code>,
     <code>config.kubeflow.yaml</code>, <code>config.vllm.yaml</code>.
   </div>
@@ -52,6 +52,15 @@
     <code>bash run.sh -- --resume</code> skips documents that already have
     <code>*_analysis.json</code> and reuses the latest run folder under
     <code>output/</code>.
+  </div>
+
+  <div class="note" style="margin-top: 16px;">
+    <strong>Post-run split:</strong>
+    <code>bash run.sh --minimise</code> writes per-document split files;
+    <code>--minimise-good</code> / <code>--minimise-bad</code> are split-only
+    shortcuts
+    <code>*_analysis_minimal_good_pairs.json</code> and
+    <code>*_analysis_minimal_bad_pairs.json</code>.
   </div>
 
   <div class="note" style="margin-top: 16px;">

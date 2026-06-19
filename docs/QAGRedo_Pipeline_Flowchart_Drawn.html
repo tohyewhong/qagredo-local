@@ -106,17 +106,13 @@
 <text x="52" y="520" text-anchor="start" class="lbl">next document</text>
 </svg>
     </div>
-    <p class="lead" style="margin-top:1rem;">
-      <strong>Resume:</strong> before the document loop,
-      <code>run_qa_pipeline.py</code> can skip inputs whose
-      <code>*_analysis.json</code> already exists (<code>--resume</code> or
-      <code>run.skip_existing_outputs</code> in profile YAML).
-    </p>
     <footer>
-      Maintainer docs:
-      <a href="HANDOVER.md" style="color:#2563eb;">docs/HANDOVER.md</a>
-      · Regenerate:
+      Regenerate:
       <code>python3 scripts/utils/_rewrite_drawn_flowchart_html.py</code>
+      · Editable PPTX:
+      <code>python3 scripts/utils/build_qagredo_pipeline_flowchart_pptx.py</code>
+      →
+      <code>docs/architecture/diagrams/QAGRedo_Pipeline_Flowchart_editable.pptx</code>
       · PNG/SVG:
       <code>python3 scripts/utils/render_pipeline_flowchart_png.py</code>
       →

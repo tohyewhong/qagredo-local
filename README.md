@@ -14,11 +14,12 @@ Question–answer generation with **strict LLM judge** verification: documents i
 ```bash
 bash run.sh --status
 bash run.sh -- --num-documents 2    # ollama / kubeflow
+bash run.sh --pipeline-only --num-documents 2    # vllm (after --vllm-up generator/judge)
 ```
 
 For **`vllm`**, prefer split startup: `--vllm-up generator` → `--vllm-up judge` → `--pipeline-only` (see [dual vLLM](#switching-to-dual-vllm-profile-vllm) below).
 
-Use **`config/config.ollama.yaml`**, **`config/config.kubeflow.yaml`**, or **`config/config.vllm.yaml`** for daily runs — not **`config/config.yaml`** alone.
+Set **`QAGREDO_PROFILE`** in `.env`, then edit **`config/config.<profile>.yaml`** for model tags and run counts (lines marked `CHANGE ME`).
 
 ## Minimal output (content + question + answer)
 
@@ -34,17 +35,30 @@ Convert an existing run folder after the fact (no re-run). Strips model reasonin
 bash run.sh --minimise
 # or target a specific folder:
 bash run.sh --minimise "/path/to/output/<provider>/<model>/<run_timestamp>"
+
+# --minimise now also exports per-document good/bad pair files
+# (use --minimise-good / --minimise-bad only when you want one side explicitly)
+bash run.sh --minimise-good "/path/to/output/<provider>/<model>/<run_timestamp>"
+bash run.sh --minimise-bad  "/path/to/output/<provider>/<model>/<run_timestamp>"
 ```
+
+`--minimise` writes all three per-document outputs (`*_analysis_minimal.json`,
+`*_analysis_minimal_good_pairs.json`, `*_analysis_minimal_bad_pairs.json`).
+`--minimise-good` and `--minimise-bad` remain available when you only want one split:
+- `*_analysis_minimal_good_pairs.json`
+- `*_analysis_minimal_bad_pairs.json`
 
 ## Profiles
 
 | Profile | When to use |
 |---------|-------------|
-| **`ollama`** | Host has `ollama`; API at `127.0.0.1:11434`. (`dev` is a deprecated alias.) |
+| **`ollama`** | Host has `ollama`; API at `127.0.0.1:11434`. |
 | **`kubeflow`** | No host Ollama binary — Ollama runs **inside** the `qagredo-kubeflow` container; set **`QAGREDO_MODELS_DIR`** to an Ollama store (`blobs/`, `manifests/`). `run.sh` reuses the loaded image (no default rebuild), keeps Ollama warm across runs, and releases on `bash run.sh --down`. |
 | **`vllm`** | Two containers: **`vllm`** (generator) and **`vllm-judge`**; HF models + vLLM image. Use **`docker-compose.vllm-siteserver.yml`** via **`QAGREDO_VLLM_COMPOSE_EXTRA`** for a 4-GPU (2+2) host. |
 
 Server-specific guidance (greenserver, Opserver, siteserver): **`docs/SERVER_MODEL_PROFILES.md`**.
+JSON/JSONL -> TXT conversion commands for Opserver/siteserver are documented in
+that same file under **"Input conversion on Opserver/siteserver"**.
 
 ## Offline packaging
 
@@ -87,7 +101,15 @@ Prefer the central docs hub first: **`docs/README.md`**.
 | `ollama: command not found` | Cannot use **`ollama`** profile; use **`kubeflow`** or install host Ollama. |
 | `Ollama not reachable on port 11434` | Start **`ollama serve`** or switch profile. |
 | vLLM connection errors | In **`config/config.vllm.yaml`**, use service names **`http://vllm:7100/v1`** and **`http://vllm-judge:7101/v1`**, not `localhost`. |
-| Qwen3.5 / `qwen3_5` errors on vLLM | Set **`VLLM_IMAGE=qagredo-vllm:qwen35-localcuda`** (`scripts/docker_build_vllm_qwen35_compat.sh`), or use Ollama profiles, or Qwen2.5 + `v0.5.3.post1`. |
+| Generator not healthy on :7100 | Run `bash run.sh --vllm-up generator` (and judge on :7101) before `--pipeline-only` |
+| Resume run processes zero new docs | Raise `--num-documents`; skipped short/duplicate records still count toward the limit |
+
+## Summarise and export
+
+```bash
+bash run.sh --summarize --latest --json
+bash run.sh --minimise "output/<provider>/<model>/<run_timestamp>"
+```
 
 ---
 
@@ -132,7 +154,9 @@ Skip inputs that already have `*_analysis.json` in a prior run folder; optionall
 **vLLM example** (generator/judge already up):
 
 ```bash
-bash run.sh --pipeline-only -- --resume
+bash run.sh --pipeline-only --resume --num-documents 100
 ```
+
+(`--` before `--resume` is optional after `--pipeline-only`.)
 
 Config keys in **`config/config.<profile>.yaml`** under `run:`: `skip_existing_outputs`, `resume`, `resume_run_dir` (see **`config/config.vllm.yaml`** for defaults).

@@ -37,7 +37,7 @@ digraph NetworkDockerComposeOllama {
     color="#cbd5e1";
     style="rounded";
 
-    runner [label="Container: qagredo-runner\nQAGRedo pipeline\nrun_qa_pipeline.py\n(CLI; no service port on qagredo)\nQAGREDO_USE_OLLAMA=1"];
+    runner [label="Container: qagredo-runner\nQAGRedo pipeline\nrun_qa_pipeline.py\n(CLI; no service port on qagredo)\nQAGREDO_PROFILE=ollama"];
     framework [label="Inside runner:\nLangChain (+ optional LangGraph in tree)", fillcolor="#e0f2fe", color="#0ea5e9"];
  }
 

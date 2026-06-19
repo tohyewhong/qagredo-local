@@ -93,6 +93,7 @@ answer_generation:
     max_answer_attempts: 3
     max_regeneration_attempts: 2
     max_question_regeneration_rounds: 3
+    reject_ungrounded_after_retries: true
   coverage_validation:
     enable: true
     min_score_threshold: 0.7

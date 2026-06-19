@@ -103,6 +103,46 @@ store containing `blobs/` and `manifests/`. In this profile, `run.sh` reuses
 the loaded image (no default rebuild) and keeps Ollama warm until
 `bash run.sh --down`.
 
+### Input conversion on Opserver/siteserver (JSON/JSONL -> TXT)
+
+Use this when your source is JSON/JSONL and you want one `.txt` file per
+document for `run.input_folder` + `run.input_glob: "*.txt"` runs.
+
+```mermaid
+flowchart LR
+  A[input.json] --> B[convert_to_qagredo_jsonl.py]
+  B --> C[input.jsonl]
+  C --> D[split_jsonl_to_txt.py]
+  D --> E[data/txt/*.txt]
+  E --> F[bash run.sh]
+```
+
+Commands:
+
+```bash
+# 1) JSON -> JSONL (skip this step if you already have .jsonl)
+python3 scripts/conversion/convert_to_qagredo_jsonl.py \
+  --input "/path/to/input.json" \
+  --output "/path/to/input.jsonl"
+
+# 2) JSONL -> one TXT per record
+python3 scripts/utils/split_jsonl_to_txt.py \
+  --input "/path/to/input.jsonl" \
+  --output-dir "/home/tyewhong/qagredo/data/txt"
+```
+
+Then run with folder mode (example in `config/config.vllm.yaml`):
+
+```yaml
+run:
+  input_folder: "."
+  input_glob: "*.txt"
+  input_file: ""
+```
+
+If you do not need TXT files, you can point `run.input_file` directly to one
+`.json` or `.jsonl` and skip the split step.
+
 ## siteserver
 
 siteserver is offline and has 4 GPUs. Use it for the main performance comparison:
@@ -145,7 +185,9 @@ bash run.sh -- --num-documents 2
 ```
 
 ```bash
-bash run.sh --minimise    # optional: minimal JSON from latest run (no vLLM rerun)
+bash run.sh --minimise    # optional: minimal JSON + good/bad pair split from latest run (no vLLM rerun)
+bash run.sh --minimise-good   # optional: per-doc good pairs split
+bash run.sh --minimise-bad    # optional: per-doc bad pairs split
 ```
 
 **Default 2-GPU siteserver** (no compose override): use the same split commands without

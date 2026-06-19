@@ -4,8 +4,8 @@ from pptx import Presentation
 from pptx.util import Inches, Pt
 
 
-OUTFILE = Path("/home/tyewhong/qagredo/docs/QAGRedo_End_to_End_Workflow_Breakdown.pptx")
-DOCS_DIR = Path("/home/tyewhong/qagredo/docs")
+DOCS_DIR = Path(__file__).resolve().parents[2] / "docs"
+OUTFILE = DOCS_DIR / "QAGRedo_End_to_End_Workflow_Breakdown.pptx"
 
 IMG = {
     "full": DOCS_DIR / "qagredo_full_pipeline_flow_16x9.png",

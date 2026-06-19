@@ -1,5 +1,5 @@
-/* Legacy: two vLLM containers + runner. Default: Ollama — see
-   network_docker_compose_ollama.dot and NETWORK_DIAGRAM.md. */
+/* vLLM-default network layout: two vLLM containers + runner.
+   Ollama alternative: network_docker_compose_ollama.dot. */
 digraph NetworkDockerCompose {
   graph [
     rankdir=LR,

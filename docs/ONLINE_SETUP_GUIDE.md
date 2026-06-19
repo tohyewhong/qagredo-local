@@ -17,7 +17,15 @@ From repo root:
 bash run.sh --status
 bash run.sh -- --num-documents 2
 bash run.sh --minimise
+# split-only commands (optional)
+bash run.sh --minimise-good
+bash run.sh --minimise-bad
 ```
+
+`--minimise` now writes all three per-document outputs:
+- `*_analysis_minimal.json`
+- `*_analysis_minimal_good_pairs.json`
+- `*_analysis_minimal_bad_pairs.json`
 
 Edit only:
 

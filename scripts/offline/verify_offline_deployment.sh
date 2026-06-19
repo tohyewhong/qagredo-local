@@ -40,7 +40,8 @@ done
 PROFILE="${REQUESTED_PROFILE:-${QAGREDO_PROFILE:-ollama}}"
 case "$PROFILE" in
   dev)
-    echo "[WARN] Profile 'dev' is deprecated; using 'ollama' instead." >&2
+    echo "[WARN] QAGREDO_PROFILE=dev is the old name for ollama; using ollama." >&2
+    echo "[WARN] Update .env: QAGREDO_PROFILE=ollama" >&2
     PROFILE="ollama"
     ;;
   ollama|kubeflow|vllm) ;;

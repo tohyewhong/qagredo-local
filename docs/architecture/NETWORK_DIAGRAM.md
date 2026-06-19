@@ -1,149 +1,107 @@
 # QAGRedo network diagram (detailed)
 
-This document describes **how QAGRedo communicates across host + containers**, with **ports**, **URLs**, and **who talks to whom**. See also **`docs/HANDOVER.md`** for profile selection.
+This document describes how QAGRedo communicates across host + containers,
+with ports, URLs, and caller/callee paths.
 
-**Default today:** **Ollama on the host** + **one Docker service** (`qagredo-runner`) in `docker-compose.yml`. See **`diagrams/network_docker_compose_ollama.png`** (source: **`diagrams/network_docker_compose_ollama.dot`**).
+Default profile in this doc: `vllm`.
 
-**Legacy:** two **vLLM** containers — **`docker-compose.vllm-stack.yml`** + GPU override files; older PNG **`diagrams/network_docker_compose.png`** matches that layout only.
+## Causal network view (vLLM default)
 
-Port and model values come from **`.env`** and the active profile config file:
-**`config/config.ollama.yaml`**, **`config/config.kubeflow.yaml`**, or **`config/config.vllm.yaml`**.
+Failures usually appear in this order:
 
-## Causal network view (Ollama default)
+- vLLM generator/judge not healthy on host ports.
+- Runner cannot resolve `vllm` / `vllm-judge` inside compose network.
+- Served model name mismatch (request model != vLLM `--served-model-name`).
+- API key mismatch (`Authorization: Bearer`).
 
-Failures usually show up in this order:
+Quick diagnosis path:
+host health check -> runner internal URL check -> model names -> logs.
 
-- **Ollama not listening** on the host (`11434` / `OLLAMA_HOST_PORT`) → `run.sh` wait loop fails; pipeline cannot reach models.
-- **Runner cannot resolve `host.docker.internal`** → fix `extra_hosts: host-gateway` (already in `docker-compose.yml` on Linux).
-- **Wrong model tags** → HTTP succeeds but Ollama returns errors (model not found).
-- **Thinking models emptying OpenAI `content`** → code uses native `/api/chat` with `think: false` when the base URL is Ollama (see `utils/question_generator.py`, `answer_generator.py`, `hallucination_checker.py`).
+## High-level components (vLLM default)
 
-Diagnose: **host `curl /api/tags` → from inside runner `curl` to `host.docker.internal:11434` → model names → logs**.
+- Host machine: Docker Engine + published ports `7100` (generator), `7101` (judge).
+- Runner container (`qagredo`): executes `python /workspace/run_qa_pipeline.py`.
+- Generator service (`vllm`): OpenAI-compatible API at `http://vllm:7100/v1`.
+- Judge service (`vllm-judge`): OpenAI-compatible API at `http://vllm-judge:7101/v1`.
 
-## High-level components (Ollama default)
-
-- **Host machine**: Docker Engine + **Ollama** (typically `http://127.0.0.1:11434`).
-- **QAGRedo runner container (`qagredo-runner`)**: runs `python /workspace/run_qa_pipeline.py`; calls Ollama at **`http://host.docker.internal:11434`** (OpenAI-compatible **`/v1`** and native **`/api/chat`** as implemented in code).
-- **Framework (inside runner)**: LangChain (prompts / parsing). LangGraph exists in the repo but the main entrypoint is the sequential loop in `run_qa_pipeline.py`.
-- **Runner** is **CLI-only** in the default image: there is no extra HTTP service on the `qagredo` service (no Jupyter port).
-
-## Diagram A — Docker runner + host Ollama (recommended default)
+## Diagram A - vLLM default layout
 
 ```mermaid
 flowchart LR
-  Laptop["Laptop / browser\n(SSH tunnel or port-forward)"]
-  Host["Offline server (host)\nDocker + Ollama on :11434"]
+  Laptop["Laptop / browser"]
+  Host["Offline host\nDocker + compose"]
 
-  subgraph Net["Docker network: qagredo_offline\nService: qagredo\nextra_hosts: host.docker.internal"]
-    Runner["Container: qagredo-runner\nrun_qa_pipeline.py\nQAGREDO_PROFILE=ollama"]
+  subgraph Net["Compose network (qagredo_offline)\nservices: qagredo, vllm, vllm-judge"]
+    Runner["qagredo runner\nrun_qa_pipeline.py\nQAGREDO_PROFILE=vllm"]
+    Gen["vllm generator\n:7100 /v1/*"]
+    Judge["vllm judge\n:7101 /v1/*"]
   end
 
-  Host -->|"docker compose run"| Runner
-  Runner -->|"HTTP host.docker.internal:11434\n/v1/* and /api/chat"| Host
-
-  Laptop -->|"optional: SSH to host / copy outputs"| Host
+  Host -->|"docker compose up"| Gen
+  Host -->|"docker compose up"| Judge
+  Host -->|"docker compose run/exec"| Runner
+  Runner -->|"POST http://vllm:7100/v1/*"| Gen
+  Runner -->|"POST http://vllm-judge:7101/v1/*"| Judge
+  Laptop -->|"optional tunnel to host ports"| Host
 ```
 
-### Raster / vector exports
-
-- **PNG:** `docs/architecture/diagrams/network_docker_compose_ollama.png`
-- **SVG:** `docs/architecture/diagrams/network_docker_compose_ollama.svg`
-- **Graphviz source:** `docs/architecture/diagrams/network_docker_compose_ollama.dot`  
-  Regenerate: `dot -Tpng network_docker_compose_ollama.dot -o network_docker_compose_ollama.png`
-
-### What’s published vs internal (Ollama layout)
-
-- **Ollama** listens on the **host** (not inside the compose project). Default **`11434`** (`OLLAMA_HOST_PORT`).
-- **Runner** does **not** publish separate “LLM ports”; it exits the container network to the host via **`host.docker.internal`**.
-
-### URLs (Ollama)
+### vLLM ports and URLs
 
 | Where | Target | URL | Notes |
-|------|--------|-----|--------|
-| **Host** | Ollama | `http://127.0.0.1:${OLLAMA_HOST_PORT:-11434}/api/tags` | `run.sh` health wait. |
-| **Host** | Ollama OpenAI shim | `http://127.0.0.1:${OLLAMA_HOST_PORT:-11434}/v1/models` | Optional check. |
-| **Inside runner** | Ollama | `http://host.docker.internal:${OLLAMA_HOST_PORT:-11434}/v1/...` | From `OLLAMA_DOCKER_BASE_URL` / compose defaults. |
-| **Native chat** | Ollama | `http://host.docker.internal:${OLLAMA_HOST_PORT:-11434}/api/chat` | Used when URL is detected as Ollama (see `utils/ollama_urls.py`). |
+|---|---|---|---|
+| Host | Generator health | `http://localhost:${VLLM_HOST_PORT:-7100}/health` | vLLM health |
+| Host | Judge health | `http://localhost:${VLLM_JUDGE_HOST_PORT:-7101}/health` | vLLM judge health |
+| Inside runner | Generator | `http://vllm:7100/v1/*` | Internal DNS |
+| Inside runner | Judge | `http://vllm-judge:7101/v1/*` | Internal DNS |
 
-### Two models, one server
-
-- **Generator:** `OLLAMA_MODEL` / `config.llm.model` (e.g. `qwen3.5:9b`).
-- **Judge:** `OLLAMA_JUDGE_MODEL` / `config.judge.model` (e.g. `llama3.1:8b`).
-- Both use the **same host and port**; only the **model** string in each request differs.
-
-### Compose environment (reference)
-
-From `docker-compose.yml` (subset): compose enables reaching host Ollama via **`OLLAMA_*`** URLs (typically `host.docker.internal:11434`), plus `OLLAMA_MODEL` and `OLLAMA_JUDGE_MODEL`. Select **`QAGREDO_PROFILE=ollama`** in `.env`.
+Model names in config must match served model names from vLLM startup.
 
 ---
 
-## Diagram A2 — Two vLLM containers (`docker-compose.vllm-stack.yml`)
+## Diagram B - Ollama alternative profile
 
-Use this when **`QAGREDO_PROFILE=vllm`** (and the vLLM stack compose file is active). Static assets: **`diagrams/network_docker_compose.png`**, **`diagrams/network_docker_compose.dot`**.
+Use when `QAGREDO_PROFILE=ollama`.
 
 ```mermaid
 flowchart LR
-  Laptop["Laptop / browser\n(uses SSH tunnel or port-forward)"]
-  Host["Offline server (host)\nDocker Engine + docker compose"]
-
-  subgraph Net["Docker network: compose project (qagredo_offline)\ninternal DNS names: vllm, vllm-judge, qagredo"]
-    vLLM["Container: qagredo-vllm\nvLLM API server\nlistens: 0.0.0.0:7100\nHTTP endpoints:\n- /health\n- /docs\n- /openapi.json\n- /v1/*"]
-    vLLMJudge["Container: qagredo-vllm-judge\nlistens: 0.0.0.0:7101\nHTTP endpoints:\n- /health\n- /v1/*"]
-    Runner["Container: qagredo-runner\nCalls vLLM via VLLM_BASE_URL"]
+  Host["Host with Ollama :11434"]
+  subgraph Net["Compose network: qagredo"]
+    Runner["qagredo runner\nQAGREDO_PROFILE=ollama"]
   end
-
-  Host -- "TCP ${VLLM_HOST_PORT} -> ${VLLM_PORT}" --> vLLM
-  Host -- "TCP ${VLLM_JUDGE_HOST_PORT} -> ${VLLM_JUDGE_PORT}" --> vLLMJudge
-
-  Runner -- "GET http://vllm:7100/health" --> vLLM
-  Runner -- "POST http://vllm:7100/v1/*\nBearer $VLLM_API_KEY" --> vLLM
-  Runner -- "POST http://vllm-judge:7101/v1/*\nBearer $VLLM_JUDGE_API_KEY" --> vLLMJudge
-
-  Laptop -- "Tunnel to localhost:${VLLM_HOST_PORT}" --> Host
+  Runner -->|"http://host.docker.internal:11434/v1"| Host
 ```
 
-### vLLM compose-mode ports and URLs
+Key Ollama URLs:
 
-| Where you run the command | Target | URL | Notes |
-|---|---|---|---|
-| **Host** | vLLM (published) | `http://localhost:${VLLM_HOST_PORT}/health` | Health probe. |
-| **Host** | vLLM-judge (published) | `http://localhost:${VLLM_JUDGE_HOST_PORT}/health` | Judge health. |
-| **Inside runner** | vLLM (internal) | `http://vllm:7100/v1/*` | Generator. |
-| **Inside runner** | vLLM-judge (internal) | `http://vllm-judge:7101/v1/*` | Judge. |
-
-vLLM typically requires `Authorization: Bearer` matching the `--api-key` used to start the server. **Model** strings must match **`--served-model-name`**.
+- Host: `http://127.0.0.1:${OLLAMA_HOST_PORT:-11434}/api/tags`
+- Runner: `http://host.docker.internal:${OLLAMA_HOST_PORT:-11434}/v1/*`
 
 ---
 
-## “Host-only mode” (no containers) — for completeness
+## Quick troubleshooting map
 
-- **Ollama on host** + **Python on host**: set `llm.base_url` / `judge.base_url` to `http://localhost:11434/v1` and run `python run_qa_pipeline.py`.
-- **Legacy:** vLLM on host + Python on host: `http://localhost:${VLLM_HOST_PORT}/v1`.
+### vLLM default (`QAGREDO_PROFILE=vllm`)
 
-## Quick troubleshooting map (network-related)
+- Generator/judge health fails: check service/container status and port mapping.
+- Runner cannot call `vllm`/`vllm-judge`: verify compose network + service names.
+- 401 or model errors: check API keys and served model names.
 
-**Ollama default**
+### Ollama alternative (`QAGREDO_PROFILE=ollama`)
 
-- **`curl -sf http://127.0.0.1:11434/api/tags` fails on host:** Ollama not running or wrong port (`OLLAMA_HOST_PORT`).
-- **Pipeline in Docker fails but host Ollama works:** check `host.docker.internal` from inside a throwaway container; verify `extra_hosts` in `docker-compose.yml`.
-- **Model errors:** `ollama pull <tag>` for both generator and judge tags; match `OLLAMA_MODEL` / `OLLAMA_JUDGE_MODEL`.
-
-**vLLM profile (`QAGREDO_PROFILE=vllm`)**
-
-- **Startup:** same Docker image on two containers — `bash run.sh --vllm-up generator` (GPU 0, :7100), `bash run.sh --vllm-up judge` (GPU 1, :7101), then `bash run.sh --pipeline-only`; or one-shot `bash run.sh`. See **`docs/Siteserver_vLLM_Change_Guide.md`** Part D.
-- **Host can’t `curl` vLLM health:** container down or port mapping wrong.
-- **Runner DNS:** must resolve `vllm` and `vllm-judge` on the compose network.
-- **`401` / wrong model:** API key or served model name mismatch.
+- Host `/api/tags` fails: Ollama not running or wrong `OLLAMA_HOST_PORT`.
+- Runner cannot reach host Ollama: verify `host.docker.internal` / `extra_hosts`.
 
 ## Output observability note
 
-Recent pipeline instrumentation adds output metrics that help correlate network/model issues with runtime behavior:
+- `*_analysis.json` includes per-document metrics and QA details.
+- `run_summary.json` includes run-level metrics and split ratios.
+- `bash run.sh --minimise` writes:
+  - `*_analysis_minimal.json`
+  - `*_analysis_minimal_good_pairs.json`
+  - `*_analysis_minimal_bad_pairs.json`
 
-- Per-document `*_analysis.json` can include `run_metrics` with stage timings and retry/rewrite counters (when not using minimal-only output).
-- `run_summary.json` can include top-level `run_metrics` aggregates.
+## Source files
 
-## Where this comes from (repo files)
-
-- **Default compose (Ollama):** `docker-compose.yml`
-- **vLLM profile:** `docker-compose.vllm-stack.yml`
-- **Runner image:** `Dockerfile` — `python:3.10-bookworm` base, default `CMD` runs `run_qa_pipeline.py` (CLI).
+- vLLM compose: `docker-compose.vllm-stack.yml`
+- Ollama compose: `docker-compose.yml`
+- Runner entry: `run.sh` -> `run_qa_pipeline.py`

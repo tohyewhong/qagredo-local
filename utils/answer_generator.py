@@ -85,6 +85,17 @@ def _create_answer_prompt(
     return build_answer_prompt(question, document_content, structured=False)
 
 
+def _reject_ungrounded_after_retries_enabled(config: Dict[str, Any]) -> bool:
+    """When true, discard answer text after failed grounding retries."""
+    mt = (config.get("answer_generation") or {}).get("multi_turn") or {}
+    raw = mt.get("reject_ungrounded_after_retries")
+    if raw is None:
+        return True
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).strip().lower() in ("1", "true", "yes", "on")
+
+
 def _validate_and_regenerate_answer(
     answer: str,
     question: str,
@@ -93,11 +104,13 @@ def _validate_and_regenerate_answer(
     min_confidence: float = 0.7,
     max_attempts: int = 3,
 ) -> tuple[str, Dict[str, Any]]:
-    validation_info = {
+    reject_after_retries = _reject_ungrounded_after_retries_enabled(config)
+    validation_info: Dict[str, Any] = {
         "confidence": 0.0,
         "attempts": 0,
         "was_regenerated": False,
         "issues": [],
+        "accepted": True,
     }
 
     # Use hallucination method from config for answer validation (default: llm)
@@ -121,6 +134,7 @@ def _validate_and_regenerate_answer(
     )
 
     if is_grounded and confidence >= min_confidence:
+        validation_info["accepted"] = True
         return answer, validation_info
 
     current_answer = answer
@@ -161,8 +175,13 @@ Generate a NEW answer using ONLY the document. Provide only the answer."""
         )
 
         if is_grounded and confidence >= min_confidence:
+            validation_info["accepted"] = True
             return current_answer, validation_info
 
+    if reject_after_retries:
+        validation_info["accepted"] = False
+        validation_info["rejection_reason"] = "ungrounded_after_retries"
+        return "", validation_info
     return current_answer, validation_info
 
 
@@ -619,12 +638,26 @@ def generate_answers(
                     "attempts": 0,
                     "was_regenerated": False,
                     "issues": [],
+                    "accepted": True,
                 }
+
+            val_block = quality_info.get("validation")
+            validation_rejected = (
+                isinstance(val_block, dict)
+                and val_block.get("accepted") is False
+            )
 
             coverage_cfg = config.get("answer_generation", {}).get(
                 "coverage_validation", {}
             )
-            if coverage_cfg.get("enable", True):
+            if validation_rejected:
+                quality_info["coverage"] = {
+                    "is_covered": None,
+                    "coverage_score": None,
+                    "reason": "skipped: ungrounded after answer retries",
+                    "missing_points": [],
+                }
+            elif coverage_cfg.get("enable", True):
                 min_cov = coverage_cfg.get("min_score_threshold", 0.7)
                 coverage_result = _check_question_coverage(
                     answer=answer,

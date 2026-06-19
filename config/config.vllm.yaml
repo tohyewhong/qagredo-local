@@ -66,7 +66,7 @@ run:
 # -------------------------------------------------------------------------
 llm:
   provider: "vllm"
-  model: "Qwen/Qwen3.5-9B"  # CHANGE ME — must match VLLM_SERVED_MODEL_NAME in .env
+  model: "Qwen/Qwen3.5-9B"  # must match VLLM_SERVED_MODEL_NAME in .env
   base_url: "http://vllm:7100/v1"  # LEAVE ALONE (container-to-container URL)
   api_key: "llama-local"
   temperature: 0.7
@@ -80,9 +80,10 @@ answer_generation:
   multi_turn:
     enable_rejection: true
     min_confidence_threshold: 0.7
-    max_answer_attempts: 3
+    max_answer_attempts: 5
     max_regeneration_attempts: 2
     max_question_regeneration_rounds: 3
+    reject_ungrounded_after_retries: true
   coverage_validation:
     enable: true
     min_score_threshold: 0.7
@@ -104,7 +105,7 @@ question_generation:
     enable_comprehensiveness_check: true
     comprehensiveness_min_score: 0.6
     comprehensiveness_max_attempts: 2
-    comprehensiveness_strict: true
+    comprehensiveness_strict: false
 
 # -------------------------------------------------------------------------
 # JUDGE — vLLM OpenAI server on port 7101 (must be a DIFFERENT model).
@@ -117,7 +118,7 @@ judge:
   temperature: 0.0
   max_tokens: 200
   timeout: 240
-  max_retries: 3
+  max_retries: 5
   retry_delay: 1.0
 
 hallucination:

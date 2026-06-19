@@ -151,14 +151,21 @@ resolve_profile() {
     prof="$(grep -E '^[[:space:]]*QAGREDO_PROFILE=' "$HOST_DIR/.env" \
              | tail -n1 | cut -d= -f2- | tr -d '[:space:]"'"'"'')"
   fi
-  prof="${prof:-ollama}"
+  if [[ -z "$prof" ]]; then
+    _warn "QAGREDO_PROFILE not set; defaulting to ollama for setup."
+    prof="ollama"
+  fi
   case "$prof" in
     ollama|kubeflow|vllm) echo "$prof" ;;
     dev)
-      _warn "Profile 'dev' is deprecated; using 'ollama'."
+      _warn "QAGREDO_PROFILE=dev is the old name for ollama; using ollama."
+      _warn "  Update .env: QAGREDO_PROFILE=ollama"
       echo "ollama"
       ;;
-    *) _warn "Unknown QAGREDO_PROFILE='${prof}', falling back to ollama."; echo "ollama" ;;
+    *)
+      echo "[ERROR] Unknown QAGREDO_PROFILE='${prof}' (expected ollama | kubeflow | vllm)" >&2
+      exit 2
+      ;;
   esac
 }
 

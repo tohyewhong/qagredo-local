@@ -20,7 +20,10 @@ set -euo pipefail
 #   bash run.sh -- --resume                             # skip docs with output; reuse latest run folder
 #   bash run.sh -- --skip-existing-outputs              # skip only; new run folder unless --resume
 #   bash run.sh --summarize --latest
-#   bash run.sh --minimise   # write *_analysis_minimal.json from latest run
+#   bash run.sh --minimise   # post-run: minimal + good/bad pair exports
+#   bash run.sh -- --minimal-qa-output   # during run: slim *_analysis.json
+#
+# Maintainer docs: docs/HANDOVER.md · docs/OFFLINE_SETUP_GUIDE.md
 #
 # Where to put settings:
 #   .env                           — host paths + QAGREDO_PROFILE selector
@@ -31,17 +34,18 @@ set -euo pipefail
 #
 # Extra options (optional, in .env or shell):
 #   OLLAMA_MODEL, OLLAMA_JUDGE_MODEL, OLLAMA_HOST_PORT
-#   QAGREDO_USE_OLLAMA=1 — legacy flag; profile YAML selects the provider
 #   QAGREDO_OFFLINE_HOST + QAGREDO_OFFLINE_INPUT — see .env (sets DATA_DIR)
 # ============================================================================
 
 HOST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 die() { echo "[run][ERROR] $*" >&2; exit 1; }
+_log() { echo "[run] $*"; }
+_warn() { echo "[run][WARN] $*" >&2; }
 
 # Load .env next to this script (your presets and ports).
 # Shell-supplied vars always win over .env — so
 #     QAGREDO_PROFILE=vllm bash run.sh
-# works even when .env says `QAGREDO_PROFILE=dev`.
+# works even when .env sets a different profile.
 if [[ -f "$HOST_DIR/.env" ]]; then
   # Snapshot existing shell env (just the names), then source .env, then
   # restore the snapshot so caller-provided values take precedence.
@@ -104,8 +108,6 @@ if [[ "${HOST_UID}" != "${_current_uid}" || "${HOST_GID}" != "${_current_gid}" ]
   fi
 fi
 
-export QAGREDO_USE_VLLM_STACK="${QAGREDO_USE_VLLM_STACK:-0}"
-export QAGREDO_USE_OLLAMA="${QAGREDO_USE_OLLAMA:-1}"
 export OLLAMA_HOST_PORT="${OLLAMA_HOST_PORT:-11434}"
 export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://localhost:${OLLAMA_HOST_PORT}/v1}"
 export OLLAMA_MODEL="${OLLAMA_MODEL:-qwen3.5:9b}"
@@ -114,29 +116,28 @@ export OLLAMA_JUDGE_BASE_URL="${OLLAMA_JUDGE_BASE_URL:-http://localhost:${OLLAMA
 export OLLAMA_JUDGE_MODEL="${OLLAMA_JUDGE_MODEL:-llama3.1:8b-instruct-fp16}"
 
 # ---------------------------------------------------------------------------
-# Profile selection: one of ollama | kubeflow | vllm
-#   ollama   (default) host Ollama + runner container  (docker-compose.yml)
+# Profile selection: ollama | kubeflow | vllm
+#   ollama   host Ollama + runner container  (docker-compose.yml)
 #   kubeflow single all-in-one image; Ollama runs inside a persistent container
 #            and reads models from QAGREDO_MODELS_DIR (e.g. /home/jovyan/models).
 #            `bash run.sh --down` releases warm container + GPU memory.
-#   vllm     legacy dual-GPU vLLM stack (docker-compose.vllm-stack.yml).
+#   vllm     dual-GPU vLLM stack (docker-compose.vllm-stack.yml).
 #
-# If QAGREDO_PROFILE is unset but QAGREDO_USE_VLLM_STACK=1, we map to vllm for
-# backwards compatibility.
+#   Unset QAGREDO_PROFILE defaults to ollama (with a warning).
+#   QAGREDO_PROFILE=dev is an old name for ollama (warn once, then run).
 # ---------------------------------------------------------------------------
 if [[ -z "${QAGREDO_PROFILE:-}" ]]; then
-  if [[ "${QAGREDO_USE_VLLM_STACK:-0}" == "1" ]]; then
-    QAGREDO_PROFILE=vllm
-  else
-    QAGREDO_PROFILE=ollama
-  fi
+  _warn "QAGREDO_PROFILE not set in .env — defaulting to ollama."
+  _warn "  For vLLM or Kubeflow, set QAGREDO_PROFILE=vllm or kubeflow in .env."
+  QAGREDO_PROFILE=ollama
 fi
 export QAGREDO_PROFILE
 
 case "${QAGREDO_PROFILE}" in
-  ollama|kubeflow|vllm) : ;;
+  ollama|kubeflow|vllm) ;;
   dev)
-    echo "[run][WARN] QAGREDO_PROFILE=dev is deprecated; use QAGREDO_PROFILE=ollama instead."
+    _warn "QAGREDO_PROFILE=dev is the old name for ollama."
+    _warn "  Update .env: QAGREDO_PROFILE=ollama"
     QAGREDO_PROFILE=ollama
     export QAGREDO_PROFILE
     ;;
@@ -149,7 +150,7 @@ esac
 export QAGREDO_MODELS_DIR="${QAGREDO_MODELS_DIR:-$HOST_DIR/models}"
 export QAGREDO_GPU_COUNT="${QAGREDO_GPU_COUNT:-2}"
 
-# Legacy vLLM stack env (only when QAGREDO_USE_VLLM_STACK=1)
+# vLLM stack env (vllm profile)
 export VLLM_MODEL="${VLLM_MODEL:-/models/Qwen3.5-9B}"
 export VLLM_SERVED_MODEL_NAME="${VLLM_SERVED_MODEL_NAME:-Qwen/Qwen3.5-9B}"
 export VLLM_API_KEY="${VLLM_API_KEY:-llama-local}"
@@ -166,8 +167,6 @@ export QAGREDO_VLLM_COMPOSE_EXTRA="${QAGREDO_VLLM_COMPOSE_EXTRA:-}"
 
 case "${QAGREDO_PROFILE}" in
   vllm)
-    export QAGREDO_USE_OLLAMA=0
-    export QAGREDO_USE_VLLM_STACK=1
     COMPOSE_ARGS=(-f "$HOST_DIR/docker-compose.vllm-stack.yml")
     if [[ -n "${QAGREDO_VLLM_COMPOSE_EXTRA}" ]]; then
       COMPOSE_ARGS+=(-f "$HOST_DIR/${QAGREDO_VLLM_COMPOSE_EXTRA}")
@@ -175,14 +174,10 @@ case "${QAGREDO_PROFILE}" in
     PROFILE_CONFIG_FILE="config/config.vllm.yaml"
     ;;
   kubeflow)
-    export QAGREDO_USE_OLLAMA=1
-    export QAGREDO_USE_VLLM_STACK=0
     COMPOSE_ARGS=(-f "$HOST_DIR/docker-compose.kubeflow.yml")
     PROFILE_CONFIG_FILE="config/config.kubeflow.yaml"
     ;;
   ollama|*)
-    export QAGREDO_USE_OLLAMA=1
-    export QAGREDO_USE_VLLM_STACK=0
     COMPOSE_ARGS=(-f "$HOST_DIR/docker-compose.yml")
     PROFILE_CONFIG_FILE="config/config.ollama.yaml"
     ;;
@@ -206,8 +201,22 @@ _ensure_pipeline_config_arg() {
 PIPELINE_ARGS=("$@")
 _ensure_pipeline_config_arg
 
-_log() { echo "[run] $*"; }
-_warn() { echo "[run][WARN] $*" >&2; }
+_latest_run_dir() {
+  python3 - "$HOST_DIR/output" <<'PYTHON_LATEST'
+from pathlib import Path
+import re
+import sys
+
+base = Path(sys.argv[1])
+if not base.exists():
+    raise SystemExit(1)
+pat = re.compile(r"^\d{4}-\d{2}-\d{2}(_\d{6})?$")
+run_dirs = [p for p in base.rglob("*") if p.is_dir() and pat.match(p.name)]
+if not run_dirs:
+    raise SystemExit(1)
+print(max(run_dirs, key=lambda d: d.name))
+PYTHON_LATEST
+}
 
 HEALTH_TIMEOUT=300
 HEALTH_INTERVAL=5
@@ -333,7 +342,7 @@ case "${1:-}" in
         _log "vLLM stack logs (Ctrl+C to stop)..."
         docker compose "${COMPOSE_ARGS[@]}" logs -f vllm vllm-judge
         ;;
-      kubeflow|dev|*)
+      kubeflow|ollama|*)
         _log "qagredo runner logs (Ctrl+C to stop)..."
         docker compose "${COMPOSE_ARGS[@]}" logs -f qagredo
         ;;
@@ -362,7 +371,7 @@ case "${1:-}" in
         echo "  Generator model  : ${OLLAMA_MODEL}"
         echo "  Judge model      : ${OLLAMA_JUDGE_MODEL}"
         ;;
-      dev|*)
+      ollama|*)
         if curl -sf "http://127.0.0.1:${OLLAMA_HOST_PORT}/api/tags" >/dev/null 2>&1; then
           echo "  Ollama (host): responding (http://localhost:${OLLAMA_HOST_PORT})"
         else
@@ -390,12 +399,20 @@ case "${1:-}" in
     fi
     echo ""
     echo "LLM provider / model / URL come from the profile YAML shown above."
+    echo "See config/README.md for which profile YAML to edit."
     echo ""
     echo "=== Input data ==="
     echo "  Files in DATA_DIR ($DATA_DIR):"
     ls -lh "$DATA_DIR/" 2>/dev/null || echo "    (empty)"
     echo ""
     exit 0
+    ;;
+  --edit-config)
+    _editor="${EDITOR:-vi}"
+    _cfg="$HOST_DIR/${PROFILE_CONFIG_FILE}"
+    [[ -f "$_cfg" ]] || die "Profile config not found: $_cfg"
+    echo "[run] Opening $_cfg (profile=${QAGREDO_PROFILE}) with ${_editor}"
+    exec "$_editor" "$_cfg"
     ;;
   --summarize)
     shift
@@ -405,28 +422,48 @@ case "${1:-}" in
   --minimise|--minimize)
     shift
     # Export minimal artifacts from existing *_analysis.json outputs.
+    # Also export minimal good/bad pair artifacts.
     # Default target is the latest run folder in ./output.
     if [[ $# -eq 0 ]]; then
-      _latest_run_dir="$(
-        python3 - "$HOST_DIR/output" <<'PYTHON_LATEST'
-from pathlib import Path
-import re
-import sys
-
-base = Path(sys.argv[1])
-if not base.exists():
-    raise SystemExit(1)
-
-pat = re.compile(r"^\d{4}-\d{2}-\d{2}(_\d{6})?$")
-run_dirs = [p for p in base.rglob("*") if p.is_dir() and pat.match(p.name)]
-if not run_dirs:
-    raise SystemExit(1)
-print(max(run_dirs, key=lambda d: d.name))
-PYTHON_LATEST
-      )" || die "No run folders found under $HOST_DIR/output. Run the pipeline first or pass a path."
+      _latest_run_dir="$(_latest_run_dir)" \
+        || die "No run folders found under $HOST_DIR/output. Run the pipeline first or pass a path."
       python3 "$HOST_DIR/scripts/utils/export_analysis_minimal.py" "$_latest_run_dir"
+      python3 "$HOST_DIR/scripts/utils/export_analysis_training_jsonl.py" \
+        --mode good "$_latest_run_dir"
+      python3 "$HOST_DIR/scripts/utils/export_analysis_training_jsonl.py" \
+        --mode bad "$_latest_run_dir"
     else
       python3 "$HOST_DIR/scripts/utils/export_analysis_minimal.py" "$@"
+      python3 "$HOST_DIR/scripts/utils/export_analysis_training_jsonl.py" \
+        --mode good "$@"
+      python3 "$HOST_DIR/scripts/utils/export_analysis_training_jsonl.py" \
+        --mode bad "$@"
+    fi
+    exit 0
+    ;;
+  --minimise-good)
+    shift
+    if [[ $# -eq 0 ]]; then
+      _latest_run_dir="$(_latest_run_dir)" \
+        || die "No run folders found under $HOST_DIR/output. Run the pipeline first or pass a path."
+      python3 "$HOST_DIR/scripts/utils/export_analysis_training_jsonl.py" \
+        --mode good "$_latest_run_dir"
+    else
+      python3 "$HOST_DIR/scripts/utils/export_analysis_training_jsonl.py" \
+        --mode good "$@"
+    fi
+    exit 0
+    ;;
+  --minimise-bad)
+    shift
+    if [[ $# -eq 0 ]]; then
+      _latest_run_dir="$(_latest_run_dir)" \
+        || die "No run folders found under $HOST_DIR/output. Run the pipeline first or pass a path."
+      python3 "$HOST_DIR/scripts/utils/export_analysis_training_jsonl.py" \
+        --mode bad "$_latest_run_dir"
+    else
+      python3 "$HOST_DIR/scripts/utils/export_analysis_training_jsonl.py" \
+        --mode bad "$@"
     fi
     exit 0
     ;;
@@ -506,7 +543,9 @@ EVERYDAY COMMANDS
   bash run.sh --down                   Stop everything.
   bash run.sh --show-config            Print active profile YAML + .env.
   bash run.sh --summarize --latest     Summarise the most recent run.
-  bash run.sh --minimise               Write *_analysis_minimal.json for latest run.
+  bash run.sh --minimise               Write minimal + minimal_{good,bad}_pairs exports.
+  bash run.sh --minimise-good          Write *_analysis_minimal_good_pairs.json.
+  bash run.sh --minimise-bad           Write *_analysis_minimal_bad_pairs.json.
 
   vllm profile — split startup (dual GPU, optional):
   bash run.sh --vllm-up generator      Start Qwen vLLM on GPU 0 (:7100), wait for health.
@@ -540,9 +579,8 @@ PROFILES — set in .env  ( QAGREDO_PROFILE=... )
 EVERYTHING WORTH EDITING — AT A GLANCE
 --------------------------------------
   .env                           → host paths, profile, UID/GID
-  config/config.ollama.yaml      → ollama profile (Ollama on host)
-  config/config.kubeflow.yaml    → kubeflow profile (Ollama in container)
-  config/config.vllm.yaml        → vllm profile (dual GPU)
+  config/README.md               → which YAML to edit (read this first)
+  config/config.<profile>.yaml   → active tuning (ollama | kubeflow | vllm)
   data/                          → your input documents go here
   output/                        → results appear here after each run
 
@@ -567,7 +605,7 @@ if [[ "${QAGREDO_PROFILE}" == "kubeflow" ]]; then
     mkdir -p "${QAGREDO_MODELS_DIR}" 2>/dev/null || die "Cannot create ${QAGREDO_MODELS_DIR}"
   fi
 fi
-if [[ "${QAGREDO_USE_VLLM_STACK:-0}" == "1" ]]; then
+if [[ "${QAGREDO_PROFILE}" == "vllm" ]]; then
   [[ -f "$HOST_DIR/docker-compose.vllm-stack.yml" ]] || die "Missing: $HOST_DIR/docker-compose.vllm-stack.yml"
   if [[ -n "${QAGREDO_VLLM_COMPOSE_EXTRA}" ]]; then
     [[ -f "$HOST_DIR/${QAGREDO_VLLM_COMPOSE_EXTRA}" ]] \
@@ -640,7 +678,7 @@ if [[ "${QAGREDO_PROFILE}" == "kubeflow" ]]; then
   #   docker compose "${COMPOSE_ARGS[@]}" build qagredo
   # Keep Ollama/GPU allocations warm until `bash run.sh --down`.
   docker compose "${COMPOSE_ARGS[@]}" up -d qagredo
-elif [[ "${QAGREDO_USE_VLLM_STACK:-0}" == "1" ]]; then
+elif [[ "${QAGREDO_PROFILE}" == "vllm" ]]; then
   _vllm_up all
 else
   _log "Waiting for Ollama at http://127.0.0.1:${OLLAMA_HOST_PORT}/api/tags ..."
@@ -671,7 +709,7 @@ if [[ "${QAGREDO_PROFILE}" == "kubeflow" ]]; then
   docker compose "${COMPOSE_ARGS[@]}" exec -T qagredo \
     python /workspace/run_qa_pipeline.py "${PIPELINE_ARGS[@]}"
   PIPELINE_EXIT=$?
-elif [[ "${QAGREDO_USE_VLLM_STACK:-0}" == "1" ]]; then
+elif [[ "${QAGREDO_PROFILE}" == "vllm" ]]; then
   _run_vllm_pipeline 0
   PIPELINE_EXIT=$?
 else

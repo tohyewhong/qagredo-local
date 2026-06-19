@@ -217,8 +217,9 @@ Before run:
 7. **Smoke test** — pick **one** run mode (see below).
 8. Review output under `output/vllm/<model>/<timestamp>/`.
 9. Optional post-run (no vLLM needed): `bash run.sh --summarize --latest --json` (run-wide stats → `run_summary.json` in that folder).
-10. Optional: `bash run.sh --minimise` (or `--minimise "<that_run_dir>"`) for per-doc `*_analysis_minimal.json`.
-11. Run normal workload; repeat steps 9–10 after large runs if you need handoff files.
+10. Optional: `bash run.sh --minimise` (or `--minimise "<that_run_dir>"`) for per-doc minimal outputs: `*_analysis_minimal.json` plus quality split files (`*_analysis_minimal_good_pairs.json` / `*_analysis_minimal_bad_pairs.json`).
+11. Optional: `bash run.sh --minimise-good` / `--minimise-bad` when you only want one side of the split.
+12. Run normal workload; repeat steps 9–11 after large runs if you need handoff files.
 
 ### D1) Split startup (recommended on siteserver — GPU 0 generator, GPU 1 judge)
 
@@ -244,8 +245,10 @@ Other useful flags (same as `bash run.sh --help`):
 | `bash run.sh --status` | Check compose + `:7100` / `:7101` health |
 | `bash run.sh --logs` | Tail vLLM / pipeline logs |
 | `bash run.sh --down` | Stop all services |
-| `bash run.sh --minimise` | After a run: write `*_analysis_minimal.json` (plain Q/A only; strips Thinking Process / think blocks; use `--force` to overwrite) |
+| `bash run.sh --minimise` | After a run: write `*_analysis_minimal.json` **and** `*_analysis_minimal_{good,bad}_pairs.json` (strips Thinking Process / think blocks; use `--force` where supported) |
 | `bash run.sh --minimise "<run_dir>"` | Same, for a specific run folder under `output/vllm/.../` |
+| `bash run.sh --minimise-good` | Export only per-doc `*_analysis_minimal_good_pairs.json` from existing `*_analysis.json` |
+| `bash run.sh --minimise-bad` | Export only per-doc `*_analysis_minimal_bad_pairs.json` from existing `*_analysis.json` |
 | `bash run.sh --summarize --latest` | Print a text summary of the latest run to the terminal (grades, grounded/ungrounded counts, timings) |
 | `bash run.sh --summarize --latest --json` | Same, and save **`run_summary.json`** next to the `*_analysis.json` files (under `output/vllm/<model>/<timestamp>/`) |
 | `bash run.sh --summarize --all` | Summarise every date folder under `output/` (combined view) |
@@ -344,7 +347,8 @@ Rollback steps:
 - [ ] Run restart sequence (`--down`, `--status`, `--show-config`, then Part **D1** or **D2**)
 - [ ] Validate output and logs
 - [ ] Optional: `bash run.sh --summarize --latest --json` for `run_summary.json` (no pipeline rerun)
-- [ ] Optional: `bash run.sh --minimise` for `*_analysis_minimal.json` (no pipeline rerun)
+- [ ] Optional: `bash run.sh --minimise` for `*_analysis_minimal.json` + per-doc split files (no pipeline rerun)
+- [ ] Optional: `bash run.sh --minimise-good` / `--minimise-bad` when only one split side is needed (no pipeline rerun)
 - [ ] Keep rollback artifacts until completion sign-off
 
 ## Part I: Where to change GPU count, GPU devices, model path, and input data path

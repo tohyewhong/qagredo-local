@@ -103,26 +103,24 @@ flowchart TB
     <section>
       <h2>Runtime profiles</h2>
       <ul class="simple">
+        <li><strong>vllm (default)</strong> — Two GPU services (generator + judge); edit
+        <code>config/config.vllm.yaml</code>.</li>
         <li><strong>ollama</strong> — Ollama on the host; edit
         <code>config/config.ollama.yaml</code>.</li>
         <li><strong>kubeflow</strong> — Ollama inside one container; edit
         <code>config/config.kubeflow.yaml</code>.</li>
-        <li><strong>vllm</strong> — Two GPU services (generator + judge); edit
-        <code>config/config.vllm.yaml</code>.</li>
       </ul>
       <p class="hint">
-        Set <code>QAGREDO_PROFILE</code> in <code>.env</code>. The old name
-        <code>dev</code> still works but is deprecated.
+        Set <code>QAGREDO_PROFILE</code> in <code>.env</code>
+        (<code>ollama</code> | <code>kubeflow</code> | <code>vllm</code>) — required.
       </p>
     </section>
     <section>
       <h2>Resume a partial run</h2>
       <p class="hint" style="margin-top:0;">
         Skip documents that already have <code>*_analysis.json</code> in a prior
-        run folder. Use <code>bash run.sh -- --resume</code> to append to the
-        latest folder, or <code>run.skip_existing_outputs</code> /
-        <code>run.resume</code> in the profile YAML. See
-        <a href="../README.md">README.md</a> and
+        run folder. Use <code>bash run.sh --pipeline-only --resume</code> (vLLM)
+        or <code>bash run.sh -- --resume</code> (ollama/kubeflow). See
         <a href="OFFLINE_SETUP_GUIDE.md">OFFLINE_SETUP_GUIDE.md</a> §8.
       </p>
     </section>
@@ -131,19 +129,27 @@ flowchart TB
       <ul class="simple">
         <li>Timestamped <strong>output folder</strong> with one analysis JSON per
         document (full detail by default).</li>
-        <li>Optional modes can keep only <strong>high-quality Q&amp;A pairs</strong>
-        or <strong>question+answer only</strong> for training-style extracts.</li>
+        <li>Post-run <code>bash run.sh --minimise</code> writes
+        <code>*_analysis_minimal.json</code> plus per-document
+        <code>*_analysis_minimal_good_pairs.json</code> and
+        <code>*_analysis_minimal_bad_pairs.json</code> (no LLM rerun).</li>
+        <li>During a run, <code>bash run.sh -- --minimal-qa-output</code> saves
+        slim <code>*_analysis.json</code> directly — different from
+        <code>--minimise</code>.</li>
+        <li><code>bash run.sh --summarize --latest --json</code> builds
+        <code>run_summary.json</code> for the run folder.</li>
+        <li>Failed slots are kept in full <code>*_analysis.json</code> for
+        bad-pair export unless config omits them.</li>
       </ul>
     </section>
     <section>
       <h2>Where to go next</h2>
       <p style="color:var(--muted);margin:0;">
         Maintainer index:
-        <a href="HANDOVER.md">HANDOVER.md</a>
-        · Engineering detail:
+        <a href="README.md">docs/README.md</a>
+        · <a href="HANDOVER.md">HANDOVER.md</a>
+        · Offline bring-up:
         <a href="OFFLINE_SETUP_GUIDE.md">OFFLINE_SETUP_GUIDE.md</a>
-        · Architecture/network details:
-        <a href="architecture/NETWORK_DIAGRAM.md">architecture/NETWORK_DIAGRAM.md</a>
       </p>
     </section>
   </main>

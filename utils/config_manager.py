@@ -11,7 +11,47 @@ import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CONFIG_PATH = REPO_ROOT / "config" / "config.yaml"
+CONFIG_DIR = REPO_ROOT / "config"
+
+PROFILE_CONFIG_FILENAMES: Dict[str, str] = {
+    "ollama": "config.ollama.yaml",
+    "kubeflow": "config.kubeflow.yaml",
+    "vllm": "config.vllm.yaml",
+}
+
+SUPPORTED_PROFILES = tuple(PROFILE_CONFIG_FILENAMES.keys())
+
+
+def normalize_profile(profile: Optional[str]) -> Optional[str]:
+    """Map QAGREDO_PROFILE values to a supported profile key."""
+    if profile is None:
+        return None
+    key = str(profile).strip().lower()
+    if not key:
+        return None
+    if key == "dev":
+        return "ollama"
+    if key in PROFILE_CONFIG_FILENAMES:
+        return key
+    return None
+
+
+def resolve_profile(profile: Optional[str] = None) -> str:
+    """Resolve profile from argument or QAGREDO_PROFILE; default ollama."""
+    resolved = normalize_profile(profile or os.getenv("QAGREDO_PROFILE"))
+    return resolved if resolved else "ollama"
+
+
+def profile_config_path(profile: Optional[str] = None) -> Path:
+    """Return config/config.<profile>.yaml for a supported profile."""
+    resolved = resolve_profile(profile)
+    return CONFIG_DIR / PROFILE_CONFIG_FILENAMES[resolved]
+
+
+def default_config_path() -> Path:
+    """Config file used when --config is omitted (uses QAGREDO_PROFILE)."""
+    return profile_config_path()
+
 
 ENV_API_KEY_VARS = {
     "vllm": "VLLM_API_KEY",
@@ -208,37 +248,6 @@ def _apply_offline_input_preset(config: Dict[str, Any]) -> None:
         )
 
 
-def _apply_profile_selection(config: Dict[str, Any]) -> None:
-    run_cfg = config.get("run") if isinstance(config.get("run"), dict) else {}
-    profile = run_cfg.get("profile")
-    if profile is None or str(profile).strip() == "":
-        return
-
-    profile_key = str(profile).strip()
-    profiles_cfg = (
-        config.get("profiles")
-        if isinstance(config.get("profiles"), dict)
-        else {}
-    )
-    selected = (
-        profiles_cfg.get(profile_key)
-        if isinstance(profiles_cfg, dict)
-        else None
-    )
-    if not isinstance(selected, dict):
-        return
-
-    selected_llm = selected.get("llm")
-    if isinstance(selected_llm, dict) and selected_llm:
-        config["llm"] = _deep_merge(config.get("llm", {}) or {}, selected_llm)
-
-    selected_judge = selected.get("judge")
-    if isinstance(selected_judge, dict) and selected_judge:
-        config["judge"] = _deep_merge(
-            config.get("judge", {}) or {}, selected_judge
-        )
-
-
 def _coerce_env_value(key: str, raw: str) -> Any:
     if key in {"timeout", "max_retries", "max_tokens"}:
         return int(raw)
@@ -270,15 +279,10 @@ def _apply_section_environment_overrides(
 
 
 def _apply_environment_overrides(config: Dict[str, Any]) -> None:
-    # The profile config YAML (config.<profile>.yaml) is the source of truth
-    # for provider, base_url, model, and api_key. Environment variables are
-    # only used as a narrow power-user escape hatch for the provider that the
-    # YAML already selected (e.g. override VLLM_MODEL without editing YAML).
-    #
-    # Historical: QAGREDO_USE_OLLAMA=1 used to rewire llm/judge providers on
-    # the fly. That behaviour has been removed to make configuration easier
-    # to reason about. To switch providers, edit the profile YAML or set
-    # QAGREDO_PROFILE.
+    # Profile YAML is the source of truth for provider, base_url, model, and
+    # api_key. Environment variables are only used as a narrow power-user
+    # escape hatch for the provider that the YAML already selected.
+    # To switch providers, edit the profile YAML or set QAGREDO_PROFILE.
     llm_cfg = config.setdefault("llm", {})
     provider = (llm_cfg.get("provider") or "").lower()
 
@@ -307,11 +311,26 @@ def _apply_environment_overrides(config: Dict[str, Any]) -> None:
 def load_config(
     config_path: Optional[os.PathLike[str]] = None,
 ) -> Dict[str, Any]:
-    path = _ensure_path(config_path, DEFAULT_CONFIG_PATH)
+    if config_path is None:
+        path = default_config_path()
+    else:
+        path = Path(config_path)
+        if not path.is_absolute():
+            path = (REPO_ROOT / path).resolve()
     if not path.exists():
+        profile = normalize_profile(os.getenv("QAGREDO_PROFILE"))
+        hint = (
+            f"config/config.{profile}.yaml (QAGREDO_PROFILE={profile})"
+            if profile
+            else (
+                "set QAGREDO_PROFILE in .env (ollama | kubeflow | vllm) "
+                "or pass --config"
+            )
+        )
         raise FileNotFoundError(
             f"Configuration file not found: {path}\n"
-            "Please create one at config/config.yaml"
+            f"Create or fix the profile YAML — expected: {hint}\n"
+            "See config/README.md for which file to edit."
         )
     config = _load_yaml(path)
     if "llm" not in config:
@@ -337,7 +356,6 @@ def build_effective_config(
     if extra_overrides:
         config = _deep_merge(config, extra_overrides)
 
-    _apply_profile_selection(config)
     _apply_environment_overrides(config)
     _apply_offline_input_preset(config)
 

@@ -1,0 +1,46 @@
+---
+description: Prefer understandable changes—small diffs, plain summaries, diagrams
+alwaysApply: true
+---
+
+# Understanding-First Coding
+
+Optimize for what the user (and future readers) can **explain**, not only
+what runs. Complement vibe-style "make it work" with clarity.
+
+## Before coding
+
+- Restate the goal in one or two sentences when the task is non-trivial.
+- If behavior, profile (`ollama` / `kubeflow` / `vllm`), or env wiring is
+  unclear, ask one focused question instead of guessing.
+
+## While coding
+
+- Prefer **small, focused diffs** over large rewrites unless requested.
+- Use names and structure that match domain terms (generator, judge, slot,
+  grounding gate)—not opaque abbreviations.
+- Comments only for non-obvious business logic; let code carry the rest.
+- When touching pipeline flow, routing, or retries, follow
+  `answer-with-diagram-code.mdc` (Mermaid with failure paths).
+
+## After non-trivial changes
+
+End the response with a short **Understanding block**:
+
+1. **What changed** (files or areas, not a full diff dump).
+2. **Why** (intent in plain language).
+3. **How to verify** (command, test, or config check).
+
+For multi-step or branching behavior, include a small Mermaid flowchart.
+
+## Tests and configs
+
+- If behavior changes, note which test or manual step proves it.
+- If config keys move, point to the profile YAML
+  (`config/config.<profile>.yaml`) and matching `.env` names.
+
+## Avoid
+
+- Large unexplained diffs the user cannot review.
+- Magic numbers or flags without tying them to config or docs.
+- "It works" without saying what was verified.

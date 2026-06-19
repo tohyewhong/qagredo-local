@@ -7,11 +7,9 @@ from pptx.enum.text import PP_ALIGN
 from pptx.util import Inches, Pt
 
 
-OUTFILE = Path(
-    "/home/tyewhong/qagredo/docs/QAGRedo_Technical_Workflow_20slides.pptx"
-)
-ASSET_DIR = Path("/home/tyewhong/.cursor/projects/home-tyewhong/assets")
-DOCS_DIR = Path("/home/tyewhong/qagredo/docs")
+DOCS_DIR = Path(__file__).resolve().parents[2] / "docs"
+ASSET_DIR = DOCS_DIR / "assets"
+OUTFILE = DOCS_DIR / "QAGRedo_Technical_Workflow_20slides.pptx"
 
 IMG = {
     "hero": ASSET_DIR / "slide_visual_01_title_hero.png",

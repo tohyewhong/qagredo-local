@@ -111,6 +111,21 @@ What happens:
 4. Each `bash run.sh` executes the pipeline inside the same warm container; generator + judge both hit `http://127.0.0.1:11434/v1`.
 5. `bash run.sh --down` stops the container and releases GPU memory.
 
+Post-run exports (no pipeline rerun):
+
+```bash
+# Minimal per-document JSON + pair-quality split from existing *_analysis.json
+bash run.sh --minimise
+
+# Split-only commands (optional)
+bash run.sh --minimise-good
+bash run.sh --minimise-bad
+```
+
+Split outputs are written per document:
+- `*_analysis_minimal_good_pairs.json`
+- `*_analysis_minimal_bad_pairs.json`
+
 Override model tags:
 
 ```bash

@@ -57,7 +57,7 @@
 # default for many Llama/Mistral/Qwen2.5-style models. Qwen3.5 (`qwen3_5`) often
 # needs a newer vLLM + Transformers (see repo docker/Dockerfile vllm-qwen35*).
 # If your stack cannot run Qwen3.5, do not use it — point VLLM_* at a supported
-# model instead; align config/config.yaml `llm.model` / `judge.model` with
+# model instead; align config/config.<profile>.yaml `llm.model` / `judge.model` with
 # the served names.
 # -----------------------------------------------------------------------------
 
@@ -68,6 +68,9 @@ services:
   vllm:
     image: ${VLLM_IMAGE:-qagredo-vllm:qwen35-localcuda}
     container_name: qagredo-vllm
+    # Compatibility for hosts where compose deploy.devices is not honored
+    # outside swarm-like behavior (common on some offline servers).
+    runtime: nvidia
     ports:
       - "7100:7100"
     shm_size: "8gb"
@@ -127,6 +130,9 @@ services:
   vllm-judge:
     image: ${VLLM_IMAGE:-qagredo-vllm:qwen35-localcuda}
     container_name: qagredo-vllm-judge
+    # Compatibility for hosts where compose deploy.devices is not honored
+    # outside swarm-like behavior (common on some offline servers).
+    runtime: nvidia
     ports:
       - "7101:7101"
     shm_size: "4gb"
@@ -222,7 +228,6 @@ services:
       - ./hf_cache:/opt/hf_cache:rw
       # Docs (optional)
       - ./README.md:/workspace/README.md:rw
-      - ./OFFLINE_GUIDE.md:/workspace/OFFLINE_GUIDE.md:rw
       - ./docs:/workspace/docs:rw
     command:
       - bash

@@ -46,7 +46,7 @@
 <text text-anchor="middle" x="759.5" y="-104.4" font-family="Arial" font-size="12.00" fill="#1e293b">QAGRedo pipeline</text>
 <text text-anchor="middle" x="759.5" y="-91.4" font-family="Arial" font-size="12.00" fill="#1e293b">run_qa_pipeline.py</text>
 <text text-anchor="middle" x="759.5" y="-78.4" font-family="Arial" font-size="12.00" fill="#1e293b">(CLI; no service port on qagredo)</text>
-<text text-anchor="middle" x="759.5" y="-65.4" font-family="Arial" font-size="12.00" fill="#1e293b">QAGREDO_USE_OLLAMA=1</text>
+<text text-anchor="middle" x="759.5" y="-65.4" font-family="Arial" font-size="12.00" fill="#1e293b">QAGREDO_PROFILE=ollama</text>
 </g>
 <!-- host&#45;&gt;runner -->
 <g id="edge2" class="edge">

@@ -95,8 +95,13 @@ main() {
   ensure_dir "$HOST_DIR/models_embed"
   ensure_dir "$HOST_DIR/hf_cache"
 
-  # Copy configs
-  copy_file "$REPO_DIR/config/config.yaml" "$HOST_DIR/config/config.yaml"
+  # Copy profile configs
+  copy_file "$REPO_DIR/config/config.ollama.yaml" "$HOST_DIR/config/config.ollama.yaml"
+  copy_file "$REPO_DIR/config/config.kubeflow.yaml" "$HOST_DIR/config/config.kubeflow.yaml"
+  copy_file "$REPO_DIR/config/config.vllm.yaml" "$HOST_DIR/config/config.vllm.yaml"
+  if [[ -f "$REPO_DIR/config/README.md" ]]; then
+    copy_file "$REPO_DIR/config/README.md" "$HOST_DIR/config/README.md"
+  fi
 
   # Copy sample input data (skip if already present)
   local data_dst="$HOST_DATA_DIR/dev-data.jsonl"

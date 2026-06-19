@@ -8,11 +8,11 @@ If anything here conflicts with older notes, follow this file. New owners should
 
 ## 1) Pick your runtime profile first
 
-QAGRedo supports three profiles:
+QAGRedo supports three profiles (default in this guide: `vllm`):
 
+- `vllm` - Dual vLLM containers (generator + judge)
 - `ollama` - Host Ollama (requires `ollama` installed on offline host)
 - `kubeflow` - In-container Ollama (no host Ollama binary required)
-- `vllm` - Dual vLLM containers (generator + judge)
 
 For the greenserver, Opserver, and siteserver mapping, see
 `docs/SERVER_MODEL_PROFILES.md`.
@@ -20,7 +20,7 @@ For the greenserver, Opserver, and siteserver mapping, see
 Set in `.env`:
 
 ```bash
-QAGREDO_PROFILE=ollama     # or kubeflow / vllm
+QAGREDO_PROFILE=vllm       # or ollama / kubeflow
 ```
 
 ---
@@ -394,7 +394,7 @@ judge:
   model: "llama3.1:8b-instruct-fp16"
 ```
 
-### C) `vllm`
+### C) `vllm` (default profile)
 
 Requirements (from §4):
 
@@ -540,7 +540,7 @@ Minimal output during a run (only `document.content` + `qa_pairs.question/answer
 bash run.sh -- --minimal-qa-output
 ```
 
-**Post-run** — convert existing full `*_analysis.json` to `*_analysis_minimal.json` (no LLM/vLLM rerun; works with `vllm` after `--pipeline-only` or a full `bash run.sh`):
+**Post-run** — `--minimise` converts existing full `*_analysis.json` to `*_analysis_minimal.json` and writes per-doc good/bad split files (no LLM/vLLM rerun; works with `vllm` after `--pipeline-only` or a full `bash run.sh`):
 
 ```bash
 bash run.sh --minimise
@@ -549,7 +549,29 @@ bash run.sh --minimise "output/vllm/qwen-qwen3.5-9b/2026-05-21_171511"
 # or path under output/<provider>/<model>/<run_timestamp>/
 ```
 
----
+Split-only commands (optional, when you only want one side):
+
+```bash
+bash run.sh --minimise-good
+bash run.sh --minimise-bad
+# or target a specific run folder:
+bash run.sh --minimise-good "output/vllm/qwen-qwen3.5-9b/2026-05-21_171511"
+bash run.sh --minimise-bad  "output/vllm/qwen-qwen3.5-9b/2026-05-21_171511"
+```
+
+These commands write per document:
+- `*_analysis_minimal.json`
+- `*_analysis_minimal_good_pairs.json`
+- `*_analysis_minimal_bad_pairs.json`
+
+**Resume tip:** `--num-documents N` counts records from the start of the sorted input list (including skips). Use a large `N` (or `0` for all) to reach unprocessed docs after many short-file or already-done skips.
+
+**Summarise a run:**
+
+```bash
+bash run.sh --summarize --latest --json
+# or: bash run.sh --summarize "output/vllm/qwen-qwen3.5-9b/<run_timestamp>"
+```
 
 ## 9) Common errors and exact meaning
 
