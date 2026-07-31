@@ -1,9 +1,9 @@
 # =============================================================================
-# QAGRedo offline — runner + host Ollama (default)
+# QAG offline — runner + host Ollama (default)
 # =============================================================================
 #
 # Ollama must be running on the Docker host (same machine), typically on port
-# 11434. The qagredo container reaches it via host.docker.internal (Linux:
+# 11434. The qag container reaches it via host.docker.internal (Linux:
 # extra_hosts host-gateway).
 #
 # Legacy vLLM stack (two GPU services): see docker-compose.vllm-stack.yml.
@@ -11,15 +11,15 @@
 # Usual command:  bash run.sh
 # =============================================================================
 
-name: qagredo_offline
+name: qag_offline
 
 services:
-  qagredo:
+  qag:
     build:
       context: .
       dockerfile: Dockerfile
-    image: qagredo-v1:latest
-    container_name: qagredo-runner
+    image: qag-v1:latest
+    container_name: qag-runner
     privileged: true
     userns_mode: host
     # Host network mode: container shares the host's loopback so
@@ -39,8 +39,8 @@ services:
       HF_HUB_OFFLINE: "1"
       TRANSFORMERS_OFFLINE: "1"
       PYDANTIC_DISABLE_PLUGIN_LOADING: "1"
-      QAGREDO_OFFLINE_HOST: ${QAGREDO_OFFLINE_HOST:-}
-      QAGREDO_OFFLINE_INPUT: ${QAGREDO_OFFLINE_INPUT:-}
+      QAG_OFFLINE_HOST: ${QAG_OFFLINE_HOST:-}
+      QAG_OFFLINE_INPUT: ${QAG_OFFLINE_INPUT:-}
     volumes:
       - ./run_qa_pipeline.py:/workspace/run_qa_pipeline.py:rw
       - ./utils:/workspace/utils:rw

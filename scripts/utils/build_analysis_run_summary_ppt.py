@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a presentation summarizing one QAGRedo doc_*_analysis.json file."""
+"""Build a presentation summarizing one QAG doc_*_analysis.json file."""
 
 from __future__ import annotations
 
@@ -145,7 +145,7 @@ def build_prs(data: Dict[str, Any], src_path: Path) -> Presentation:
     ).text_frame
     tf.clear()
     p = tf.paragraphs[0]
-    p.text = "QAGRedo run summary"
+    p.text = "QAG run summary"
     p.font.size = Pt(36)
     p.font.bold = True
     p.font.color.rgb = NAVY
@@ -359,7 +359,7 @@ def main() -> None:
         type=Path,
         default=None,
         help=(
-            "Output .pptx (default: docs/QAGRedo_Run_Summary_<doc_id>.pptx)"
+            "Output .pptx (default: docs/QAG_Run_Summary_<doc_id>.pptx)"
         ),
     )
     args = parser.parse_args()
@@ -373,7 +373,7 @@ def main() -> None:
     root = Path(__file__).resolve().parents[2]
     out = args.out
     if out is None:
-        out = root / "docs" / f"QAGRedo_Run_Summary_{stem}.pptx"
+        out = root / "docs" / f"QAG_Run_Summary_{stem}.pptx"
     else:
         out = out.expanduser().resolve()
     prs = build_prs(data, path)

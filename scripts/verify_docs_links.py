@@ -28,11 +28,15 @@ def check(base: Path, ref: str, src: Path) -> None:
 
 
 for md in DOCS.rglob("*.md"):
+    if "algorithm-baselines" in md.parts:
+        continue
     text = md.read_text(encoding="utf-8", errors="replace")
     for m in MD_IMG.finditer(text):
         check(md, m.group(1), md)
 
 for html in DOCS.rglob("*.html"):
+    if "algorithm-baselines" in html.parts:
+        continue
     text = html.read_text(encoding="utf-8", errors="replace")
     for m in HTML_SRC.finditer(text):
         check(html, m.group(1), html)

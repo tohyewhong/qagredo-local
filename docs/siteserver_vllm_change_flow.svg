@@ -45,7 +45,7 @@
 <g id="node4" class="node">
 <title>D</title>
 <path fill="#f8fafc" stroke="#334155" d="M370,-417C370,-417 232,-417 232,-417 226,-417 220,-411 220,-405 220,-405 220,-391 220,-391 220,-385 226,-379 232,-379 232,-379 370,-379 370,-379 376,-379 382,-385 382,-391 382,-391 382,-405 382,-405 382,-411 376,-417 370,-417"/>
-<text text-anchor="middle" x="301" y="-401.8" font-family="Arial" font-size="14.00">Build/load qagredo&#45;vllm:</text>
+<text text-anchor="middle" x="301" y="-401.8" font-family="Arial" font-size="14.00">Build/load qag&#45;vllm:</text>
 <text text-anchor="middle" x="301" y="-386.8" font-family="Arial" font-size="14.00">qwen35&#45;localcuda</text>
 </g>
 <!-- B&#45;&gt;D -->
@@ -59,7 +59,7 @@
 <g id="node5" class="node">
 <title>E</title>
 <path fill="#f8fafc" stroke="#334155" d="M284.5,-342C284.5,-342 115.5,-342 115.5,-342 109.5,-342 103.5,-336 103.5,-330 103.5,-330 103.5,-318 103.5,-318 103.5,-312 109.5,-306 115.5,-306 115.5,-306 284.5,-306 284.5,-306 290.5,-306 296.5,-312 296.5,-318 296.5,-318 296.5,-330 296.5,-330 296.5,-336 290.5,-342 284.5,-342"/>
-<text text-anchor="middle" x="200" y="-320.3" font-family="Arial" font-size="14.00">Update QAGRedo config/env</text>
+<text text-anchor="middle" x="200" y="-320.3" font-family="Arial" font-size="14.00">Update QAG config/env</text>
 </g>
 <!-- C&#45;&gt;E -->
 <g id="edge4" class="edge">

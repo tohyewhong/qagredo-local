@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Download Qwen/Qwen3-14B-FP8 into QAGREDO_MODELS_LLM_HOST for vLLM generator.
+# Download Qwen/Qwen3-14B-FP8 into QAG_MODELS_LLM_HOST for vLLM generator.
 set -euo pipefail
 
 HOST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -10,7 +10,7 @@ if [[ -f "$HOST_DIR/.env" ]]; then
   set +a
 fi
 
-MODELS_ROOT="${QAGREDO_MODELS_LLM_HOST:-/data/models}"
+MODELS_ROOT="${QAG_MODELS_LLM_HOST:-/data/models}"
 DEST="${MODELS_ROOT}/Qwen3-14B-FP8"
 HF_ID="Qwen/Qwen3-14B-FP8"
 

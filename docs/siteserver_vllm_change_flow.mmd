@@ -1,8 +1,8 @@
 flowchart TD
     A[Check current state] --> B{Qwen3.5 vLLM image on host?}
     B -- Yes --> C[Reuse existing endpoint/image]
-    B -- No --> D[Build or load qagredo-vllm:qwen35-localcuda]
-    C --> E[Update QAGRedo config/env]
+    B -- No --> D[Build or load qag-vllm:qwen35-localcuda]
+    C --> E[Update QAG config/env]
     D --> E
     E --> F[Restart stack]
     F --> G[Health checks + test run]

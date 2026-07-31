@@ -1,9 +1,9 @@
-# Legacy: full stack with two vLLM GPU services + qagredo runner.
+# Legacy: full stack with two vLLM GPU services + qag runner.
 # Use: docker compose -f docker-compose.vllm-stack.yml up -d
 # Default `bash run.sh` can target host Ollama — see docker-compose.yml.
 
 # =============================================================================
-# QAGRedo offline — three Docker services (vLLM historical layout)
+# QAG offline — three Docker services (vLLM historical layout)
 # =============================================================================
 #
 # What runs (models are *not* fixed in this file — they come from .env):
@@ -12,10 +12,10 @@
 #                 VLLM_SERVED_MODEL_NAME to a checkpoint your CUDA/vLLM image
 #                 actually supports. If Qwen3.5 is unsupported on your driver,
 #                 use e.g. Llama-3.1, Qwen2.5, Mistral, or another compatible model;
-#                 override paths under QAGREDO_MODELS_LLM_HOST.
+#                 override paths under QAG_MODELS_LLM_HOST.
 #   vllm-judge  — separate model for grading (default GPU 1). Set
 #                 VLLM_JUDGE_MODEL and VLLM_JUDGE_SERVED_NAME in .env.
-#   qagredo     — Python job: calls both vLLM services and writes results (CPU).
+#   qag     — Python job: calls both vLLM services and writes results (CPU).
 #
 # Why two AIs?  If the same model checks its own work, it can be biased.
 # A different model gives a more honest second opinion.
@@ -27,7 +27,7 @@
 #   config/     → /workspace/config     (settings)
 #   DATA_DIR *  → /workspace/data       (your input documents — see .env)
 #   output/     → /workspace/output     (results)
-#   QAGREDO_MODELS_LLM_HOST (default /data/models) → /models (generator + judge)
+#   QAG_MODELS_LLM_HOST (default /data/models) → /models (generator + judge)
 #   hf_cache/   → Hugging Face cache
 #
 # * DATA_DIR comes from .env + run.sh (preset 1–4) or defaults to ./data.
@@ -49,7 +49,7 @@
 # Do not set CUDA_VISIBLE_DEVICES here; use device_ids only.
 # Model names / URLs for the AIs are in config/config.vllm.yaml, not here.
 #
-# LLM host path: QAGREDO_MODELS_LLM_HOST in .env (default /data/models). For a
+# LLM host path: QAG_MODELS_LLM_HOST in .env (default /data/models). For a
 # repo-local copy use e.g. ./data/models. Override VLLM_* to match the folder
 # and served names of *your* checkpoints.
 #
@@ -61,13 +61,13 @@
 # the served names.
 # -----------------------------------------------------------------------------
 
-name: qagredo_offline
+name: qag_offline
 
 services:
   # Generator: model from VLLM_MODEL / VLLM_SERVED_MODEL_NAME (.env), GPU via overlay, port 7100
   vllm:
-    image: ${VLLM_IMAGE:-qagredo-vllm:qwen35-localcuda}
-    container_name: qagredo-vllm
+    image: ${VLLM_IMAGE:-qag-vllm:qwen35-localcuda}
+    container_name: qag-vllm
     # Compatibility for hosts where compose deploy.devices is not honored
     # outside swarm-like behavior (common on some offline servers).
     runtime: nvidia
@@ -79,7 +79,7 @@ services:
       HUGGINGFACE_HUB_CACHE: /root/.cache/huggingface/hub
       # Which GPU to use: see deploy.resources… device_ids below (not here).
     volumes:
-      - ${QAGREDO_MODELS_LLM_HOST:-/data/models}:/models:ro
+      - ${QAG_MODELS_LLM_HOST:-/data/models}:/models:ro
       # Must be read-write — vLLM saves tokenizer cache when it starts.
       - ./hf_cache:/root/.cache/huggingface:rw
     command:
@@ -128,8 +128,8 @@ services:
 
   # Judge: model from VLLM_JUDGE_* (.env); should differ from generator to reduce self-bias.
   vllm-judge:
-    image: ${VLLM_IMAGE:-qagredo-vllm:qwen35-localcuda}
-    container_name: qagredo-vllm-judge
+    image: ${VLLM_IMAGE:-qag-vllm:qwen35-localcuda}
+    container_name: qag-vllm-judge
     # Compatibility for hosts where compose deploy.devices is not honored
     # outside swarm-like behavior (common on some offline servers).
     runtime: nvidia
@@ -141,7 +141,7 @@ services:
       HUGGINGFACE_HUB_CACHE: /root/.cache/huggingface/hub
       # Which GPU: see deploy… device_ids below.
     volumes:
-      - ${QAGREDO_MODELS_LLM_HOST:-/data/models}:/models:ro
+      - ${QAG_MODELS_LLM_HOST:-/data/models}:/models:ro
       - ./hf_cache_judge:/root/.cache/huggingface:rw
     command:
       - --host
@@ -149,9 +149,9 @@ services:
       - --port
       - "7101"
       - --model
-      - ${VLLM_JUDGE_MODEL:-/models/Meta-Llama-3.1-8B-Instruct}
+      - ${VLLM_JUDGE_MODEL:-/models/Selene-1-Mini-Llama-3.1-8B}
       - --served-model-name
-      - ${VLLM_JUDGE_SERVED_NAME:-meta-llama/Meta-Llama-3.1-8B-Instruct}
+      - ${VLLM_JUDGE_SERVED_NAME:-AtlaAI/Selene-1-Mini-Llama-3.1-8B}
       - --tokenizer-mode
       - ${VLLM_JUDGE_TOKENIZER_MODE:-${VLLM_TOKENIZER_MODE:-auto}}
       # How many GPUs for judge (must match device_ids below).
@@ -181,12 +181,12 @@ services:
       retries: 40
       start_period: 10s
 
-  qagredo:
+  qag:
     build:
       context: .
       dockerfile: Dockerfile
-    image: qagredo-v1:latest
-    container_name: qagredo-runner
+    image: qag-v1:latest
+    container_name: qag-runner
     # Lets the container fix file ownership on mounted folders (so you own
     # output files on the host, not root).
     privileged: true
@@ -208,14 +208,14 @@ services:
       PYDANTIC_DISABLE_PLUGIN_LOADING: "1"
       # Network names inside Docker — “vllm” and “vllm-judge” are the other two
       # services above.
-      VLLM_BASE_URL: "http://vllm:7100/v1"
+      VLLM_BASE_URL: ${VLLM_BASE_URL:-http://vllm:7100/v1}
       VLLM_API_KEY: ${VLLM_API_KEY:-llama-local}
       VLLM_JUDGE_BASE_URL: ${VLLM_JUDGE_BASE_URL:-http://vllm-judge:7101/v1}
-      VLLM_JUDGE_MODEL: ${VLLM_JUDGE_SERVED_NAME:-meta-llama/Meta-Llama-3.1-8B-Instruct}
+      VLLM_JUDGE_MODEL: ${VLLM_JUDGE_SERVED_NAME:-AtlaAI/Selene-1-Mini-Llama-3.1-8B}
       VLLM_JUDGE_API_KEY: ${VLLM_JUDGE_API_KEY:-qwen-local}
       # Same preset as .env (which folder to read — txt or json, etc.)
-      QAGREDO_OFFLINE_HOST: ${QAGREDO_OFFLINE_HOST:-}
-      QAGREDO_OFFLINE_INPUT: ${QAGREDO_OFFLINE_INPUT:-}
+      QAG_OFFLINE_HOST: ${QAG_OFFLINE_HOST:-}
+      QAG_OFFLINE_INPUT: ${QAG_OFFLINE_INPUT:-}
     volumes:
       # All rw: you can edit on host or in container.
       - ./run_qa_pipeline.py:/workspace/run_qa_pipeline.py:rw
@@ -233,7 +233,7 @@ services:
       - bash
       - -c
       - |
-        unset TRANSFORMERS_CACHE  # remove once qagredo-v1 image is rebuilt
+        unset TRANSFORMERS_CACHE  # remove once qag-v1 image is rebuilt
         echo "[INFO] Waiting for vLLM (generator) at http://vllm:7100/health ..."
         for i in $(seq 1 120); do
           if curl -sf http://vllm:7100/health >/dev/null; then

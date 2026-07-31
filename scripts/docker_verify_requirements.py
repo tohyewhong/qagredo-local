@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Verify the qagredo-v1 image: every package in requirements.txt is installed and
+Verify the qag-v1 image: every package in requirements.txt is installed and
 satisfies the specifier, and `pip check` reports no broken dependencies.
 
 Intended to run inside the Docker image (same Python as the pipeline), e.g.:

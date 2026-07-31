@@ -1,0 +1,59 @@
+@startuml
+' Maintainer index: ../../HANDOVER.md
+' Render (local): plantuml -tpng QAG_Pipeline_Flowchart.puml
+' Render (docker): docker run --rm -v "$PWD":/work -w /work plantuml/plantuml -tpng docs/architecture/diagrams/QAG_Pipeline_Flowchart.puml
+title QAG Pipeline Flowchart (profile-independent core loop)
+
+skinparam linetype ortho
+skinparam shadowing false
+skinparam dpi 180
+skinparam defaultFontName Arial
+
+start
+
+:Load input file (JSON/JSONL) and normalize documents;
+
+while (Another document?) is (yes)
+  :generate_questions (N per document);
+
+  repeat
+    :generate_answers (current slot)\nretain answer_attempts;
+    :grade + build pair + grounding gate;
+
+    if (Passes quality gate?) then (yes)
+      if (Rejected answer attempts exist?) then (yes)
+        :Select highest-confidence rejected\nfor the exact same question;
+        :Add chosen + rejected to dpo_pairs;
+      else (no)
+        :No DPO pair for this answer;
+      endif
+      :Accept slot result;
+    else (no)
+      if (Regeneration rounds left?) then (yes)
+        :generate_questions (x1 replace);
+        :Re-answer same slot;
+      else (no)
+        :Keep last attempt;
+      endif
+    endif
+  repeat while (More slots?) is (yes)
+
+  :save_results (per config);
+  :optional post-run exports;
+  note right
+    bash run.sh --minimise
+    writes:
+    - *_analysis_minimal.json
+    - *_analysis_minimal_good_pairs.json
+    - *_analysis_minimal_bad_pairs.json
+    - lora_sft.jsonl
+    - lora_dpo.jsonl (when DPO rows exist)
+    bash run.sh --finetune-lora (optional)
+    trains adapter only; base model read-only
+    Legacy exact-question good/bad fallback remains supported.
+    Pre-capture runs cannot reconstruct discarded attempts.
+  end note
+endwhile (no)
+
+stop
+@enduml

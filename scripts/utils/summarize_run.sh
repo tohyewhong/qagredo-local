@@ -417,7 +417,7 @@ SEP = "=" * 80
 THIN = "-" * 80
 
 print(SEP)
-print("  QAGRedo Run Summary")
+print("  QAG Run Summary")
 print(SEP)
 if documents:
     print(f"  Generator: {documents[0]['model']}")

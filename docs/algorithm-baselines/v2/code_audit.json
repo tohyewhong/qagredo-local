@@ -1,0 +1,80 @@
+{
+  "audited_at": "2026-06-26T14:00:00Z",
+  "git_commit": "fa7016ffd2143fa4575d01bda5af7edcccdf7ffb",
+  "checklist_rows_completed": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+  "code_files_read": [
+    "run_qa_pipeline.py",
+    "utils/question_generator.py",
+    "utils/answer_generator.py",
+    "utils/hallucination_checker.py",
+    "utils/output_manager.py",
+    "utils/langgraph_pipeline.py",
+    "utils/config_manager.py",
+    "config/config.vllm.yaml",
+    "config/config.ollama.yaml",
+    "config/config.kubeflow.yaml",
+    "run.sh",
+    "scripts/verify_docs_links.py",
+    "scripts/make_qag_bundle.sh"
+  ],
+  "doc_edits": [
+    {
+      "file": "docs/ALGORITHM_REPORT.md",
+      "sections": ["§3.4", "§3.6", "§4.4", "§10", "Appendix C.6"],
+      "summary": "Profile-specific max_question_regeneration_rounds; A-F grading (no E); 2026-06-26 strict vLLM validation"
+    },
+    {
+      "file": "docs/HANDOVER.md",
+      "sections": ["Release checks", "Algorithm baselines"],
+      "summary": "Release checks + validated 42-doc strict run; per-profile replacement rounds"
+    },
+    {
+      "file": "scripts/verify_docs_links.py",
+      "sections": ["scan"],
+      "summary": "Skip docs/algorithm-baselines/** so frozen snapshots do not break link check"
+    },
+    {
+      "file": "tests/test_slot_pipeline_smoke.py",
+      "sections": ["mocks"],
+      "summary": "Mock evaluate_question_answerability for offline smoke test"
+    }
+  ],
+  "verify_docs_links": "pass",
+  "tests_run": [
+    "verify_docs_links",
+    "test_slot_pipeline_smoke",
+    "test_reject_ungrounded_after_retries",
+    "test_reject_insufficient_answers",
+    "test_answerability_check",
+    "test_comprehensiveness_strict",
+    "test_strict_llm_judge",
+    "test_grounding_why",
+    "test_save_grounded_qa_filter",
+    "test_backend_selection",
+    "test_auto_convert_prepare"
+  ],
+  "tests_passed": true,
+  "production_validation": {
+    "date": "2026-06-26",
+    "profile": "vllm",
+    "documents": 42,
+    "overall_grades": {"A": 39, "D": 2, "F": 1},
+    "pipeline_errors": 0,
+    "output_dir": "output/vllm/qwen-qwen3.5-9b/2026-05-28_145345"
+  },
+  "archives_refreshed": [
+    {
+      "path": "/data/tyewhong/qag/qag_bundle.tar.gz",
+      "reason": "Pipeline code, configs, docs, tests, algorithm-baselines v1-v2"
+    }
+  ],
+  "archives_unchanged": [
+    "qag-v1.tar",
+    "qag-kubeflow.tar",
+    "vllm-qwen35-localcuda.rootfs.tar",
+    "models_ollama.tar.gz",
+    "models_vllm.tar.gz",
+    "models_vllm_Qwen3_5-9B.tar.gz",
+    "models_vllm_Meta-Llama-3_1-8B-Instruct.tar.gz"
+  ]
+}

@@ -26,6 +26,7 @@ wheels/
 # IDE
 .vscode/
 .idea/
+docs/vscode-extensions/*.vsix
 *.swp
 *.swo
 *~
@@ -50,10 +51,11 @@ Thumbs.db
 models/
 models_embed/
 models_llm/
-qagredo_host/
+qag_host/
 
 # Virtual environments
 .venv/
+.venv-lora/
 
 # HuggingFace cache
 hf_cache/
@@ -75,12 +77,12 @@ logs/
 *.tar.zst
 *.sha256
 python_packages/
-qagredo_standalone_*/
+qag_standalone_*/
 *_standalone_*.zip
 Miniforge3.sh
 
 # Temporary test data files
 data/samplepress.*
 
-qagredo/
+qag/
 .venv_diagram/

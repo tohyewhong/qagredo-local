@@ -8,11 +8,11 @@ set -euo pipefail
 #
 # Usage:
 #   bash scripts/save_vllm_qwen35_image.sh
-#   OUT_DIR=/data/tyewhong/qagredo bash scripts/save_vllm_qwen35_image.sh
+#   OUT_DIR=/data/tyewhong/qag bash scripts/save_vllm_qwen35_image.sh
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TAG="${VLLM_IMAGE:-qagredo-vllm:qwen35-localcuda}"
-ARCHIVE_DIR="${QAGREDO_ARCHIVE_DIR:-/data/tyewhong/qagredo}"
+TAG="${VLLM_IMAGE:-qag-vllm:qwen35-localcuda}"
+ARCHIVE_DIR="${QAG_ARCHIVE_DIR:-/data/tyewhong/qag}"
 OUT_DIR="${OUT_DIR:-$ARCHIVE_DIR}"
 OUT_FILE="${OUT_FILE:-$OUT_DIR/vllm-qwen35-localcuda.rootfs.tar}"
 mkdir -p "$OUT_DIR"

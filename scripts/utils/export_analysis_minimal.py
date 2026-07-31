@@ -60,10 +60,14 @@ def _minimal_payload(data: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError("missing or invalid 'qa_pairs' list")
     raw_id = document.get("id", document.get("title", "unknown"))
     doc_id = str(raw_id) if raw_id is not None else "unknown"
-    return {
+    payload = {
         "document": _minimal_document_for_output(document, doc_id),
         "qa_pairs": _minimal_qa_pairs_for_output(qa_pairs),
     }
+    dpo_pairs = data.get("dpo_pairs")
+    if isinstance(dpo_pairs, list):
+        payload["dpo_pairs"] = dpo_pairs
+    return payload
 
 
 def _parse_args() -> argparse.Namespace:

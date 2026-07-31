@@ -2,7 +2,7 @@
 Minimal article/document JSON parser.
 
 Provides ``load_article_json`` which the conversion script
-(scripts/conversion/convert_to_qagredo_jsonl.py) imports.
+(scripts/conversion/convert_to_qag_jsonl.py) imports.
 
 The function accepts a file path and returns a list of document dicts,
 regardless of whether the source JSON is a single object, a list of

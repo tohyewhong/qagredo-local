@@ -171,7 +171,7 @@ def rename_txt_dir(
     elif todo:
         temps: list[tuple[Path, Path, Path]] = []
         for i, (old, new) in enumerate(todo):
-            tmp = old.with_name(f".qagredo_rename_{i}.tmp")
+            tmp = old.with_name(f".qag_rename_{i}.tmp")
             old.rename(tmp)
             temps.append((tmp, new, old))
         for tmp, new, _old in temps:

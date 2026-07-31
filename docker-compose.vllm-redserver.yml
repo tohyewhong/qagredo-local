@@ -1,0 +1,20 @@
+# Redserver override when vLLM runs on gpuserver outside QAG compose.
+#
+# Canonical name: docker-compose.vllm-redserver.yml
+# Compatibility alias: docker-compose.vllm-external.yml
+#
+# In .env:
+#   VLLM_BASE_URL=http://gpuserver:52328/v1
+#   VLLM_JUDGE_BASE_URL=http://gpuserver:53366/v1
+#   QAG_VLLM_CONFIG_FILE=config/config.vllm.redserver.yaml
+#
+# If gpuserver does not resolve inside the qag container, uncomment
+# extra_hosts and set GPUSERVER_IP in .env.
+
+services:
+  qag:
+    environment:
+      VLLM_BASE_URL: ${VLLM_BASE_URL}
+      VLLM_JUDGE_BASE_URL: ${VLLM_JUDGE_BASE_URL}
+    # extra_hosts:
+    #   - "gpuserver:${GPUSERVER_IP}"

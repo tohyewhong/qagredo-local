@@ -35,14 +35,14 @@ digraph NetworkDockerCompose {
   host [label="Offline server (host)\nDocker Engine + docker compose", fillcolor="#f1f5f9"];
 
   subgraph cluster_net {
-    label="Docker network: compose project (qagredo_offline)\nDNS: vllm, vllm-judge, qagredo";
+    label="Docker network: compose project (qag_offline)\nDNS: vllm, vllm-judge, qag";
     color="#cbd5e1";
     style="rounded";
 
-    runner [label="Container: qagredo-runner\nQAGRedo pipeline\n(CLI; internal calls to vLLM)\nCalls internal APIs"];
+    runner [label="Container: qag-runner\nQAG pipeline\n(CLI; internal calls to vLLM)\nCalls internal APIs"];
     framework [label="Inside runner:\nRequired LangGraph + LangChain", fillcolor="#e0f2fe", color="#0ea5e9"];
-    vllm [label="Container: qagredo-vllm\n(typical: Qwen3.5-9B generator)\nlistens: 0.0.0.0:7100\n/health, /docs, /openapi.json, /v1/*"];
-    judge [label="Container: qagredo-vllm-judge\n(typical: Llama 3.1 judge)\nlistens: 0.0.0.0:7101\n/health, /v1/*"];
+    vllm [label="Container: qag-vllm\n(typical: Qwen3.5-9B generator)\nlistens: 0.0.0.0:7100\n/health, /docs, /openapi.json, /v1/*"];
+    judge [label="Container: qag-vllm-judge\n(typical: Llama 3.1 judge)\nlistens: 0.0.0.0:7101\n/health, /v1/*"];
   }
 
   laptop -> host [label="Tunnel to server localhost:${VLLM_HOST_PORT}"];

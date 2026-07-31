@@ -14,19 +14,19 @@ class OfflinePresetEffectiveTest(unittest.TestCase):
     """End-to-end config load + offline preset (config/config.ollama.yaml)."""
 
     def setUp(self) -> None:
-        os.environ["QAGREDO_PROFILE"] = "ollama"
+        os.environ["QAG_PROFILE"] = "ollama"
 
     def tearDown(self) -> None:
         for key in (
-            "QAGREDO_OFFLINE_HOST",
-            "QAGREDO_OFFLINE_INPUT",
-            "QAGREDO_PROFILE",
+            "QAG_OFFLINE_HOST",
+            "QAG_OFFLINE_INPUT",
+            "QAG_PROFILE",
         ):
             os.environ.pop(key, None)
 
     def test_preset_1_data_txt(self) -> None:
-        os.environ["QAGREDO_OFFLINE_HOST"] = "data"
-        os.environ["QAGREDO_OFFLINE_INPUT"] = "txt"
+        os.environ["QAG_OFFLINE_HOST"] = "data"
+        os.environ["QAG_OFFLINE_INPUT"] = "txt"
         cfg = build_effective_config()
         run = cfg["run"]
         self.assertEqual(run["input_folder"], ".")
@@ -35,8 +35,8 @@ class OfflinePresetEffectiveTest(unittest.TestCase):
         self.assertIs(run["auto_convert"], False)
 
     def test_preset_2_data_json(self) -> None:
-        os.environ["QAGREDO_OFFLINE_HOST"] = "data"
-        os.environ["QAGREDO_OFFLINE_INPUT"] = "json"
+        os.environ["QAG_OFFLINE_HOST"] = "data"
+        os.environ["QAG_OFFLINE_INPUT"] = "json"
         cfg = build_effective_config()
         run = cfg["run"]
         self.assertEqual(run["input_folder"], ".")
@@ -44,8 +44,8 @@ class OfflinePresetEffectiveTest(unittest.TestCase):
         self.assertIs(run["auto_convert"], True)
 
     def test_preset_3_repo_txt(self) -> None:
-        os.environ["QAGREDO_OFFLINE_HOST"] = "repo"
-        os.environ["QAGREDO_OFFLINE_INPUT"] = "txt"
+        os.environ["QAG_OFFLINE_HOST"] = "repo"
+        os.environ["QAG_OFFLINE_INPUT"] = "txt"
         cfg = build_effective_config()
         run = cfg["run"]
         self.assertEqual(run["input_folder"], "txt")
@@ -53,8 +53,8 @@ class OfflinePresetEffectiveTest(unittest.TestCase):
         self.assertIs(run["auto_convert"], False)
 
     def test_preset_4_repo_json(self) -> None:
-        os.environ["QAGREDO_OFFLINE_HOST"] = "repo"
-        os.environ["QAGREDO_OFFLINE_INPUT"] = "json"
+        os.environ["QAG_OFFLINE_HOST"] = "repo"
+        os.environ["QAG_OFFLINE_INPUT"] = "json"
         cfg = build_effective_config()
         run = cfg["run"]
         self.assertEqual(run["input_folder"], "json")

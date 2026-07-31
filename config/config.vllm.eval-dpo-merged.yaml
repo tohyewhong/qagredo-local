@@ -1,0 +1,140 @@
+# ============================================================================
+#  QAG — VLLM profile  (two vLLM GPU containers + runner)
+# ============================================================================
+#
+#  WHEN IS THIS FILE USED?
+#    Whenever .env has  QAG_PROFILE=vllm.
+#    Two separate vLLM containers serve the generator (port 7100) and the
+#    judge (port 7101). This profile is heavier and only needed if you
+#    want the vLLM engine instead of Ollama.
+#
+#  LAYMAN CHEAT SHEET — the only 4 things you will ever want to change:
+#
+#    1) run.num_documents              → how many documents to process
+#    2) question_generation.num_questions → how many questions per document
+#    3) llm.model                      → generator model (MUST MATCH .env)
+#    4) judge.model                    → judge model     (MUST MATCH .env)
+#
+#  IMPORTANT: the names in (3) and (4) must match the vLLM "served names" in
+#  .env — specifically VLLM_SERVED_MODEL_NAME and VLLM_JUDGE_SERVED_NAME.
+#  If they disagree, vLLM will return "model not found".
+#
+#  ALSO IMPORTANT (offline Docker): keep base_url as service DNS names:
+#      llm.base_url   = http://vllm:7100/v1
+#      judge.base_url = http://vllm-judge:7101/v1
+#  Do NOT use localhost here. The pipeline runs inside the qag container.
+#
+#  Everything else in this file: LEAVE ALONE.
+# ============================================================================
+
+offline_mode: true
+
+framework:
+  use_langchain: true
+  use_langgraph: true
+  langchain:
+    structured_json_output: true
+  langgraph:
+    enable_dynamic_routing: true
+    semantic_fallback_threshold: 0.7
+
+run:
+  input_folder: "."   # DATA_DIR is the txt folder (see .env QAG_DATA_DIR)
+  input_file: ""
+  input_glob: "*.txt"
+  auto_convert: false
+  output_folder: timestamp
+  output_analysis_stem: document_id
+  input_type: auto
+  max_files: 0
+  num_documents: 1000              # 0 = all loaded (resume skips done + short docs)
+  parallel_documents: 4         # concurrent docs (orchestrator unchanged each)
+  prefilter_skips: true         # drop done/short docs before worker pool
+  quiet_skips: true             # one prefilter summary (not per-doc lines)
+  skip_preflight: true          # skip READY probes when vLLM already up
+  start_at_document: 0          # 1-based; 0 or 1 = from start
+  # Resume: skip docs that already have *_analysis.json (see run.resume_run_dir)
+  skip_existing_outputs: false
+  resume: false
+  resume_run_dir: ""
+  save_grounded_qa_pairs_only: false  # keep final failures for --minimise-bad
+  reject_insufficient_answers: true
+  minimal_qa_output: false
+  min_content_words: 0   # skip documents with fewer words (0 = no minimum)
+  min_content_chars: 0     # optional extra floor by character count
+  semantic_normalization:
+    enable: false
+    max_content_chars: 5000
+
+# -------------------------------------------------------------------------
+# GENERATOR — vLLM OpenAI server on port 7100.
+# -------------------------------------------------------------------------
+llm:
+  provider: "vllm"
+  model: "qag-dpo-merged"  # must match VLLM_SERVED_MODEL_NAME in .env
+  base_url: "http://vllm:7100/v1"  # LEAVE ALONE (container-to-container URL)
+  api_key: "llama-local"
+  temperature: 0.7
+  max_tokens: 500
+  max_retries: 5
+  retry_delay: 1.0
+  timeout: 240
+
+answer_generation:
+  temperature: 0.3
+  multi_turn:
+    enable_rejection: true
+    min_confidence_threshold: 0.7
+    max_answer_attempts: 5
+    max_regeneration_attempts: 2
+    max_question_regeneration_rounds: 5
+    reject_ungrounded_after_retries: true
+  coverage_validation:
+    enable: true
+    min_score_threshold: 0.7
+    max_doc_chars: 5000
+
+question_generation:
+  num_questions: 3              # CHANGE ME — how many questions per document
+  complexity: "advanced"
+  deduplication_method: "llm"
+  dedup_llm:
+    use_judge_model: true
+    strict: true
+    max_tokens: 80
+  validation:
+    enable_rejection: true
+    method: "llm"
+    min_confidence_threshold: 0.7
+    max_regeneration_attempts: 2
+    enable_comprehensiveness_check: true
+    comprehensiveness_min_score: 0.6
+    comprehensiveness_max_attempts: 2
+    comprehensiveness_strict: false
+    enable_answerability_check: true
+    answerability_min_score: 0.8
+    answerability_max_attempts: 2
+    answerability_strict: false   # keep final failed slots for --minimise-bad
+    answerability_max_doc_chars: 6000
+
+# -------------------------------------------------------------------------
+# JUDGE — vLLM OpenAI server on port 7101 (must be a DIFFERENT model).
+# -------------------------------------------------------------------------
+judge:
+  provider: "vllm"
+  model: "AtlaAI/Selene-1-Mini-Llama-3.1-8B"  # CHANGE ME — must match VLLM_JUDGE_SERVED_NAME in .env
+  base_url: "http://vllm-judge:7101/v1"  # LEAVE ALONE (container-to-container URL)
+  api_key: "qwen-local"
+  temperature: 0.0
+  max_tokens: 320
+  timeout: 240
+  max_retries: 5
+  retry_delay: 1.0
+
+hallucination:
+  method: "llm"
+  judge_required: true
+  judge_strict_verdict: true
+  allow_semantic_fallback: false
+  citation_alignment: "off"
+  grounding_explanation_when_no_citations: "off"

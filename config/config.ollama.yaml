@@ -1,9 +1,9 @@
 # ============================================================================
-#  QAGRedo — OLLAMA profile  (Ollama running on this machine)
+#  QAG — OLLAMA profile  (Ollama running on this machine)
 # ============================================================================
 #
 #  WHEN IS THIS FILE USED?
-#    Whenever .env has  QAGREDO_PROFILE=ollama  (and you run `bash run.sh`).
+#    Whenever .env has  QAG_PROFILE=ollama  (and you run `bash run.sh`).
 #
 #  LAYMAN CHEAT SHEET — the only 4 things you will ever want to change:
 #
@@ -19,7 +19,7 @@
 #
 #  SWITCH NOTE:
 #    If you are coming from vLLM and want Ollama, set in .env:
-#      QAGREDO_PROFILE=ollama
+#      QAG_PROFILE=ollama
 #    then change ONLY llm.model and judge.model below.
 #
 #  Everything else in this file: LEAVE ALONE unless something tells you
@@ -38,7 +38,7 @@ framework:
     semantic_fallback_threshold: 0.7
 
 # -------------------------------------------------------------------------
-# INPUT / OUTPUT — folder is usually set via .env (QAGREDO_OFFLINE_*).
+# INPUT / OUTPUT — folder is usually set via .env (QAG_OFFLINE_*).
 # -------------------------------------------------------------------------
 run:
   input_folder: "."
@@ -50,6 +50,7 @@ run:
   input_type: auto
   max_files: 0
   num_documents: 2            # CHANGE ME — how many documents to process
+  parallel_documents: 1         # concurrent docs (orchestrator unchanged each)
   skip_existing_outputs: false
   resume: false
   resume_run_dir: ""
@@ -108,6 +109,10 @@ question_generation:
     comprehensiveness_min_score: 0.6
     comprehensiveness_max_attempts: 2
     comprehensiveness_strict: true   # drop failed slots (no answer generated)
+    enable_answerability_check: true
+    answerability_min_score: 0.8
+    answerability_max_attempts: 2
+    answerability_strict: false
 
 # -------------------------------------------------------------------------
 # JUDGE — second model that double-checks answers for hallucination.

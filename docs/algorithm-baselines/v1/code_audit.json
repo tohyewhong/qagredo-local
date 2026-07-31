@@ -1,0 +1,57 @@
+{
+  "audited_at": "2026-06-26T05:45:00Z",
+  "git_commit": null,
+  "checklist_rows_completed": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+  "code_files_read": [
+    "run_qa_pipeline.py",
+    "utils/question_generator.py",
+    "utils/answer_generator.py",
+    "utils/hallucination_checker.py",
+    "utils/output_manager.py",
+    "utils/langgraph_pipeline.py",
+    "utils/config_manager.py",
+    "config/config.vllm.yaml",
+    "config/config.ollama.yaml",
+    "config/config.kubeflow.yaml",
+    "run.sh"
+  ],
+  "doc_edits": [
+    {
+      "file": "docs/ALGORITHM_REPORT.md",
+      "sections": ["§3.4", "§3.6", "§4.4", "§10", "Appendix C.6"],
+      "summary": "Profile-specific max_question_regeneration_rounds (vllm=5); clarified A-F grading has no E; added 2026-06-26 strict vLLM validation run"
+    },
+    {
+      "file": "docs/HANDOVER.md",
+      "sections": ["Release checks"],
+      "summary": "Added verify_docs_links to release checks; documented 42-doc strict run grades; vllm replacement round count"
+    },
+    {
+      "file": "tests/test_slot_pipeline_smoke.py",
+      "sections": ["mocks"],
+      "summary": "Mock evaluate_question_answerability so smoke test stays offline"
+    }
+  ],
+  "verify_docs_links": "pass",
+  "tests_run": [
+    "verify_docs_links",
+    "test_slot_pipeline_smoke",
+    "test_reject_ungrounded_after_retries",
+    "test_reject_insufficient_answers",
+    "test_answerability_check",
+    "test_comprehensiveness_strict",
+    "test_strict_llm_judge",
+    "test_grounding_why",
+    "test_save_grounded_qa_filter",
+    "test_backend_selection",
+    "test_auto_convert_prepare"
+  ],
+  "tests_passed": true,
+  "production_validation": {
+    "date": "2026-06-26",
+    "profile": "vllm",
+    "documents": 42,
+    "overall_grades": {"A": 39, "D": 2, "F": 1},
+    "pipeline_errors": 0
+  }
+}

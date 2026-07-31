@@ -6,11 +6,11 @@ set -euo pipefail
 #                                Kubeflow server, in one place.
 # ============================================================================
 #
-# Produces (in /data/tyewhong/qagredo/ by default):
+# Produces (in /data/tyewhong/qag/ by default):
 #
-#   qagredo_bundle.tar.gz          Repo code + configs + compose files
-#   qagredo-v1.tar                 Docker image for the ollama profile
-#   qagredo-kubeflow.tar           Docker image for the kubeflow profile
+#   qag_bundle.tar.gz          Repo code + configs + compose files
+#   qag-v1.tar                 Docker image for the ollama profile
+#   qag-kubeflow.tar           Docker image for the kubeflow profile
 #   models_ollama.tar.gz           Ollama GGUF store (for dev / kubeflow)
 #   models_vllm.tar.gz             HuggingFace model dirs (for vllm profile)
 #   <tag>.rootfs.tar               vLLM runtime image (for vllm profile; default qwen35-localcuda.rootfs.tar)
@@ -20,12 +20,12 @@ set -euo pipefail
 #
 #   Profile on offline server | Tarballs you must copy over
 #   --------------------------+-------------------------------------------------
-#   ollama                    | qagredo_bundle.tar.gz, qagredo-v1.tar,
+#   ollama                    | qag_bundle.tar.gz, qag-v1.tar,
 #                             |  models_ollama.tar.gz (unless Ollama on the
 #                             |  offline host already has the tags)
-#   kubeflow                  | qagredo_bundle.tar.gz, qagredo-kubeflow.tar,
+#   kubeflow                  | qag_bundle.tar.gz, qag-kubeflow.tar,
 #                             |  models_ollama.tar.gz
-#   vllm                      | qagredo_bundle.tar.gz, qagredo-v1.tar,
+#   vllm                      | qag_bundle.tar.gz, qag-v1.tar,
 #                             |  qwen35-localcuda.rootfs.tar (or save_vllm script name), models_vllm.tar.gz
 #
 # Usage:
@@ -35,8 +35,8 @@ set -euo pipefail
 # ============================================================================
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ARCHIVE_DIR="${QAGREDO_ARCHIVE_DIR:-/data/tyewhong/qagredo}"
-OUT_DIR="${QAGREDO_OFFLINE_OUT:-$ARCHIVE_DIR}"
+ARCHIVE_DIR="${QAG_ARCHIVE_DIR:-/data/tyewhong/qag}"
+OUT_DIR="${QAG_OFFLINE_OUT:-$ARCHIVE_DIR}"
 
 DO_BUNDLE=0
 DO_IMAGE_DEV=0
@@ -51,12 +51,12 @@ DO_IMAGE_VLLM=0
 OLLAMA_STORE_SRC="${OLLAMA_STORE_SRC:-/data/ollama/models}"
 # Must match llm.model / judge.model in config/config.ollama.yaml and config/config.kubeflow.yaml
 OLLAMA_SPLIT_TAGS_DEFAULT=("qwen3.5:9b" "llama3.1:8b-instruct-fp16")
-VLLM_MODELS_SRC="${VLLM_MODELS_SRC:-/home/tyewhong/qagredo/models_llm}"
-VLLM_MODEL_DIRS_DEFAULT=("Qwen3.5-9B" "Meta-Llama-3.1-8B-Instruct")
+VLLM_MODELS_SRC="${VLLM_MODELS_SRC:-/home/tyewhong/qag/models_llm}"
+VLLM_MODEL_DIRS_DEFAULT=("Qwen3.5-9B" "Selene-1-Mini-Llama-3.1-8B")
 
-QAGREDO_IMAGE="${QAGREDO_IMAGE:-qagredo-v1:latest}"
-QAGREDO_KUBEFLOW_IMAGE="${QAGREDO_KUBEFLOW_IMAGE:-qagredo-kubeflow:latest}"
-VLLM_IMAGE="${VLLM_IMAGE:-qagredo-vllm:qwen35-localcuda}"
+QAG_IMAGE="${QAG_IMAGE:-qag-v1:latest}"
+QAG_KUBEFLOW_IMAGE="${QAG_KUBEFLOW_IMAGE:-qag-kubeflow:latest}"
+VLLM_IMAGE="${VLLM_IMAGE:-qag-vllm:qwen35-localcuda}"
 
 _log()  { echo "[make-offline] $*"; }
 _warn() { echo "[make-offline][WARN] $*" >&2; }
@@ -67,14 +67,14 @@ usage() {
 make_offline_tarballs.sh — build every tarball needed for an offline / Kubeflow server.
 
 Output directory:  ${OUT_DIR}
-  (override with QAGREDO_OFFLINE_OUT=/your/path or --out PATH)
+  (override with QAG_OFFLINE_OUT=/your/path or --out PATH)
 
 Flags (select what to build — use --all for everything):
   --all                    Build every tarball below
-  --bundle                 qagredo_bundle.tar.gz        (repo code + configs)
-  --image-dev              qagredo-v1.tar (ollama profile runner; legacy flag name)
-  --image-kubeflow         qagredo-kubeflow.tar         (docker save ${QAGREDO_KUBEFLOW_IMAGE})
-  --image-vllm             <tag>.rootfs.tar from VLLM_IMAGE (default qagredo-vllm:qwen35-localcuda)
+  --bundle                 qag_bundle.tar.gz        (repo code + configs)
+  --image-dev              qag-v1.tar (ollama profile runner; legacy flag name)
+  --image-kubeflow         qag-kubeflow.tar         (docker save ${QAG_KUBEFLOW_IMAGE})
+  --image-vllm             <tag>.rootfs.tar from VLLM_IMAGE (default qag-vllm:qwen35-localcuda)
   --models-ollama          models_ollama.tar.gz         (from ${OLLAMA_STORE_SRC})
   --models-ollama-split[=TAGS]
                            models_ollama_<tag>.tar.gz per tag (from ${OLLAMA_STORE_SRC})
@@ -96,8 +96,8 @@ Other:
 Environment overrides:
   OLLAMA_STORE_SRC         Source Ollama store (must contain blobs/ + manifests/)
   VLLM_MODELS_SRC          Parent folder holding HuggingFace model subdirs
-  QAGREDO_IMAGE            Docker tag for dev-profile image
-  QAGREDO_KUBEFLOW_IMAGE   Docker tag for kubeflow-profile image
+  QAG_IMAGE            Docker tag for dev-profile image
+  QAG_KUBEFLOW_IMAGE   Docker tag for kubeflow-profile image
   VLLM_IMAGE               Docker tag for the vLLM runtime image
 
 Examples:
@@ -161,9 +161,9 @@ mkdir -p "$OUT_DIR"
 # 1) Bundle
 # ---------------------------------------------------------------------------
 if [[ "$DO_BUNDLE" -eq 1 ]]; then
-  _log "Building qagredo_bundle.tar.gz ..."
-  ( cd "$REPO_DIR" && QAGREDO_ARCHIVE_DIR="$OUT_DIR" bash scripts/make_qagredo_bundle.sh )
-  _log "  -> $OUT_DIR/qagredo_bundle.tar.gz"
+  _log "Building qag_bundle.tar.gz ..."
+  ( cd "$REPO_DIR" && QAG_ARCHIVE_DIR="$OUT_DIR" bash scripts/make_qag_bundle.sh )
+  _log "  -> $OUT_DIR/qag_bundle.tar.gz"
 fi
 
 # ---------------------------------------------------------------------------
@@ -194,15 +194,15 @@ _save_image_if_present() {
 }
 
 if [[ "$DO_IMAGE_DEV" -eq 1 ]]; then
-  _save_image_if_present "$QAGREDO_IMAGE" "$OUT_DIR/qagredo-v1.tar" "dev image"
+  _save_image_if_present "$QAG_IMAGE" "$OUT_DIR/qag-v1.tar" "dev image"
 fi
 
 if [[ "$DO_IMAGE_KUBEFLOW" -eq 1 ]]; then
-  _save_image_if_present "$QAGREDO_KUBEFLOW_IMAGE" "$OUT_DIR/qagredo-kubeflow.tar" "kubeflow image"
+  _save_image_if_present "$QAG_KUBEFLOW_IMAGE" "$OUT_DIR/qag-kubeflow.tar" "kubeflow image"
 fi
 
 if [[ "$DO_IMAGE_VLLM" -eq 1 ]]; then
-  # Normalize to a filename: qagredo-vllm:qwen35-localcuda -> qwen35-localcuda.rootfs.tar
+  # Normalize to a filename: qag-vllm:qwen35-localcuda -> qwen35-localcuda.rootfs.tar
   _vllm_fname="$(echo "${VLLM_IMAGE##*/}" | tr ':' '_').rootfs.tar"
   _save_image_if_present "$VLLM_IMAGE" "$OUT_DIR/$_vllm_fname" "vllm image"
 fi
@@ -403,8 +403,8 @@ ls -lh "$OUT_DIR" | tail -n +2
 echo ""
 _log "Next steps:"
 echo "  1. rsync / scp the files you need from $OUT_DIR/ to the offline server."
-echo "  2. On the offline server, extract the bundle: tar xzf qagredo_bundle.tar.gz"
-echo "  3. cd qagredo_host/ && bash setup_offline.sh"
+echo "  2. On the offline server, extract the bundle: tar xzf qag_bundle.tar.gz"
+echo "  3. cd qag_host/ && bash setup_offline.sh"
 echo "  4. Edit .env, then: bash run.sh"
 echo ""
 echo "Full guide: docs/OFFLINE_SETUP_GUIDE.md"

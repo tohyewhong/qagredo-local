@@ -9,12 +9,12 @@ from pptx.util import Inches, Pt
 
 DOCS_DIR = Path(__file__).resolve().parents[2] / "docs"
 ASSET_DIR = DOCS_DIR / "assets"
-OUTFILE = DOCS_DIR / "QAGRedo_Technical_Workflow_20slides.pptx"
+OUTFILE = DOCS_DIR / "QAG_Technical_Workflow_20slides.pptx"
 
 IMG = {
     "hero": ASSET_DIR / "slide_visual_01_title_hero.png",
     "problem": ASSET_DIR / "slide_visual_02_problem_context.png",
-    "pipeline": DOCS_DIR / "qagredo_full_pipeline_flow_16x9.png",
+    "pipeline": DOCS_DIR / "qag_full_pipeline_flow_16x9.png",
     "arch": ASSET_DIR / "slide_visual_04_architecture_containers.png",
     "qgen": ASSET_DIR / "slide_visual_05_question_generation.png",
     "aval": ASSET_DIR / "slide_visual_06_answer_validation.png",
@@ -278,7 +278,7 @@ def build():
     ).text_frame
     t.clear()
     p = t.paragraphs[0]
-    p.text = "QAGRedo Workflow + LangChain/LangGraph Upgrade"
+    p.text = "QAG Workflow + LangChain/LangGraph Upgrade"
     p.font.size = Pt(44)
     p.font.bold = True
     p.font.color.rgb = RGBColor(18, 47, 95)
@@ -424,7 +424,7 @@ def build():
         5.55,
         2.15,
         1.0,
-        "qagredo-vllm",
+        "qag-vllm",
         "Llama Q/A generator\nGPU 0 | Port ${VLLM_HOST_PORT}",
         (232, 241, 255),
     )
@@ -434,7 +434,7 @@ def build():
         5.55,
         2.2,
         1.0,
-        "qagredo-runner",
+        "qag-runner",
         "Orchestrator\nCPU | internal",
         (233, 252, 244),
     )
@@ -444,7 +444,7 @@ def build():
         5.55,
         2.35,
         1.0,
-        "qagredo-vllm-judge",
+        "qag-vllm-judge",
         "Qwen judge model\nGPU 1 | Port ${VLLM_JUDGE_HOST_PORT}",
         (240, 236, 255),
     )
@@ -458,7 +458,7 @@ def build():
         1.25,
         "Generator service",
         [
-            "qagredo-vllm | Llama | GPU 0 | :${VLLM_HOST_PORT}",
+            "qag-vllm | Llama | GPU 0 | :${VLLM_HOST_PORT}",
             "Handles question + answer generation",
         ],
         (232, 241, 255),
@@ -471,7 +471,7 @@ def build():
         1.25,
         "Judge service",
         [
-            "qagredo-vllm-judge | Qwen | GPU 1 | :${VLLM_JUDGE_HOST_PORT}",
+            "qag-vllm-judge | Qwen | GPU 1 | :${VLLM_JUDGE_HOST_PORT}",
             "Independent grounding verification",
         ],
         (240, 236, 255),
@@ -484,7 +484,7 @@ def build():
         1.25,
         "Runner service",
         [
-            "qagredo-runner | CPU | internal network",
+            "qag-runner | CPU | internal network",
             "Pipeline orchestration + semantic checks",
         ],
         (233, 252, 244),
@@ -1489,7 +1489,7 @@ def build():
     add_bullets(
         s,
         [
-            "6-file split-model transfer: vllm rootfs + qagredo image + llama model + qwen model + embed model + bundle.",  # noqa: E501
+            "6-file split-model transfer: vllm rootfs + qag image + llama model + qwen model + embed model + bundle.",  # noqa: E501
             "Model split archives: models_llama.tar.gz (Llama HF tree, typical vLLM-judge) and models_qwen.tar.gz (Qwen HF tree, typical vLLM generator, e.g. Qwen3.5-9B).",  # noqa: E501
             "setup_offline.sh prepares links, loads containers, and validates runtime.",  # noqa: E501
             "run.sh executes pipeline with reproducible directory structure and outputs.",  # noqa: E501

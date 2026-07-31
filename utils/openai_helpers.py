@@ -10,9 +10,19 @@ from utils.minimal_text import (
 )
 
 
+def _is_qwen3_vllm_model(model: str) -> bool:
+    """True for Qwen3.x base names and QAG merged/LoRA served names."""
+    m = (model or "").lower()
+    if "qwen3" in m:
+        return True
+    if m.startswith("qag-"):
+        return True
+    return False
+
+
 def qwen_no_thinking_system_suffix(model: str) -> str:
     """Extra system instruction for Qwen3 models on vLLM."""
-    if "qwen3" in (model or "").lower():
+    if _is_qwen3_vllm_model(model):
         return (
             " Do not output Thinking Process, chain-of-thought, or "
             "reasoning. Output only the final questions or answers requested."
@@ -22,8 +32,7 @@ def qwen_no_thinking_system_suffix(model: str) -> str:
 
 def openai_chat_extra_body(model: str) -> Dict[str, Any]:
     """Disable Qwen3 thinking in vLLM so content is the final reply."""
-    m = (model or "").lower()
-    if "qwen3" in m:
+    if _is_qwen3_vllm_model(model):
         return {"chat_template_kwargs": {"enable_thinking": False}}
     return {}
 

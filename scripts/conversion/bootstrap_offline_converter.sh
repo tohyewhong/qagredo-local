@@ -5,11 +5,11 @@ set -euo pipefail
 #
 # You can run this:
 # - on the OFFLINE SERVER host (if it has python3 + venv), or
-# - inside the qagredo container, then run the converter using the created venv.
+# - inside the qag container, then run the converter using the created venv.
 #
-# Typical (inside qagredo container) usage:
+# Typical (inside qag container) usage:
 #   bash /workspace/scripts/conversion/bootstrap_offline_converter.sh
-#   /workspace/.venv_converter/bin/python /workspace/scripts/conversion/convert_to_qagredo_jsonl.py --input ... --output ...
+#   /workspace/.venv_converter/bin/python /workspace/scripts/conversion/convert_to_qag_jsonl.py --input ... --output ...
 #
 # This installs from the local wheelhouse folder:
 #   ./wheelhouse_converter/
@@ -49,4 +49,4 @@ PY
 
 ok "Offline converter environment is ready."
 echo "Run converter with:"
-echo "  ${VENV_DIR}/bin/python ${REPO_DIR}/scripts/conversion/convert_to_qagredo_jsonl.py --input <file> --output <file.jsonl>"
+echo "  ${VENV_DIR}/bin/python ${REPO_DIR}/scripts/conversion/convert_to_qag_jsonl.py --input <file> --output <file.jsonl>"

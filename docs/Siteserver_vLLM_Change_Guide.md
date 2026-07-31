@@ -1,8 +1,8 @@
 # Siteserver vLLM Change Guide (Detailed Runbook)
 
-Goal: run QAGRedo on siteserver with a **Qwen3.5-compatible** vLLM runtime (`qagredo-vllm:qwen35-localcuda`, based on vLLM **v0.17.1** + **Transformers 5.4+**), validate functionality, and keep a fast rollback path.
+Goal: run QAG on siteserver with a **Qwen3.5-compatible** vLLM runtime (`qag-vllm:qwen35-localcuda`, based on vLLM **v0.17.1** + **Transformers 5.4+**), validate functionality, and keep a fast rollback path.
 
-**Not current defaults:** `vllm/vllm-openai:v0.5.3.post1` (fails on `qwen3_5`). Retagging to a newer stock `vllm/vllm-openai` image (including **v0.17.x**) is not enough either — those images still ship Transformers 4.57.x, which does not register `qwen3_5`. Build the supported runtime with `bash scripts/docker_build_vllm_qwen35_compat.sh` (produces `qagredo-vllm:qwen35-localcuda`).
+**Not current defaults:** `vllm/vllm-openai:v0.5.3.post1` (fails on `qwen3_5`). Retagging to a newer stock `vllm/vllm-openai` image (including **v0.17.x**) is not enough either — those images still ship Transformers 4.57.x, which does not register `qwen3_5`. Build the supported runtime with `bash scripts/docker_build_vllm_qwen35_compat.sh` (produces `qag-vllm:qwen35-localcuda`).
 
 ## Flow Diagram (Image)
 
@@ -12,42 +12,42 @@ Goal: run QAGRedo on siteserver with a **Qwen3.5-compatible** vLLM runtime (`qag
 
 - Changing `.env` / `config/*.yaml` controls endpoints, model names, and behavior.
 - It does **not** change the vLLM binary version by itself.
-- To use Qwen3.5 on vLLM, your runtime must be the **Qwen3.5 compat image** (`VLLM_IMAGE=qagredo-vllm:qwen35-localcuda` in `.env`) — not only a newer stock `vllm/vllm-openai` tag.
+- To use Qwen3.5 on vLLM, your runtime must be the **Qwen3.5 compat image** (`VLLM_IMAGE=qag-vllm:qwen35-localcuda` in `.env`) — not only a newer stock `vllm/vllm-openai` tag.
 
 ## Current standard (repo default)
 
 | Item | Value |
 |------|--------|
-| `.env` `VLLM_IMAGE` | `qagredo-vllm:qwen35-localcuda` |
+| `.env` `VLLM_IMAGE` | `qag-vllm:qwen35-localcuda` |
 | Generator (GPU 0) | `Qwen3.5-9B` → `Qwen/Qwen3.5-9B` on port **7100** |
 | Judge (GPU 1) | `Meta-Llama-3.1-8B-Instruct` on port **7101** |
 | Compose flags (generator) | `--language-model-only`, `--enforce-eager` (see `docker-compose.vllm-stack.yml`) |
 | Split startup | `bash run.sh --vllm-up generator` → `--vllm-up judge` → `bash run.sh --pipeline-only` |
 
-Build / ship image (archives default to **`/data/tyewhong/qagredo/`** — see `QAGREDO_ARCHIVE_DIR` in `.env`):
+Build / ship image (archives default to **`/data/tyewhong/qag/`** — see `QAG_ARCHIVE_DIR` in `.env`):
 
 ```bash
 bash scripts/docker_build_vllm_qwen35_compat.sh
 bash scripts/save_vllm_qwen35_image.sh
-# writes /data/tyewhong/qagredo/vllm-qwen35-localcuda.rootfs.tar (+ .sha256)
+# writes /data/tyewhong/qag/vllm-qwen35-localcuda.rootfs.tar (+ .sha256)
 
 # on siteserver (after rsync/scp from build host):
-docker load -i /data/tyewhong/qagredo/vllm-qwen35-localcuda.rootfs.tar
+docker load -i /data/tyewhong/qag/vllm-qwen35-localcuda.rootfs.tar
 ```
 
 Full offline package list and extract steps: **`docs/OFFLINE_SETUP_GUIDE.md`** · tarball build: **`bash scripts/make_offline_tarballs.sh`** (same output dir).
 
 ## Scope and assumptions
 
-- You run QAGRedo with `bash run.sh`.
-- You use vLLM profile (`QAGREDO_PROFILE=vllm`).
+- You run QAG with `bash run.sh`.
+- You use vLLM profile (`QAG_PROFILE=vllm`).
 - Generator and judge are separate vLLM services (dual GPU by default).
-- Models stay in the same shared folder (`QAGREDO_MODELS_LLM_HOST`); runtime image and `.env` wiring must match Qwen3.5.
+- Models stay in the same shared folder (`QAG_MODELS_LLM_HOST`); runtime image and `.env` wiring must match Qwen3.5.
 
 ## What success looks like
 
 - `run.sh --show-config` points to intended vLLM generator/judge endpoints.
-- Compose (or external service) is truly on `qagredo-vllm:qwen35-localcuda`.
+- Compose (or external service) is truly on `qag-vllm:qwen35-localcuda`.
 - One-document smoke run succeeds.
 - Output JSON is produced without repeated generator/judge failures.
 
@@ -79,21 +79,21 @@ Recommended backup command:
 ### A2) Confirm ownership settings
 
 - Ensure `.env` has `HOST_UID` and `HOST_GID` matching `id -u` and `id -g` (offline siteserver: `1013` / `1015`).
-- Keep `QAGREDO_ALLOW_FOREIGN_OWNERSHIP` unset or `0` unless intentional.
+- Keep `QAG_ALLOW_FOREIGN_OWNERSHIP` unset or `0` unless intentional.
 
 ### A3) Decide your switch path
 
 Pick one:
 
-- Path 1: existing `qagredo-vllm:qwen35-localcuda` service already running (external endpoint reuse).
-- Path 2: existing `qagredo-vllm:qwen35-localcuda` image on siteserver (compose uses this image).
-- Path 3: no local `qagredo-vllm:qwen35-localcuda` image/service (load/build first, then Path 2).
+- Path 1: existing `qag-vllm:qwen35-localcuda` service already running (external endpoint reuse).
+- Path 2: existing `qag-vllm:qwen35-localcuda` image on siteserver (compose uses this image).
+- Path 3: no local `qag-vllm:qwen35-localcuda` image/service (load/build first, then Path 2).
 
 ## Part B: Detailed procedures by path
 
-## Path 1: Reuse already-running vLLM `qagredo-vllm:qwen35-localcuda` endpoint
+## Path 1: Reuse already-running vLLM `qag-vllm:qwen35-localcuda` endpoint
 
-Use when `qagredo-vllm:qwen35-localcuda` is known working in another code stack on same server.
+Use when `qag-vllm:qwen35-localcuda` is known working in another code stack on same server.
 
 ### B1.1) Confirm endpoint health
 
@@ -113,7 +113,7 @@ Set:
 
 Keep provider fields consistent with your pipeline expectations.
 
-### B1.3) Restart QAGRedo runner cleanly
+### B1.3) Restart QAG runner cleanly
 
 - `bash run.sh --down`
 - `bash run.sh --show-config` (verify final values)
@@ -124,25 +124,25 @@ Keep provider fields consistent with your pipeline expectations.
 - Smoke test: Part **D1** (`--pipeline-only`) or Part **D2** (`bash run.sh -- --num-documents 1`)
 - Check no repeated connection or model-not-found errors.
 
-## Path 2: Use local compose with `qagredo-vllm:qwen35-localcuda` image
+## Path 2: Use local compose with `qag-vllm:qwen35-localcuda` image
 
 Use when image already exists locally but compose is launching older tag.
 
 ### B2.1) Identify the exact local image/tag
 
-- `docker images | rg -i "vllm|qagredo-vllm:qwen35-localcuda"`
+- `docker images | rg -i "vllm|qag-vllm:qwen35-localcuda"`
 
 Record the exact tag you will use.
 
 ### B2.2) Update compose service image tags
 
-In the compose file(s) used by vLLM profile, set generator/judge image tags to your `qagredo-vllm:qwen35-localcuda` image tag.
+In the compose file(s) used by vLLM profile, set generator/judge image tags to your `qag-vllm:qwen35-localcuda` image tag.
 
 If using override via `.env`:
 
-- `QAGREDO_VLLM_COMPOSE_EXTRA=docker-compose.vllm-siteserver.yml`
+- `QAG_VLLM_COMPOSE_EXTRA=docker-compose.vllm-siteserver.yml`
 
-ensure the override references `qagredo-vllm:qwen35-localcuda` image tags.
+ensure the override references `qag-vllm:qwen35-localcuda` image tags.
 
 ### B2.3) Align `config/config.vllm.yaml`
 
@@ -162,39 +162,39 @@ Set base URLs to match exposed service ports and set model names to served names
   - `curl -sf http://localhost:7101/health`
 - Smoke run: Part **D1** or **D2**
 
-## Path 3: `qagredo-vllm:qwen35-localcuda` not available locally
+## Path 3: `qag-vllm:qwen35-localcuda` not available locally
 
 ### B3.1) Obtain runtime
 
 Either:
 
-- Load image tar that contains `qagredo-vllm:qwen35-localcuda` (e.g. `docker load -i /data/tyewhong/qagredo/vllm-qwen35-localcuda.rootfs.tar`), or
-- Build: `bash scripts/docker_build_vllm_qwen35_compat.sh` (produces `qagredo-vllm:qwen35-localcuda`), or export with `bash scripts/save_vllm_qwen35_image.sh` (writes under `/data/tyewhong/qagredo/` by default).
+- Load image tar that contains `qag-vllm:qwen35-localcuda` (e.g. `docker load -i /data/tyewhong/qag/vllm-qwen35-localcuda.rootfs.tar`), or
+- Build: `bash scripts/docker_build_vllm_qwen35_compat.sh` (produces `qag-vllm:qwen35-localcuda`), or export with `bash scripts/save_vllm_qwen35_image.sh` (writes under `/data/tyewhong/qag/` by default).
 
 ### B3.2) Verify image exists
 
-- `docker images | rg -i "vllm|qagredo-vllm:qwen35-localcuda"`
+- `docker images | rg -i "vllm|qag-vllm:qwen35-localcuda"`
 
 Then continue with Path 2.
 
-## Special scenario you asked: `qagredo-vllm:qwen35-localcuda` not running now, but tested elsewhere
+## Special scenario you asked: `qag-vllm:qwen35-localcuda` not running now, but tested elsewhere
 
 Yes, you can switch and run via `run.sh` if:
 
-- You point QAGRedo to that already-tested `qagredo-vllm:qwen35-localcuda` runtime (external endpoint), or
-- You make compose launch a local `qagredo-vllm:qwen35-localcuda` image.
+- You point QAG to that already-tested `qag-vllm:qwen35-localcuda` runtime (external endpoint), or
+- You make compose launch a local `qag-vllm:qwen35-localcuda` image.
 
-You cannot activate `qagredo-vllm:qwen35-localcuda` by config only if compose still launches old runtime.
+You cannot activate `qag-vllm:qwen35-localcuda` by config only if compose still launches old runtime.
 
 ## Part C: Exact config mapping checklist
 
 Before run:
 
 - `.env`
-  - `QAGREDO_PROFILE=vllm`
+  - `QAG_PROFILE=vllm`
   - `HOST_UID=<id -u>`
   - `HOST_GID=<id -g>`
-  - optional: `QAGREDO_VLLM_COMPOSE_EXTRA=<override file>` if required
+  - optional: `QAG_VLLM_COMPOSE_EXTRA=<override file>` if required
 
 - `config/config.vllm.yaml`
   - `llm.base_url` ends with `/v1`
@@ -203,8 +203,8 @@ Before run:
   - `judge.model` exact served judge model name
 
 - Compose
-  - generator image is `qagredo-vllm:qwen35-localcuda`
-  - judge image is `qagredo-vllm:qwen35-localcuda` (if judge uses vLLM)
+  - generator image is `qag-vllm:qwen35-localcuda`
+  - judge image is `qag-vllm:qwen35-localcuda` (if judge uses vLLM)
 
 ## Part D: End-to-end execution sequence
 
@@ -214,12 +214,15 @@ Before run:
 4. `bash run.sh --down`
 5. `bash run.sh --status`
 6. `bash run.sh --show-config`
+   - Must report `config/config.vllm.yaml`; if it reports the redserver YAML,
+     save `.env` and clear the redserver override block/shell exports.
 7. **Smoke test** — pick **one** run mode (see below).
 8. Review output under `output/vllm/<model>/<timestamp>/`.
 9. Optional post-run (no vLLM needed): `bash run.sh --summarize --latest --json` (run-wide stats → `run_summary.json` in that folder).
-10. Optional: `bash run.sh --minimise` (or `--minimise "<that_run_dir>"`) for per-doc minimal outputs: `*_analysis_minimal.json` plus quality split files (`*_analysis_minimal_good_pairs.json` / `*_analysis_minimal_bad_pairs.json`).
+10. Optional: `bash run.sh --minimise` (or `--minimise "<that_run_dir>"`) for per-doc minimal outputs, quality split files, LoRA SFT, and conditional retry-based DPO.
 11. Optional: `bash run.sh --minimise-good` / `--minimise-bad` when you only want one side of the split.
-12. Run normal workload; repeat steps 9–11 after large runs if you need handoff files.
+12. Optional: `bash run.sh --finetune-lora "<that_run_dir>"` after `--down` to train a LoRA adapter on the host (base model read-only).
+13. Run normal workload; repeat steps 9–12 after large runs if you need handoff files.
 
 ### D1) Split startup (recommended on siteserver — GPU 0 generator, GPU 1 judge)
 
@@ -245,7 +248,8 @@ Other useful flags (same as `bash run.sh --help`):
 | `bash run.sh --status` | Check compose + `:7100` / `:7101` health |
 | `bash run.sh --logs` | Tail vLLM / pipeline logs |
 | `bash run.sh --down` | Stop all services |
-| `bash run.sh --minimise` | After a run: write `*_analysis_minimal.json` **and** `*_analysis_minimal_{good,bad}_pairs.json` (strips Thinking Process / think blocks; use `--force` where supported) |
+| `bash run.sh --minimise` | Write minimal/split files, SFT, and conditional gate-passing retry DPO |
+| `bash run.sh --finetune-lora "<run_dir>"` | Host LoRA SFT (adapter only; stop vLLM first) |
 | `bash run.sh --minimise "<run_dir>"` | Same, for a specific run folder under `output/vllm/.../` |
 | `bash run.sh --minimise-good` | Export only per-doc `*_analysis_minimal_good_pairs.json` from existing `*_analysis.json` |
 | `bash run.sh --minimise-bad` | Export only per-doc `*_analysis_minimal_bad_pairs.json` from existing `*_analysis.json` |
@@ -316,7 +320,7 @@ Check these in order:
 - Symptom: permission warnings or write failures
   - UID/GID mismatch; fix `.env` `HOST_UID`/`HOST_GID`
 
-- Symptom: works in one stack, fails in QAGRedo
+- Symptom: works in one stack, fails in QAG
   - endpoint path mismatch (`/v1`) or different served model alias
 
 ## Part G: Rollback plan (ready before change)
@@ -338,16 +342,17 @@ Rollback steps:
 ## Part H: Print-friendly operator checklist
 
 - [ ] Backup `.env` and `config/config.vllm.yaml`
-- [ ] Confirm `QAGREDO_PROFILE=vllm`
+- [ ] Confirm `QAG_PROFILE=vllm`
+- [ ] Confirm redserver config/URL overrides are commented or unset
 - [ ] Confirm correct UID/GID values
-- [ ] Confirm `qagredo-vllm:qwen35-localcuda` runtime source (external endpoint or local image)
+- [ ] Confirm `qag-vllm:qwen35-localcuda` runtime source (external endpoint or local image)
 - [ ] Update compose image tags if needed
 - [ ] Update `llm.base_url` / `judge.base_url`
 - [ ] Update `llm.model` / `judge.model`
 - [ ] Run restart sequence (`--down`, `--status`, `--show-config`, then Part **D1** or **D2**)
 - [ ] Validate output and logs
 - [ ] Optional: `bash run.sh --summarize --latest --json` for `run_summary.json` (no pipeline rerun)
-- [ ] Optional: `bash run.sh --minimise` for `*_analysis_minimal.json` + per-doc split files (no pipeline rerun)
+- [ ] Optional: `bash run.sh --minimise` for minimal/split files + LoRA SFT/conditional DPO (no pipeline rerun)
 - [ ] Optional: `bash run.sh --minimise-good` / `--minimise-bad` when only one split side is needed (no pipeline rerun)
 - [ ] Keep rollback artifacts until completion sign-off
 
@@ -360,9 +365,9 @@ This section answers exactly where to edit for siteserver operations.
 Primary places:
 
 - `.env`
-  - `QAGREDO_GPU_COUNT=4` (overall GPU request used by profile stack)
+  - `QAG_GPU_COUNT=4` (overall GPU request used by profile stack)
   - `VLLM_TP_SIZE=2` and `VLLM_JUDGE_TP_SIZE=2` for 4-GPU split (2 for generator, 2 for judge), or choose your intended split
-  - `QAGREDO_VLLM_COMPOSE_EXTRA=docker-compose.vllm-siteserver.yml` (recommended when using 4-GPU override compose file)
+  - `QAG_VLLM_COMPOSE_EXTRA=docker-compose.vllm-siteserver.yml` (recommended when using 4-GPU override compose file)
 
 - Compose override file (usually `docker-compose.vllm-siteserver.yml`)
   - Set per-service GPU device mapping (`device_ids`) to explicit GPU indices
@@ -401,7 +406,7 @@ Depends on profile:
 
 - kubeflow profile:
   - `.env`:
-    - `QAGREDO_MODELS_DIR=<host-model-dir>`
+    - `QAG_MODELS_DIR=<host-model-dir>`
   - This mounts into container at `/opt/ollama/models` per current stack.
 
 Model name alignment:
@@ -416,8 +421,8 @@ Primary location:
 - `.env`
   - `DATA_DIR=<host-input-folder>`
   - or use shortcut variables already supported by `run.sh`:
-    - `QAGREDO_DATA_DIR`
-    - `QAGREDO_OFFLINE_HOST` + `QAGREDO_OFFLINE_INPUT`
+    - `QAG_DATA_DIR`
+    - `QAG_OFFLINE_HOST` + `QAG_OFFLINE_INPUT`
 
 How pipeline reads files:
 
@@ -433,8 +438,8 @@ So input path setup has two layers:
 ### I5) Quick examples (copy pattern)
 
 - 4-GPU with siteserver override:
-  - `.env`: `QAGREDO_VLLM_COMPOSE_EXTRA=docker-compose.vllm-siteserver.yml`
-  - `.env`: `QAGREDO_GPU_COUNT=4`
+  - `.env`: `QAG_VLLM_COMPOSE_EXTRA=docker-compose.vllm-siteserver.yml`
+  - `.env`: `QAG_GPU_COUNT=4`
   - `.env`: `VLLM_TP_SIZE=2`
   - `.env`: `VLLM_JUDGE_TP_SIZE=2`
 

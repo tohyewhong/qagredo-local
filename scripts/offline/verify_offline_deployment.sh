@@ -9,9 +9,9 @@ set -euo pipefail
 # Runs `pip check` and import smoke tests inside whichever Docker image is
 # appropriate for the configured profile.
 #
-# Run from qagredo_host/ AFTER:
+# Run from qag_host/ AFTER:
 #   - bash setup_offline.sh
-#   - docker images show qagredo-v1:latest (or qagredo-kubeflow:latest)
+#   - docker images show qag-v1:latest (or qag-kubeflow:latest)
 #
 # Exits non-zero if the image is missing packages or has broken deps.
 #
@@ -37,11 +37,11 @@ while (($#)); do
 done
 
 [[ -f "$HOST_DIR/.env" ]] && { set -a; source "$HOST_DIR/.env"; set +a; }
-PROFILE="${REQUESTED_PROFILE:-${QAGREDO_PROFILE:-ollama}}"
+PROFILE="${REQUESTED_PROFILE:-${QAG_PROFILE:-ollama}}"
 case "$PROFILE" in
   dev)
-    echo "[WARN] QAGREDO_PROFILE=dev is the old name for ollama; using ollama." >&2
-    echo "[WARN] Update .env: QAGREDO_PROFILE=ollama" >&2
+    echo "[WARN] QAG_PROFILE=dev is the old name for ollama; using ollama." >&2
+    echo "[WARN] Update .env: QAG_PROFILE=ollama" >&2
     PROFILE="ollama"
     ;;
   ollama|kubeflow|vllm) ;;
@@ -64,9 +64,9 @@ _current_gid="$(id -g)"
 export HOST_UID="${HOST_UID:-${_current_uid}}"
 export HOST_GID="${HOST_GID:-${_current_gid}}"
 if [[ "${HOST_UID}" != "${_current_uid}" || "${HOST_GID}" != "${_current_gid}" ]]; then
-  if [[ "${QAGREDO_ALLOW_FOREIGN_OWNERSHIP:-0}" != "1" ]]; then
+  if [[ "${QAG_ALLOW_FOREIGN_OWNERSHIP:-0}" != "1" ]]; then
     echo "[WARN] HOST_UID/HOST_GID (${HOST_UID}:${HOST_GID}) do not match current user (${_current_uid}:${_current_gid}). Auto-correcting to current user."
-    echo "[WARN] To keep foreign ownership mapping, set QAGREDO_ALLOW_FOREIGN_OWNERSHIP=1."
+    echo "[WARN] To keep foreign ownership mapping, set QAG_ALLOW_FOREIGN_OWNERSHIP=1."
     export HOST_UID="${_current_uid}"
     export HOST_GID="${_current_gid}"
   fi
@@ -76,7 +76,7 @@ echo "[INFO] Profile      : $PROFILE"
 echo "[INFO] Compose file : $COMPOSE_FILE"
 echo "[INFO] Verifying requirements.txt inside the runner image ..."
 
-docker compose -f "$COMPOSE_FILE" run --rm --no-deps -T qagredo \
+docker compose -f "$COMPOSE_FILE" run --rm --no-deps -T qag \
   python /workspace/scripts/docker_verify_requirements.py /workspace/requirements.txt
 
 echo "[OK] Image matches requirements.txt and pip check passed."

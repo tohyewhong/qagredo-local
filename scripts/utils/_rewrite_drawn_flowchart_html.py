@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate docs/QAGRedo_Pipeline_Flowchart_Drawn.html (SVG layout)."""
+"""Regenerate docs/QAG_Pipeline_Flowchart_Drawn.html (SVG layout)."""
 from pathlib import Path
 
 W, H = 680, 920
@@ -17,7 +17,7 @@ def build_svg() -> str:
         "role=\"img\" aria-labelledby=\"title desc\">"
     )
     add(
-        "<title id=\"title\">QAGRedo pipeline flowchart</title>"
+        "<title id=\"title\">QAG pipeline flowchart</title>"
         "<desc id=\"desc\">Slots, grounding gate, replacement, save, "
         "documents.</desc>"
         "<defs>"
@@ -169,7 +169,7 @@ def build_html() -> str:
         "  <meta charset=\"utf-8\" />\n"
         "  <meta name=\"viewport\" content=\"width=device-width, "
         "initial-scale=1\" />\n"
-        "  <title>QAGRedo — pipeline (SVG in HTML)</title>\n"
+        "  <title>QAG — pipeline (SVG in HTML)</title>\n"
         "  <link href=\"https://fonts.googleapis.com/css2?family="
         "Source+Sans+3:wght@400;600&display=swap\" rel=\"stylesheet\" />\n"
         "  <style>\n"
@@ -206,7 +206,7 @@ def build_html() -> str:
         "</head>\n"
         "<body>\n"
         "  <div class=\"wrap\">\n"
-        "    <h1>QAGRedo pipeline (drawn in HTML / SVG)</h1>\n"
+        "    <h1>QAG pipeline (drawn in HTML / SVG)</h1>\n"
         "    <p class=\"lead\">\n"
         "      Native SVG (no Mermaid). Layout matches "
         "<code>run_qa_pipeline.py</code>:\n"
@@ -222,16 +222,16 @@ def build_html() -> str:
         "_rewrite_drawn_flowchart_html.py</code>\n"
         "      · Editable PPTX:\n"
         "      <code>python3 scripts/utils/"
-        "build_qagredo_pipeline_flowchart_pptx.py</code>\n"
+        "build_qag_pipeline_flowchart_pptx.py</code>\n"
         "      →\n"
         "      <code>docs/architecture/diagrams/"
-        "QAGRedo_Pipeline_Flowchart_editable.pptx</code>\n"
+        "QAG_Pipeline_Flowchart_editable.pptx</code>\n"
         "      · PNG/SVG:\n"
         "      <code>python3 scripts/utils/"
         "render_pipeline_flowchart_png.py</code>\n"
         "      →\n"
         "      <code>docs/architecture/diagrams/"
-        "QAGRedo_Pipeline_Flowchart.png</code> (+ .svg)\n"
+        "QAG_Pipeline_Flowchart.png</code> (+ .svg)\n"
         "      (venv: pip install -r requirements-diagram.txt "
         "or apt librsvg2-bin)\n"
         "    </footer>\n"
@@ -243,7 +243,7 @@ def build_html() -> str:
 
 def main() -> None:
     root = Path(__file__).resolve().parents[2]
-    out = root / "docs" / "QAGRedo_Pipeline_Flowchart_Drawn.html"
+    out = root / "docs" / "QAG_Pipeline_Flowchart_Drawn.html"
     out.write_text(build_html(), encoding="utf-8")
     print(f"Wrote {out}")
 

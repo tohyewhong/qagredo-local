@@ -111,6 +111,7 @@ def _validate_and_regenerate_answer(
         "was_regenerated": False,
         "issues": [],
         "accepted": True,
+        "answer_attempts": [],
     }
 
     # Use hallucination method from config for answer validation (default: llm)
@@ -133,7 +134,18 @@ def _validate_and_regenerate_answer(
         }
     )
 
-    if is_grounded and confidence >= min_confidence:
+    accepted = bool(is_grounded and confidence >= min_confidence)
+    validation_info["answer_attempts"].append(
+        {
+            "answer": answer,
+            "is_grounded": is_grounded,
+            "confidence": confidence,
+            "issues": check_result.get("issues", []),
+            "accepted": accepted,
+        }
+    )
+
+    if accepted:
         validation_info["accepted"] = True
         return answer, validation_info
 
@@ -174,7 +186,18 @@ Generate a NEW answer using ONLY the document. Provide only the answer."""
             }
         )
 
-        if is_grounded and confidence >= min_confidence:
+        accepted = bool(is_grounded and confidence >= min_confidence)
+        validation_info["answer_attempts"].append(
+            {
+                "answer": current_answer,
+                "is_grounded": is_grounded,
+                "confidence": confidence,
+                "issues": check_result.get("issues", []),
+                "accepted": accepted,
+            }
+        )
+
+        if accepted:
             validation_info["accepted"] = True
             return current_answer, validation_info
 

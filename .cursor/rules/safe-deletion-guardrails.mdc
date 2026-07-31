@@ -20,7 +20,7 @@ Require clear intent (`delete`, `remove`, `wipe`, `clean up all`) before:
 - `rm -rf` on repo root, `config/`, `utils/`, `scripts/`, `docs/`, `.cursor/`
 - `git clean -fdx`, `git reset --hard`, `git push --force`
 - `docker compose down -v`, `docker volume rm`, `docker system prune -a`
-- Deleting or truncating `/data/tyewhong/qagredo/*.tar` or `*.tar.gz` archives
+- Deleting or truncating `/data/tyewhong/qag/*.tar` or `*.tar.gz` archives
 - `bash setup_offline.sh --force` (re-extracts models)
 
 ## Protected paths
@@ -29,8 +29,10 @@ Do not delete or overwrite without listing paths and getting confirmation:
 
 - `.env`, `certbundle/*.crt`
 - `models/`, `models_llm/`, `output/`, `hf_cache`, `hf_cache_judge`
-- `/data/tyewhong/qagredo/` (offline archives)
-- `QAGREDO_DATA_DIR` mounted data (read-only unless task is data prep)
+- `/data/tyewhong/qag/` (active offline archives)
+- `/data/tyewhong/qag/zz_old_qag/` (retired / other-profile archives)
+- `/data/tyewhong/qagredo/` (legacy archive dir — protected until emptied)
+- `QAG_DATA_DIR` mounted data (read-only unless task is data prep)
 
 ## Multi-file deletes
 

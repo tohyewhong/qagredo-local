@@ -36,6 +36,13 @@ def _write_analysis(path: Path) -> None:
                 },
             },
         ],
+        "dpo_pairs": [
+            {
+                "question": "good q",
+                "chosen": "good a",
+                "rejected": "rejected a",
+            }
+        ],
     }
     path.write_text(
         json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
@@ -100,6 +107,13 @@ class ExportTrainingSplitTest(unittest.TestCase):
             self.assertNotIn("content", good_rows[0])
             self.assertNotIn("is_grounded", good_rows[0])
             self.assertNotIn("confidence", good_rows[0])
+            good_payload = json.loads(
+                good_path.read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                good_payload["dpo_pairs"][0]["rejected"],
+                "rejected a",
+            )
 
     def test_threshold_boundary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

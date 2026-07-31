@@ -1,26 +1,67 @@
 ---
-description: Store all .tar and .tar.gz archives under /data/tyewhong/qagredo
+description: Store all .tar and .tar.gz archives under /data/tyewhong/qag
 alwaysApply: true
 ---
 
 # Archive Output Location
 
-All QAGRedo **`.tar`** and **`.tar.gz`** artifacts (and their **`.sha256`** sidecars) belong in:
+All QAG offline build artifacts belong in **`/data/tyewhong/qag/`**:
 
-**`/data/tyewhong/qagredo/`**
+- **`.tar`** — Docker image exports, rootfs archives
+- **`.tar.gz`** — code bundles, model stores
+- **`.sha256`** — checksum sidecars for any of the above
 
 ## Scripts (defaults)
 
-- `scripts/make_qagredo_bundle.sh` → `QAGREDO_ARCHIVE_DIR` (default above)
-- `scripts/make_offline_tarballs.sh` → `QAGREDO_OFFLINE_OUT` (defaults to same dir)
-- `scripts/save_vllm_qwen35_image.sh` → `OUT_DIR` / `QAGREDO_ARCHIVE_DIR`
+- `scripts/make_qag_bundle.sh` → `QAG_ARCHIVE_DIR` (default above)
+- `scripts/make_offline_tarballs.sh` → `QAG_OFFLINE_OUT` (defaults to same dir)
+- `scripts/save_vllm_qwen35_image.sh` → `OUT_DIR` / `QAG_ARCHIVE_DIR`
+- `scripts/migrate_archive_dir.sh` → one-time legacy path migration
 
-Set in `.env`: `QAGREDO_ARCHIVE_DIR=/data/tyewhong/qagredo`
+Set in `.env`: `QAG_ARCHIVE_DIR=/data/tyewhong/qag`
+
+## Retirement folder (`zz_old_qag/`)
+
+Under **`/data/tyewhong/qag/zz_old_qag/`**, park archives that are not needed
+for the **active** profile on this host:
+
+- Active profile bundles stay in the **root** of `QAG_ARCHIVE_DIR`.
+- Superseded, duplicate, or other-profile archives (e.g. ollama, kubeflow,
+  legacy vLLM images) → **move** into `zz_old_qag/` — do not delete unless
+  the user explicitly asks.
+- `setup_offline.sh` searches `ARCHIVE_DIR` root only; retired files are not
+  auto-discovered. To deploy ollama/kubeflow later, move (or symlink) the
+  needed files back to the archive root.
+
+## Legacy path (deprecated)
+
+**`/data/tyewhong/qagredo/`** must not receive new archives. If `.tar` /
+`.tar.gz` / `.sha256` files exist only there, **move** them to
+`/data/tyewhong/qag/` (use `mv` on the same filesystem — do not copy ~200 GB).
+
+Rename qagredo-prefixed bundles on move so `setup_offline.sh` finds them:
+
+| Legacy name | Canonical name |
+|-------------|----------------|
+| `qagredo_bundle.tar.gz` | `qag_bundle.tar.gz` |
+| `qagredo-v1.tar` | `qag-v1.tar` |
+| `qagredo-kubeflow.tar` | `qag-kubeflow.tar` |
+| `qagredo-vllm_qwen35-localcuda.rootfs.tar` | `vllm-qwen35-localcuda.rootfs.tar` |
+
+(Include matching `.sha256` sidecars. Other `models_*` archives move as-is.)
+
+Dry-run: `bash scripts/migrate_archive_dir.sh`  
+Apply: `bash scripts/migrate_archive_dir.sh --execute`
 
 ## Agent behavior
 
-- Never delete or truncate archives under `/data/tyewhong/qagredo/` unless the
-  user explicitly requests it (see `safe-deletion-guardrails.mdc`).
-- Never leave `.tar` / `.tar.gz` in `/home/tyewhong/qagredo/` or `offline_out/` after building; move or write directly to `/data/tyewhong/qagredo/`.
-- When giving manual `docker save` or `tar czf` commands, use `/data/tyewhong/qagredo/` as the output directory.
-- `.zip` archives are not covered by this rule (may live next to datasets, e.g. pathfinder).
+- Never delete or truncate archives under `/data/tyewhong/qag/` or
+  `/data/tyewhong/qag/zz_old_qag/` unless the user explicitly requests it
+  (see `safe-deletion-guardrails.mdc`).
+- Never write new `.tar` / `.tar.gz` archives to `/data/tyewhong/qagredo/`.
+- Never leave `.tar` / `.tar.gz` in `/home/tyewhong/qag/` or `offline_out/`
+  after building; move or write directly to `/data/tyewhong/qag/`.
+- When giving manual `docker save` or `tar czf` commands, use
+  `/data/tyewhong/qag/` as the output directory.
+- `.zip` archives are not covered by this rule (may live next to datasets,
+  e.g. pathfinder).

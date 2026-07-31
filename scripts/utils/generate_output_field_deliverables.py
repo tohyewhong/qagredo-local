@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Emit presentation deliverables without running the LLM stack.
 
-Writes docs/QAGRedo_Output_Sample.json (from the repo sample) and rebuilds
-docs/QAGRedo_Output_Fields_Overview.pptx.
+Writes docs/QAG_Output_Sample.json (from the repo sample) and rebuilds
+docs/QAG_Output_Fields_Overview.pptx.
 
 For real per-document JSON, start vLLM on :7100 and judge on :7101, then run
 `run_qa_pipeline.py` (see `docs/OFFLINE_SETUP_GUIDE.md`).
@@ -16,10 +16,10 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SAMPLE = ROOT / "examples" / "sample_qagredo_doc_analysis.json"
-OUT_JSON = ROOT / "docs" / "QAGRedo_Output_Sample.json"
-OUT_PPTX = ROOT / "docs" / "QAGRedo_Output_Fields_Overview.pptx"
-BUILD_PPT = ROOT / "scripts" / "utils" / "build_qagredo_output_fields_ppt.py"
+SAMPLE = ROOT / "examples" / "sample_qag_doc_analysis.json"
+OUT_JSON = ROOT / "docs" / "QAG_Output_Sample.json"
+OUT_PPTX = ROOT / "docs" / "QAG_Output_Fields_Overview.pptx"
+BUILD_PPT = ROOT / "scripts" / "utils" / "build_qag_output_fields_ppt.py"
 
 
 def main() -> None:

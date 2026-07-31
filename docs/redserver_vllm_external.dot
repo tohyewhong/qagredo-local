@@ -1,0 +1,39 @@
+digraph redserver_vllm_external {
+  rankdir=LR;
+  bgcolor="white";
+  node [shape=box, style="rounded,filled", fillcolor="#e8e8e8",
+        fontname="Helvetica", fontsize=11];
+  edge [fontname="Helvetica", fontsize=10];
+
+  subgraph cluster_red {
+    label="Redserver";
+    style="rounded";
+    fillcolor="#f5f5f5";
+    ENV [label=".env (saved)\nQAG_PROFILE=vllm\nQAG_VLLM_CONFIG_FILE\nVLLM_BASE_URL + judge URL\nQAG_VLLM_COMPOSE_EXTRA"];
+    CFG [label="config.vllm.redserver.yaml"];
+    DATA [label="QAG_DATA_DIR\n*.txt"];
+    QAG [label="qag-v1\norchestrator"];
+  }
+
+  subgraph cluster_gpu {
+    label="gpuserver — already running";
+    style="rounded";
+    fillcolor="#fff4cc";
+    G [label="Generator\nQwen3.5-9B\n:52328/v1"];
+    J [label="Judge\nQwen3.6-27B\n:53366/v1"];
+  }
+
+  READY [label="Both healthy?", shape=diamond, fillcolor="#fff4cc"];
+  FIX [label="Fix gpuserver,\nDNS, or firewall", fillcolor="#ffd6d6"];
+  OUT [label="output/vllm/...", fillcolor="#d9f2d9"];
+
+  ENV -> CFG [label=" selects"];
+  CFG -> QAG [label=" config"];
+  DATA -> QAG [label=" input"];
+  QAG -> G [label=" HTTP :52328"];
+  QAG -> J [label=" HTTP :53366"];
+  G -> READY;
+  J -> READY;
+  READY -> OUT [label=" yes"];
+  READY -> FIX [label=" no"];
+}

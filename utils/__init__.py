@@ -1,4 +1,4 @@
-"""Utility functions for the qagredo project."""
+"""Utility functions for the qag project."""
 
 from .config_manager import (
     build_effective_config,

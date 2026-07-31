@@ -7,8 +7,8 @@ digraph SiteserverVllmChange {
   A [label="Check current state"];
   B [label="Qwen3.5 vLLM image\nalready on host?", shape=diamond, fillcolor="#eef2ff"];
   C [label="Reuse existing endpoint/image"];
-  D [label="Build/load qagredo-vllm:\nqwen35-localcuda"];
-  E [label="Update QAGRedo config/env"];
+  D [label="Build/load qag-vllm:\nqwen35-localcuda"];
+  E [label="Update QAG config/env"];
   F [label="Restart stack"];
   G [label="Health checks + test run"];
   H [label="Pass?", shape=diamond, fillcolor="#eef2ff"];

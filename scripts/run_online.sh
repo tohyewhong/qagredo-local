@@ -2,17 +2,17 @@
 set -euo pipefail
 
 # Layman-friendly runner for this server:
-# - Creates a repo-local qagredo_host/ structure
+# - Creates a repo-local qag_host/ structure
 # - Copies sample config + sample input data
 # - Extracts Llama model zip and materializes it into models_llm/
-# - Starts vLLM, waits for /health, then runs QAGRedo
+# - Starts vLLM, waits for /health, then runs QAG
 #
 # Usage:
-#   cd /path/to/qagredo
+#   cd /path/to/qag
 #   bash scripts/run_online.sh           # safe mode (no overwrite)
 #   bash scripts/run_online.sh --overwrite
 #
-# Rare: HOST_DATA_DIR=... if sample copy should not go to qagredo_host/data.
+# Rare: HOST_DATA_DIR=... if sample copy should not go to qag_host/data.
 
 OVERWRITE=0
 if [[ "${1:-}" == "--overwrite" ]]; then
@@ -23,8 +23,8 @@ elif [[ -n "${1:-}" ]]; then
 fi
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HOST_DIR_DEFAULT="${REPO_DIR}/qagredo_host"
-HOST_DIR="${QAGREDO_HOST_DIR:-$HOST_DIR_DEFAULT}"
+HOST_DIR_DEFAULT="${REPO_DIR}/qag_host"
+HOST_DIR="${QAG_HOST_DIR:-$HOST_DIR_DEFAULT}"
 
 # Where sample input is copied under the host bundle (override: HOST_DATA_DIR=...).
 HOST_DATA_DIR="${HOST_DATA_DIR:-$HOST_DIR/data}"
@@ -148,16 +148,16 @@ main() {
     docker pull "$VLLM_IMAGE"
   fi
 
-  # Ensure qagredo image exists
-  if ! docker image inspect "qagredo-v1:latest" >/dev/null 2>&1; then
-    die "Missing docker image qagredo-v1:latest. Build or load it first on this machine."
+  # Ensure qag image exists
+  if ! docker image inspect "qag-v1:latest" >/dev/null 2>&1; then
+    die "Missing docker image qag-v1:latest. Build or load it first on this machine."
   fi
 
   # Start vLLM
   info "Starting vLLM (GPU) on port 7100"
   (
     cd "$REPO_DIR"
-    export QAGREDO_HOST_DIR="$HOST_DIR"
+    export QAG_HOST_DIR="$HOST_DIR"
     export VLLM_IMAGE="$VLLM_IMAGE"
     export VLLM_MODEL="$VLLM_MODEL_IN_CONTAINER"
     export VLLM_API_KEY="$VLLM_API_KEY"
@@ -173,15 +173,15 @@ main() {
     fi
     sleep 2
     if [[ "$i" -eq 120 ]]; then
-      die "Timed out waiting for vLLM. Check logs: docker logs qagredo-vllm --tail 100"
+      die "Timed out waiting for vLLM. Check logs: docker logs qag-vllm --tail 100"
     fi
   done
 
-  info "Running QAGRedo pipeline (this may take a while)"
+  info "Running QAG pipeline (this may take a while)"
   (
     cd "$REPO_DIR"
-    export QAGREDO_HOST_DIR="$HOST_DIR"
-    docker compose -f docker-compose.vllm-stack.yml run --rm qagredo
+    export QAG_HOST_DIR="$HOST_DIR"
+    docker compose -f docker-compose.vllm-stack.yml run --rm qag
   )
 
   ok "Done. Output folder:"

@@ -7,7 +7,7 @@ set -euo pipefail
 #   pip install pypdf openpyxl
 #
 # Run this ON AN ONLINE MACHINE (internet required), inside the repo:
-#   cd /home/tyewhong/qagredo
+#   cd /home/tyewhong/qag
 #   bash scripts/conversion/build_wheelhouse_converter.sh
 #
 # Output folder:
@@ -37,6 +37,6 @@ python3 -m pip download \
 
 ok "Wheelhouse ready."
 echo "Next:"
-echo "  - Bundle ${WHEELHOUSE_DIR}/ into qagredo_bundle.tar.gz (via scripts/make_qagredo_bundle.sh)"
+echo "  - Bundle ${WHEELHOUSE_DIR}/ into qag_bundle.tar.gz (via scripts/make_qag_bundle.sh)"
 echo "  - Offline install (inside container or host):"
 echo "      bash scripts/conversion/bootstrap_offline_converter.sh"

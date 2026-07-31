@@ -4,27 +4,27 @@
 #
 # Design:
 #   * One image that Kubeflow (or any "1 image" environment) can run as a pod.
-#   * Contains: Python 3.10 + QAGRedo code + Ollama binary.
+#   * Contains: Python 3.10 + QAG code + Ollama binary.
 #   * Does NOT bake model weights; models are mounted at /opt/ollama/models
 #     (default) from a host directory such as /home/jovyan/models on Kubeflow
-#     or /home/tyewhong/qagredo/models on the dev server.
+#     or /home/tyewhong/qag/models on the dev server.
 #   * Entrypoint starts `ollama serve` in the background (listening on
-#     127.0.0.1:11434) and then runs the QAGRedo pipeline.
-#   * vLLM is NOT removed from the repo — pick it via QAGREDO_PROFILE=vllm
+#     127.0.0.1:11434) and then runs the QAG pipeline.
+#   * vLLM is NOT removed from the repo — pick it via QAG_PROFILE=vllm
 #     or by running the original docker-compose.vllm-stack.yml. This image is
 #     Ollama-only so it stays small and self-contained.
 #
 # Build:
-#   docker build -f Dockerfile.kubeflow -t qagredo-kubeflow:latest .
+#   docker build -f Dockerfile.kubeflow -t qag-kubeflow:latest .
 #
 # Typical run (Kubeflow-style):
 #   docker run --rm --gpus all \
-#     -e QAGREDO_SERVE_OLLAMA=1 \
+#     -e QAG_SERVE_OLLAMA=1 \
 #     -e OLLAMA_MODEL=qwen3:8b -e OLLAMA_JUDGE_MODEL=llama3.1:8b \
 #     -v /home/jovyan/models:/opt/ollama/models:ro \
 #     -v "$PWD/data":/workspace/data \
 #     -v "$PWD/output":/workspace/output \
-#     qagredo-kubeflow:latest
+#     qag-kubeflow:latest
 #
 # Swap to larger models (e.g. 70B) by dropping new GGUF into the host models
 # directory and updating OLLAMA_MODEL / OLLAMA_JUDGE_MODEL at run time.
@@ -36,7 +36,7 @@ USER root
 
 ARG UID=1013
 ARG GID=1015
-ARG USERNAME=qagredo
+ARG USERNAME=qag
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
@@ -57,7 +57,7 @@ COPY certbundle /workspace/certbundle
 RUN if [ -f /workspace/certbundle/certbundle.crt ]; then \
         echo "[INFO] Installing custom CA from /workspace/certbundle/certbundle.crt before Ollama download"; \
         mkdir -p /usr/local/share/ca-certificates; \
-        cp /workspace/certbundle/certbundle.crt /usr/local/share/ca-certificates/qagredo-custom.crt; \
+        cp /workspace/certbundle/certbundle.crt /usr/local/share/ca-certificates/qag-custom.crt; \
         update-ca-certificates; \
     else \
         echo "[INFO] No certbundle/certbundle.crt provided; using default system CAs"; \
@@ -96,7 +96,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     HUGGINGFACE_HUB_CACHE=/opt/hf_cache/hub \
     OLLAMA_MODELS=/opt/ollama/models \
     OLLAMA_HOST=127.0.0.1:11434 \
-    QAGREDO_SERVE_OLLAMA=1 \
+    QAG_SERVE_OLLAMA=1 \
     OLLAMA_BASE_URL=http://127.0.0.1:11434/v1 \
     OLLAMA_JUDGE_BASE_URL=http://127.0.0.1:11434/v1
 
@@ -114,7 +114,7 @@ COPY docs/OFFLINE_SETUP_GUIDE.md ./OFFLINE_SETUP_GUIDE.md
 RUN if [ -f /workspace/certbundle/certbundle.crt ]; then \
         echo "[INFO] Installing custom CA from /workspace/certbundle/certbundle.crt"; \
         mkdir -p /usr/local/share/ca-certificates; \
-        cp /workspace/certbundle/certbundle.crt /usr/local/share/ca-certificates/qagredo-custom.crt; \
+        cp /workspace/certbundle/certbundle.crt /usr/local/share/ca-certificates/qag-custom.crt; \
         update-ca-certificates; \
         pip config set global.cert /etc/ssl/certs/ca-certificates.crt; \
     else \

@@ -1,4 +1,4 @@
-"""LangGraph-based per-document orchestration for QAGRedo.
+"""LangGraph-based per-document orchestration for QAG.
 
 This module wraps generation/grading functions into a per-document state graph
 with conditional routing and fallback grading.

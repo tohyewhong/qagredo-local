@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Split a QAGRedo-style JSONL file into one .txt per record.
+Split a QAG-style JSONL file into one .txt per record.
 
 Output filenames: linux_Data_<12-char-hex>.txt
   (hex = first 12 chars of MD5 over record id + content, stable per row)

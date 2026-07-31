@@ -1,0 +1,142 @@
+# ============================================================================
+#  QAG — VLLM profile (redserver / external vLLM on gpuserver)
+# ============================================================================
+#
+#  Use when generator and judge already run outside QAG compose — e.g. on
+#  host gpuserver with custom ports. Pipeline runs inside the qag container
+#  and calls these OpenAI-compatible /v1 endpoints.
+#
+#  Activate on redserver without overwriting config.vllm.yaml:
+#    In .env: QAG_VLLM_CONFIG_FILE=config/config.vllm.redserver.yaml
+#
+#  Also set in .env (so compose + run.sh health checks match):
+#    VLLM_BASE_URL=http://gpuserver:52328/v1
+#    VLLM_JUDGE_BASE_URL=http://gpuserver:53366/v1
+#    QAG_VLLM_COMPOSE_EXTRA=docker-compose.vllm-redserver.yml
+#
+#  Local dual-GPU hosts leave these redserver overrides unset and use
+#  config/config.vllm.yaml.
+#
+#  Input documents (host path — not in this YAML):
+#    QAG_DATA_DIR=/home/tyewhong/khangzhie-data/pathfinder/txt
+#    (mounted as /workspace/data; run.input_folder "." scans that folder)
+#
+#  Training export: answerability_strict is false so failed slots stay in
+#  qa_pairs; after a run:
+#    bash run.sh --minimise
+#  writes lora_sft.jsonl (+ conditional retry-based lora_dpo.jsonl).
+#
+#  Verify served names: curl http://gpuserver:52328/v1/models
+#                       curl http://gpuserver:53366/v1/models
+# ============================================================================
+
+offline_mode: true
+
+framework:
+  use_langchain: true
+  use_langgraph: true
+  langchain:
+    structured_json_output: true
+  langgraph:
+    enable_dynamic_routing: true
+    semantic_fallback_threshold: 0.7
+
+run:
+  input_folder: "."   # host: QAG_DATA_DIR → /workspace/data (pathfinder/txt)
+  input_file: ""
+  input_glob: "*.txt"
+  auto_convert: false
+  output_folder: timestamp
+  output_analysis_stem: document_id
+  input_type: auto
+  max_files: 0
+  num_documents: 0
+  parallel_documents: 2
+  prefilter_skips: true
+  quiet_skips: true
+  skip_preflight: true
+  start_at_document: 0
+  skip_existing_outputs: true
+  resume: true
+  resume_run_dir: ""
+  save_grounded_qa_pairs_only: false
+  reject_insufficient_answers: true
+  minimal_qa_output: false
+  min_content_words: 250
+  min_content_chars: 0
+  semantic_normalization:
+    enable: false
+    max_content_chars: 32000
+
+# -------------------------------------------------------------------------
+# GENERATOR — external vLLM (Qwen3.5-9B on gpuserver:52328).
+# -------------------------------------------------------------------------
+llm:
+  provider: "vllm"
+  model: "Qwen3.5-9B"
+  base_url: "http://gpuserver:52328/v1"
+  api_key: "llama-local"
+  temperature: 0.7
+  max_tokens: 32000
+  max_retries: 5
+  retry_delay: 1.0
+  timeout: 240
+
+answer_generation:
+  temperature: 0.3
+  multi_turn:
+    enable_rejection: true
+    min_confidence_threshold: 0.7
+    max_answer_attempts: 5
+    max_regeneration_attempts: 2
+    max_question_regeneration_rounds: 5
+    reject_ungrounded_after_retries: true
+  coverage_validation:
+    enable: true
+    min_score_threshold: 0.7
+    max_doc_chars: 32000
+
+question_generation:
+  num_questions: 3
+  complexity: "advanced"
+  deduplication_method: "llm"
+  dedup_llm:
+    use_judge_model: true
+    strict: true
+    max_tokens: 80
+  validation:
+    enable_rejection: true
+    method: "llm"
+    min_confidence_threshold: 0.7
+    max_regeneration_attempts: 2
+    enable_comprehensiveness_check: true
+    comprehensiveness_min_score: 0.6
+    comprehensiveness_max_attempts: 2
+    comprehensiveness_strict: false
+    enable_answerability_check: true
+    answerability_min_score: 0.8
+    answerability_max_attempts: 2
+    answerability_strict: false   # keep final failed slots for --minimise-bad
+    answerability_max_doc_chars: 32000
+
+# -------------------------------------------------------------------------
+# JUDGE — external vLLM (Qwen3.6-27B on gpuserver:53366).
+# -------------------------------------------------------------------------
+judge:
+  provider: "vllm"
+  model: "Qwen3.6-27B"
+  base_url: "http://gpuserver:53366/v1"
+  api_key: "qwen-local"
+  temperature: 0.0
+  max_tokens: 32000
+  timeout: 240
+  max_retries: 5
+  retry_delay: 1.0
+
+hallucination:
+  method: "llm"
+  judge_required: true
+  judge_strict_verdict: true
+  allow_semantic_fallback: false
+  citation_alignment: "off"
+  grounding_explanation_when_no_citations: "off"

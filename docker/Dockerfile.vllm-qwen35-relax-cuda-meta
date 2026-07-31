@@ -9,10 +9,10 @@
 # or use a machine that already meets that requirement.
 #
 # Build after qwen35-compat:
-#   docker build -f docker/Dockerfile.vllm-qwen35-relax-cuda-meta -t qagredo-vllm:qwen35-localcuda .
+#   docker build -f docker/Dockerfile.vllm-qwen35-relax-cuda-meta -t qag-vllm:qwen35-localcuda .
 #
-# In .env: VLLM_IMAGE=qagredo-vllm:qwen35-localcuda
+# In .env: VLLM_IMAGE=qag-vllm:qwen35-localcuda
 
-ARG BASE=qagredo-vllm:qwen35-compat-v1
+ARG BASE=qag-vllm:qwen35-compat-v1
 FROM ${BASE}
 ENV NVIDIA_REQUIRE_CUDA=cuda>=12.2

@@ -57,6 +57,10 @@ def _fake_generate_answers(questions, document, config=None, config_path=None):
     }
 
 
+def _fake_answerability_check(*_args, **_kwargs):
+    return True, {"is_answerable": True, "score": 1.0}
+
+
 def _fake_grade_qa_results(qa_results, method="llm"):
     out = []
     for res in qa_results:
@@ -92,13 +96,17 @@ class SlotPipelineSmokeTest(unittest.TestCase):
 
     def _capture_save(self, combined_result, **kwargs):
         self._saved = combined_result
-        return Path("/tmp/mock_qagredo_output.json")
+        return Path("/tmp/mock_qag_output.json")
 
     def test_saves_three_pairs_when_num_questions_three(self):
         cfg_path = _ROOT / "config" / "config.ollama.yaml"
         if not cfg_path.is_file():
             self.skipTest("config/config.ollama.yaml not found")
         config = build_effective_config(cfg_path)
+        run_block = config.setdefault("run", {})
+        if isinstance(run_block, dict):
+            run_block["min_content_words"] = 0
+            run_block["min_content_chars"] = 0
 
         fd, path = tempfile.mkstemp(suffix=".jsonl", text=True)
         os.close(fd)
@@ -124,6 +132,9 @@ class SlotPipelineSmokeTest(unittest.TestCase):
                 "run_qa_pipeline.grade_qa_results",
                 _fake_grade_qa_results,
             ), patch(
+                "run_qa_pipeline.evaluate_question_answerability",
+                _fake_answerability_check,
+            ), patch(
                 "run_qa_pipeline.save_results",
                 self._capture_save,
             ), patch(
@@ -133,6 +144,8 @@ class SlotPipelineSmokeTest(unittest.TestCase):
                 "run_qa_pipeline.print_grading_report"
             ), patch(
                 "run_qa_pipeline._preflight_llm_judge"
+            ), patch(
+                "run_qa_pipeline._preflight_llm_generator"
             ):
                 from run_qa_pipeline import run_pipeline  # noqa: E402
 

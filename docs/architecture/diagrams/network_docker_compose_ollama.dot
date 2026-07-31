@@ -33,18 +33,18 @@ digraph NetworkDockerComposeOllama {
   host [label="Offline server (host)\nDocker Engine + Ollama :11434\n(ollama serve)", fillcolor="#ecfdf5", color="#16a34a"];
 
   subgraph cluster_net {
-    label="Docker network: compose project (qagredo_offline)\nSingle service: qagredo (qagredo-runner)\nextra_hosts: host.docker.internal -> host-gateway";
+    label="Docker network: compose project (qag_offline)\nSingle service: qag (qag-runner)\nextra_hosts: host.docker.internal -> host-gateway";
     color="#cbd5e1";
     style="rounded";
 
-    runner [label="Container: qagredo-runner\nQAGRedo pipeline\nrun_qa_pipeline.py\n(CLI; no service port on qagredo)\nQAGREDO_PROFILE=ollama"];
+    runner [label="Container: qag-runner\nQAG pipeline\nrun_qa_pipeline.py\n(CLI; no service port on qag)\nQAG_PROFILE=ollama"];
     framework [label="Inside runner:\nLangChain (+ optional LangGraph in tree)", fillcolor="#e0f2fe", color="#0ea5e9"];
  }
 
   ollama [label="Host process: Ollama\nlisten: 127.0.0.1:11434 (typical)\n/api/tags, /v1/*, /api/chat\nModels: $OLLAMA_MODEL + $OLLAMA_JUDGE_MODEL", fillcolor="#ecfdf5", color="#16a34a"];
 
   laptop -> host [label="e.g. SSH to host"];
-  host -> runner [label="docker compose run qagredo\n(no published LLM port)"];
+  host -> runner [label="docker compose run qag\n(no published LLM port)"];
   host -> ollama [label="TCP localhost:11434\n(not inside compose)"];
 
   runner -> framework [label="orchestration / parsing"];

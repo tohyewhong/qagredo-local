@@ -1,0 +1,60 @@
+---
+description: Code-verify algorithm docs, baseline versions, compare v1 v2
+alwaysApply: true
+---
+
+# Algorithm documentation baselines (code-verified)
+
+When the user says **baseline now**, produce a **code-verified** snapshot—not
+a passive copy of existing docs.
+
+## Trigger phrases
+
+| Intent | Examples |
+|--------|----------|
+| Create baseline | `baseline now`, `create algorithm baseline`, `snapshot algorithm docs` |
+| List versions | `list baselines`, `show algorithm baselines` |
+| Compare | `compare baseline v1 and v2`, `what changed from baseline 1 to 2`, `diff baseline v1 v2` |
+| Skip audit (rare) | `baseline snapshot only` — copy current docs without code audit |
+
+## Baseline workflow
+
+1. Walk every row in `docs/algorithm-baselines/CODE_AUDIT_CHECKLIST.md`.
+2. Read the listed code **before** trusting any doc paragraph.
+3. Update `docs/ALGORITHM_REPORT.md`, `docs/HANDOVER.md`, and diagram sources
+   where prose, tables, config keys, or flows disagree with code.
+4. Run `python3 scripts/verify_docs_links.py` and confirmation tests (see
+   checklist). Fix until green. **Do not snapshot on failure.**
+5. Allocate next `vN` under `docs/algorithm-baselines/` (never overwrite).
+6. Write `code_audit.json` + `manifest.json`; copy the bundle into `vN/`.
+7. Update `docs/algorithm-baselines/INDEX.md`.
+8. End with an **Understanding block**: code checked, doc edits, version label,
+   how to verify.
+
+Prefer `bash scripts/snapshot_algorithm_baseline.sh --create` for mechanical
+verify + copy after the audit. The agent still owns the code read and doc edits.
+
+## Bundle files (snapshotted)
+
+- `docs/ALGORITHM_REPORT.md`, `docs/HANDOVER.md`
+- `docs/qag_grading_test_flow.dot`, `.svg`, `qag_input_prep_explained_16x9.png` (if present)
+- `docs/architecture/diagrams/QAG_Pipeline_Flowchart.puml`, `.svg`
+- `docs/architecture/diagrams/qag_sequence_final_7step.dot`, `.svg`
+
+Excluded: `siteserver_vllm_change_flow.*`, `network_docker_compose*.dot/svg`.
+
+## Compare vX to vY
+
+1. Headline — dates, summaries, git commits from manifests.
+2. Doc delta — `##` section map in `ALGORITHM_REPORT.md`; HANDOVER sections:
+   What this system does, Change points, Code map, Release checks, Diagram sources.
+3. Implied code delta — cross-reference `code_audit.json` `doc_edits` from both versions.
+4. Mermaid if pipeline or slot-loop flow changed (`answer-with-diagram-code.mdc`).
+5. Point to `bash scripts/snapshot_algorithm_baseline.sh --diff vX vY` for line diff.
+
+## Guardrails
+
+- Never delete `docs/algorithm-baselines/**` unless the user explicitly asks.
+- Do not auto-commit baselines.
+- If code vs doc is ambiguous, ask one focused question—do not guess.
+- Regenerate diagram PNG/SVG when `.dot`/`.puml` sources change.

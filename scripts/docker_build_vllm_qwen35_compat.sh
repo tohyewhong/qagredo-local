@@ -12,10 +12,10 @@ set -euo pipefail
 # Usage:
 #   bash scripts/docker_build_vllm_qwen35_compat.sh
 #   # optional custom tag:
-#   VLLM_COMPAT_TAG=qagredo-vllm:qwen35-compat-v1 bash scripts/docker_build_vllm_qwen35_compat.sh
+#   VLLM_COMPAT_TAG=qag-vllm:qwen35-compat-v1 bash scripts/docker_build_vllm_qwen35_compat.sh
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TAG="${VLLM_COMPAT_TAG:-qagredo-vllm:qwen35-compat-v1}"
+TAG="${VLLM_COMPAT_TAG:-qag-vllm:qwen35-compat-v1}"
 
 echo "[build] Building ${TAG} ..."
 docker build \
@@ -24,7 +24,7 @@ docker build \
   "${REPO_DIR}"
 
 echo "[build] Done."
-RELAX_TAG="${VLLM_RELAX_TAG:-qagredo-vllm:qwen35-localcuda}"
+RELAX_TAG="${VLLM_RELAX_TAG:-qag-vllm:qwen35-localcuda}"
 echo "[build] Building relaxed CUDA metadata tag for driver 535 / CUDA 12.2 hosts: ${RELAX_TAG} ..."
 docker build \
   -f "${REPO_DIR}/docker/Dockerfile.vllm-qwen35-relax-cuda-meta" \

@@ -25,18 +25,18 @@ class TestProfileConfigPath(unittest.TestCase):
         path = profile_config_path("vllm")
         self.assertTrue(path.name.endswith("config.vllm.yaml"))
 
-    @mock.patch.dict(os.environ, {"QAGREDO_PROFILE": "kubeflow"}, clear=False)
+    @mock.patch.dict(os.environ, {"QAG_PROFILE": "kubeflow"}, clear=False)
     def test_default_config_path_from_env(self) -> None:
         path = default_config_path()
         self.assertTrue(path.name.endswith("config.kubeflow.yaml"))
 
     @mock.patch.dict(os.environ, {}, clear=True)
     def test_default_config_path_without_profile_defaults_ollama(self) -> None:
-        os.environ.pop("QAGREDO_PROFILE", None)
+        os.environ.pop("QAG_PROFILE", None)
         path = default_config_path()
         self.assertEqual(path.name, "config.ollama.yaml")
 
-    @mock.patch.dict(os.environ, {"QAGREDO_PROFILE": "dev"}, clear=False)
+    @mock.patch.dict(os.environ, {"QAG_PROFILE": "dev"}, clear=False)
     def test_resolve_profile_maps_dev_to_ollama(self) -> None:
         self.assertEqual(resolve_profile(), "ollama")
 

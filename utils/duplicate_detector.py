@@ -1,7 +1,7 @@
 """
 Duplicate question detection using lexical similarity (Jaccard).
 
-Embedding-based similarity was removed from QAGRedo; use ``deduplication_method:
+Embedding-based similarity was removed from QAG; use ``deduplication_method:
 \"llm\"`` in config for semantic duplicate judgment via the generator LLM.
 """
 

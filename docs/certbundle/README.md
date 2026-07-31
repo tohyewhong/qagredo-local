@@ -15,14 +15,14 @@ Some environments intercept TLS traffic (e.g., corporate proxies). In that case 
 2. Rebuild the image (offline-safe default):
 
 ```bash
-cd /home/tyewhong/qagredo
-docker compose -f docker-compose.yml build qagredo
+cd /home/tyewhong/qag
+docker compose -f docker-compose.yml build qag
 ```
 
 After a successful build, confirm dependencies (optional but recommended):
 
 ```bash
-docker run --rm --entrypoint "" qagredo-v1:latest \
+docker run --rm --entrypoint "" qag-v1:latest \
   python /workspace/scripts/docker_verify_requirements.py /workspace/requirements.txt
 ```
 

@@ -1,0 +1,37 @@
+digraph offline_host_pick {
+  rankdir=TB;
+  bgcolor="white";
+  node [shape=box, style="rounded,filled", fillcolor="#e8e8e8",
+        fontname="Helvetica", fontsize=11];
+  edge [fontname="Helvetica", fontsize=10];
+
+  start [label="Offline host", shape=ellipse, fillcolor="#d0e8ff"];
+  which [label="Which machine?", shape=diamond, fillcolor="#fff4cc"];
+
+  ops [label="Opserver\n2x24GB air-gapped"];
+  red [label="Redserver\nvLLM orchestrator"];
+  site [label="siteserver\n4 GPUs — see Siteserver guide"];
+
+  opMode [label="Opserver profile?", shape=diamond, fillcolor="#fff4cc"];
+  ollamaPath [label="§2 ollama / kubeflow"];
+  opsVllm [label="§3 Opserver vLLM\nlocal :7100 / :7101\nredserver overrides off"];
+  runOllama [label="bash run.sh"];
+  runOpsVllm [label="--vllm-up +\n--pipeline-only"];
+
+  redVllm [label="§4 Redserver vLLM\nmodels on gpuserver\nfour overrides on"];
+  runRed [label="--pipeline-only only"];
+
+  start -> which;
+  which -> ops;
+  which -> red;
+  which -> site;
+
+  ops -> opMode;
+  opMode -> ollamaPath [label=" ollama/kubeflow"];
+  opMode -> opsVllm [label=" vLLM local"];
+  ollamaPath -> runOllama;
+  opsVllm -> runOpsVllm;
+
+  red -> redVllm;
+  redVllm -> runRed;
+}

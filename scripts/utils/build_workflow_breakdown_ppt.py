@@ -5,13 +5,13 @@ from pptx.util import Inches, Pt
 
 
 DOCS_DIR = Path(__file__).resolve().parents[2] / "docs"
-OUTFILE = DOCS_DIR / "QAGRedo_End_to_End_Workflow_Breakdown.pptx"
+OUTFILE = DOCS_DIR / "QAG_End_to_End_Workflow_Breakdown.pptx"
 
 IMG = {
-    "full": DOCS_DIR / "qagredo_full_pipeline_flow_16x9.png",
-    "part1": DOCS_DIR / "qagredo_workflow_part1_input_prep_16x9.png",
-    "part2": DOCS_DIR / "qagredo_workflow_part2_qa_loop_16x9.png",
-    "part3": DOCS_DIR / "qagredo_workflow_part3_grading_output_16x9.png",
+    "full": DOCS_DIR / "qag_full_pipeline_flow_16x9.png",
+    "part1": DOCS_DIR / "qag_workflow_part1_input_prep_16x9.png",
+    "part2": DOCS_DIR / "qag_workflow_part2_qa_loop_16x9.png",
+    "part3": DOCS_DIR / "qag_workflow_part3_grading_output_16x9.png",
 }
 
 def add_image_native(slide, path: Path) -> None:

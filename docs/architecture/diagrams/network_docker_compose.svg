@@ -12,8 +12,8 @@
 <g id="clust1" class="cluster">
 <title>cluster_net</title>
 <path fill="#ffffff" stroke="#cbd5e1" d="M20,-8C20,-8 1211,-8 1211,-8 1217,-8 1223,-14 1223,-20 1223,-20 1223,-244 1223,-244 1223,-250 1217,-256 1211,-256 1211,-256 20,-256 20,-256 14,-256 8,-250 8,-244 8,-244 8,-20 8,-20 8,-14 14,-8 20,-8"/>
-<text text-anchor="middle" x="615.5" y="-240.8" font-family="Arial" font-size="14.00">Docker network: compose project (qagredo_offline)</text>
-<text text-anchor="middle" x="615.5" y="-225.8" font-family="Arial" font-size="14.00">DNS: vllm, vllm&#45;judge, qagredo</text>
+<text text-anchor="middle" x="615.5" y="-240.8" font-family="Arial" font-size="14.00">Docker network: compose project (qag_offline)</text>
+<text text-anchor="middle" x="615.5" y="-225.8" font-family="Arial" font-size="14.00">DNS: vllm, vllm&#45;judge, qag</text>
 </g>
 <!-- laptop -->
 <g id="node1" class="node">
@@ -40,7 +40,7 @@
 <g id="node5" class="node">
 <title>vllm</title>
 <path fill="#f8fafc" stroke="#94a3b8" d="M1203,-103C1203,-103 1031,-103 1031,-103 1025,-103 1019,-97 1019,-91 1019,-91 1019,-51 1019,-51 1019,-45 1025,-39 1031,-39 1031,-39 1203,-39 1203,-39 1209,-39 1215,-45 1215,-51 1215,-51 1215,-91 1215,-91 1215,-97 1209,-103 1203,-103"/>
-<text text-anchor="middle" x="1117" y="-87.4" font-family="Arial" font-size="12.00" fill="#1e293b">Container: qagredo&#45;vllm</text>
+<text text-anchor="middle" x="1117" y="-87.4" font-family="Arial" font-size="12.00" fill="#1e293b">Container: qag&#45;vllm</text>
 <text text-anchor="middle" x="1117" y="-74.4" font-family="Arial" font-size="12.00" fill="#1e293b">(typical: Qwen3.5&#45;9B generator)</text>
 <text text-anchor="middle" x="1117" y="-61.4" font-family="Arial" font-size="12.00" fill="#1e293b">listens: 0.0.0.0:7100</text>
 <text text-anchor="middle" x="1117" y="-48.4" font-family="Arial" font-size="12.00" fill="#1e293b">/health, /docs, /openapi.json, /v1/*</text>
@@ -57,7 +57,7 @@
 <g id="node6" class="node">
 <title>judge</title>
 <path fill="#f8fafc" stroke="#94a3b8" d="M1195.5,-210C1195.5,-210 1038.5,-210 1038.5,-210 1032.5,-210 1026.5,-204 1026.5,-198 1026.5,-198 1026.5,-158 1026.5,-158 1026.5,-152 1032.5,-146 1038.5,-146 1038.5,-146 1195.5,-146 1195.5,-146 1201.5,-146 1207.5,-152 1207.5,-158 1207.5,-158 1207.5,-198 1207.5,-198 1207.5,-204 1201.5,-210 1195.5,-210"/>
-<text text-anchor="middle" x="1117" y="-194.4" font-family="Arial" font-size="12.00" fill="#1e293b">Container: qagredo&#45;vllm&#45;judge</text>
+<text text-anchor="middle" x="1117" y="-194.4" font-family="Arial" font-size="12.00" fill="#1e293b">Container: qag&#45;vllm&#45;judge</text>
 <text text-anchor="middle" x="1117" y="-181.4" font-family="Arial" font-size="12.00" fill="#1e293b">(typical: Llama 3.1 judge)</text>
 <text text-anchor="middle" x="1117" y="-168.4" font-family="Arial" font-size="12.00" fill="#1e293b">listens: 0.0.0.0:7101</text>
 <text text-anchor="middle" x="1117" y="-155.4" font-family="Arial" font-size="12.00" fill="#1e293b">/health, /v1/*</text>
@@ -74,8 +74,8 @@
 <g id="node3" class="node">
 <title>runner</title>
 <path fill="#f8fafc" stroke="#94a3b8" d="M167,-161C167,-161 28,-161 28,-161 22,-161 16,-155 16,-149 16,-149 16,-109 16,-109 16,-103 22,-97 28,-97 28,-97 167,-97 167,-97 173,-97 179,-103 179,-109 179,-109 179,-149 179,-149 179,-155 173,-161 167,-161"/>
-<text text-anchor="middle" x="97.5" y="-145.4" font-family="Arial" font-size="12.00" fill="#1e293b">Container: qagredo&#45;runner</text>
-<text text-anchor="middle" x="97.5" y="-132.4" font-family="Arial" font-size="12.00" fill="#1e293b">QAGRedo pipeline</text>
+<text text-anchor="middle" x="97.5" y="-145.4" font-family="Arial" font-size="12.00" fill="#1e293b">Container: qag&#45;runner</text>
+<text text-anchor="middle" x="97.5" y="-132.4" font-family="Arial" font-size="12.00" fill="#1e293b">QAG pipeline</text>
 <text text-anchor="middle" x="97.5" y="-119.4" font-family="Arial" font-size="12.00" fill="#1e293b">(CLI; internal calls to vLLM)</text>
 <text text-anchor="middle" x="97.5" y="-106.4" font-family="Arial" font-size="12.00" fill="#1e293b">Calls internal APIs</text>
 </g>

@@ -14,7 +14,7 @@ set -e
 
 TARGET_UID="${HOST_UID:-1013}"
 TARGET_GID="${HOST_GID:-1015}"
-USERNAME="qagredo"
+USERNAME="qag"
 
 # Must match folders mounted in docker-compose.yml.
 # /workspace/data = your input folder (DATA_DIR from .env / run.sh).
@@ -28,7 +28,7 @@ WRITABLE_DIRS=(
 # ---------------------------------------------------------------------------
 #  Optional: serve Ollama inside the container (Kubeflow / K2-B pattern).
 #
-#  Enabled when QAGREDO_SERVE_OLLAMA=1. Models are read from $OLLAMA_MODELS
+#  Enabled when QAG_SERVE_OLLAMA=1. Models are read from $OLLAMA_MODELS
 #  (default /opt/ollama/models) — typically a host volume mount such as
 #  /home/jovyan/models on Kubeflow, or ./models on the dev server.
 # ---------------------------------------------------------------------------
@@ -43,7 +43,7 @@ start_inproc_ollama() {
     chown -R "$TARGET_UID:$TARGET_GID" "${OLLAMA_MODELS:-/opt/ollama/models}" 2>/dev/null || true
 
     if ! command -v ollama >/dev/null 2>&1; then
-        echo "[entrypoint][ERROR] QAGREDO_SERVE_OLLAMA=1 but 'ollama' is not installed in the image." >&2
+        echo "[entrypoint][ERROR] QAG_SERVE_OLLAMA=1 but 'ollama' is not installed in the image." >&2
         echo "[entrypoint][ERROR] Rebuild with Dockerfile.kubeflow or mount the ollama binary." >&2
         exit 2
     fi
@@ -53,7 +53,7 @@ start_inproc_ollama() {
         gosu "$USERNAME" ollama serve >/workspace/output/ollama.log 2>&1 &
     OLLAMA_PID=$!
 
-    local elapsed=0 timeout="${QAGREDO_OLLAMA_WAIT_TIMEOUT:-180}"
+    local elapsed=0 timeout="${QAG_OLLAMA_WAIT_TIMEOUT:-180}"
     while true; do
         if curl -sf "http://${bind_addr}/api/tags" >/dev/null 2>&1; then
             echo "[entrypoint] Ollama is ready after ${elapsed}s"
@@ -147,7 +147,7 @@ if [ "$(id -u)" = "0" ]; then
     trap 'forward_signal INT'  INT
 
     # --- Optional: serve Ollama inside the container (Kubeflow profile) ---
-    if [ "${QAGREDO_SERVE_OLLAMA:-0}" = "1" ]; then
+    if [ "${QAG_SERVE_OLLAMA:-0}" = "1" ]; then
         start_inproc_ollama
     fi
 

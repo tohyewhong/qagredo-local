@@ -1,0 +1,30 @@
+digraph opserver_vllm_local {
+  rankdir=LR;
+  bgcolor="white";
+  node [shape=box, style="rounded,filled", fillcolor="#e8e8e8",
+        fontname="Helvetica", fontsize=11];
+  edge [fontname="Helvetica", fontsize=10];
+
+  subgraph cluster_opserver {
+    label="Opserver";
+    style="rounded";
+    fillcolor="#f5f5f5";
+    ENV [label=".env\nQAG_PROFILE=vllm\nexternal vars unset"];
+    CFG [label="config.vllm.yaml"];
+    QAG [label="qag-v1\npipeline"];
+    G [label="vllm :7100\nQwen generator"];
+    J [label="vllm-judge :7101\nLlama judge"];
+  }
+
+  STALE [label="gpuserver still selected?", shape=diamond,
+         fillcolor="#fff4cc"];
+  FIX [label="Save .env + unset old\nshell variables", fillcolor="#ffd6d6"];
+
+  ENV -> CFG [label="selects"];
+  CFG -> QAG [label="config"];
+  QAG -> G;
+  QAG -> J;
+  ENV -> STALE;
+  STALE -> FIX [label="yes"];
+  STALE -> QAG [label="no"];
+}

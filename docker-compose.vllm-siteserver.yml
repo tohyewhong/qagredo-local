@@ -2,8 +2,8 @@
 #
 # Use together with docker-compose.vllm-stack.yml through run.sh:
 #
-#   QAGREDO_PROFILE=vllm \
-#   QAGREDO_VLLM_COMPOSE_EXTRA=docker-compose.vllm-siteserver.yml \
+#   QAG_PROFILE=vllm \
+#   QAG_VLLM_COMPOSE_EXTRA=docker-compose.vllm-siteserver.yml \
 #   VLLM_TP_SIZE=2 \
 #   VLLM_JUDGE_TP_SIZE=2 \
 #   bash run.sh

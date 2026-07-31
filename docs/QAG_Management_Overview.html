@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>QAG — management overview</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.5/dist/mermaid.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root { --bg:#fafbfc; --text:#1c2128; --muted:#57606a; --accent:#0969da;
+      --card:#fff; --border:#d0d7de; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:"Source Sans 3",system-ui,sans-serif;
+      background:var(--bg); color:var(--text); line-height:1.5; font-size:17px; }
+    header { padding:2rem 1.5rem 1.25rem; max-width:44rem; margin:0 auto; }
+    header h1 { margin:0 0 0.35rem; font-size:1.75rem; font-weight:700; }
+    header .sub { color:var(--muted); font-size:1.05rem; margin:0; }
+    main { max-width:44rem; margin:0 auto; padding:0 1.5rem 3rem; }
+    section { margin-bottom:2rem; }
+    h2 { font-size:1.1rem; font-weight:700; margin:0 0 0.75rem; }
+    ul.simple { margin:0; padding-left:1.2rem; }
+    ul.simple li { margin-bottom:0.4rem; }
+    .diagram { background:var(--card); border:1px solid var(--border);
+      border-radius:10px; padding:1rem; margin:0.75rem 0; overflow-x:auto; }
+    .mermaid { text-align:center; }
+    .card { background:var(--card); border:1px solid var(--border);
+      border-radius:10px; padding:1rem 1.15rem; margin:0.75rem 0; }
+    .card p { margin:0; color:var(--muted); font-size:0.95rem; }
+    footer { text-align:center; padding:1.5rem; font-size:0.85rem;
+      color:var(--muted); border-top:1px solid var(--border); }
+    a { color:var(--accent); }
+    .hint { color:var(--muted); font-size:0.95rem; margin-top:0.5rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>QAG — management overview</h1>
+    <p class="sub">
+      One-page summary for stakeholders: what the system does, how it runs,
+      and what you get out. Technical detail is in the engineering diagrams pack.
+    </p>
+  </header>
+  <main>
+    <section>
+      <h2>What it does</h2>
+      <ul class="simple">
+        <li>Reads prepared documents (JSON/JSONL).</li>
+        <li>Uses AI to draft <strong>questions</strong> and <strong>answers</strong>
+        grounded in each document.</li>
+        <li>Checks quality (grounding / confidence) and saves a structured
+        <strong>analysis file</strong> per document.</li>
+      </ul>
+    </section>
+    <section>
+      <h2>End-to-end flow (simplified)</h2>
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart TB
+  doc[Documents_in] --> qlist[AI_question_list_per_document]
+  qlist --> slot[Each_slot_write_answer]
+  slot --> qc[Quality_check]
+  qc --> gate{Good_enough}
+  gate -->|no| repl[Replacement_question_same_slot]
+  repl --> slot
+  gate -->|yes| more{More_slots}
+  more -->|yes| slot
+  more -->|no| save[Save_analysis_JSON]
+  save --> gh[Publish_to_GitHub]
+        </pre>
+      </div>
+      <p class="hint">
+        <strong>Questions first:</strong> the pipeline asks the AI for a
+        <em>batch of questions</em> for each document (count is configured).
+        Then for <em>each slot</em> it generates an <strong>answer</strong>. If
+        the quality check fails, it can draft a <strong>replacement question
+        for that same slot</strong> and try answers again (within limits), not
+        only re-answering the same question text.
+      </p>
+    </section>
+    <section>
+      <h2>How it runs (typical offline setup)</h2>
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart TB
+  subgraph stack [Three_parts]
+    G[AI_A_questions_and_answers]
+    J[AI_B_independent_checker]
+    R[Pipeline_CPU]
+  end
+  R --> G
+  R --> J
+        </pre>
+      </div>
+      <div class="card">
+        <p>
+          <strong>Why two AIs?</strong> The same model should not both write and
+          judge the answer; a second model improves trust in the quality signal.
+          The default grading path is the independent LLM judge (legacy semantic /
+          hybrid labels are compatibility-only, without embedding-model loading).
+        </p>
+      </div>
+    </section>
+    <section>
+      <h2>Runtime profiles</h2>
+      <ul class="simple">
+        <li><strong>vllm</strong> — Two local GPU services (generator + judge); edit
+        <code>config/config.vllm.yaml</code>.</li>
+        <li><strong>ollama (default when unset)</strong> — Ollama on the host; edit
+        <code>config/config.ollama.yaml</code>.</li>
+        <li><strong>kubeflow</strong> — Ollama inside one container; edit
+        <code>config/config.kubeflow.yaml</code>.</li>
+      </ul>
+      <p class="hint">Redserver uses external gpuserver vLLM through the four
+        overrides documented in <code>config/README.md</code>.</p>
+      <p class="hint">
+        Set <code>QAG_PROFILE</code> in <code>.env</code>
+        (<code>ollama</code> | <code>kubeflow</code> | <code>vllm</code>) — required.
+      </p>
+    </section>
+    <section>
+      <h2>Resume a partial run</h2>
+      <p class="hint" style="margin-top:0;">
+        Skip documents that already have <code>*_analysis.json</code> in a prior
+        run folder. Use <code>bash run.sh --pipeline-only --resume</code> (vLLM)
+        or <code>bash run.sh -- --resume</code> (ollama/kubeflow). See
+        <a href="OFFLINE_SETUP_GUIDE.md">OFFLINE_SETUP_GUIDE.md</a> §8.
+      </p>
+    </section>
+    <section>
+      <h2>Deliverable</h2>
+      <ul class="simple">
+        <li>Timestamped <strong>output folder</strong> with one analysis JSON per
+        document (full detail by default).</li>
+        <li>Post-run <code>bash run.sh --minimise</code> writes
+        <code>*_analysis_minimal.json</code> plus per-document
+        <code>*_analysis_minimal_good_pairs.json</code> and
+        <code>*_analysis_minimal_bad_pairs.json</code> (no LLM rerun).</li>
+        <li>Optional <code>bash run.sh --finetune-lora [RUN_DIR]</code> trains a
+        host LoRA adapter from <code>lora_sft.jsonl</code> (base model stays
+        read-only; stop vLLM first).</li>
+        <li>During a run, <code>bash run.sh -- --minimal-qa-output</code> saves
+        slim <code>*_analysis.json</code> directly — different from
+        <code>--minimise</code>.</li>
+        <li><code>bash run.sh --summarize --latest --json</code> builds
+        <code>run_summary.json</code> for the run folder.</li>
+        <li>Failed slots are kept in full <code>*_analysis.json</code> for
+        bad-pair export unless config omits them.</li>
+      </ul>
+    </section>
+    <section>
+      <h2>Where to go next</h2>
+      <p style="color:var(--muted);margin:0;">
+        Maintainer index:
+        <a href="README.md">docs/README.md</a>
+        · <a href="ARCHITECTURE.md">ARCHITECTURE.md</a> (technical lead)
+        · <a href="HANDOVER.md">HANDOVER.md</a>
+        · Offline bring-up:
+        <a href="OFFLINE_SETUP_GUIDE.md">OFFLINE_SETUP_GUIDE.md</a>
+      </p>
+    </section>
+  </main>
+  <footer>QAG — internal overview.</footer>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: "neutral",
+      securityLevel: "loose",
+      flowchart: { curve: "basis" },
+    });
+  </script>
+</body>
+</html>

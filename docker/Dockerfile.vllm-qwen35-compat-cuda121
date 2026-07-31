@@ -1,4 +1,4 @@
-# QAGRedo: Qwen3.5 compatibility on CUDA-12.1-era vLLM base
+# QAG: Qwen3.5 compatibility on CUDA-12.1-era vLLM base
 #
 # Goal: keep the host driver compatible with CUDA 12.2 by using the older
 # vLLM runtime image (v0.5.3.post1) which ships a CUDA-12.1 PyTorch build.
@@ -17,10 +17,10 @@
 FROM vllm/vllm-openai:v0.5.3.post1
 
 # Optional: use the repo's cert bundle for offline/airgapped HTTPS.
-COPY certbundle/certbundle.crt /etc/ssl/certs/qagredo-certbundle.crt
-ENV SSL_CERT_FILE=/etc/ssl/certs/qagredo-certbundle.crt
-ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/qagredo-certbundle.crt
-ENV CURL_CA_BUNDLE=/etc/ssl/certs/qagredo-certbundle.crt
+COPY certbundle/certbundle.crt /etc/ssl/certs/qag-certbundle.crt
+ENV SSL_CERT_FILE=/etc/ssl/certs/qag-certbundle.crt
+ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/qag-certbundle.crt
+ENV CURL_CA_BUNDLE=/etc/ssl/certs/qag-certbundle.crt
 
 # Stock vLLM images ship older Transformers that do not recognize model_type
 # `qwen3_5`. Qwen3.5 checkpoints require Transformers 5.4+.

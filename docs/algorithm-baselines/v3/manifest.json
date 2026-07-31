@@ -1,0 +1,18 @@
+{
+  "version": 3,
+  "label": "v3",
+  "created": "2026-07-31T02:44:49Z",
+  "summary": "ARCHITECTURE.md; LoRA SFT/DPO/fair eval; QAG rename; redserver docs; LangGraph unwired note",
+  "git_commit": "fa7016ffd2143fa4575d01bda5af7edcccdf7ffb",
+  "files": [
+    {"path": "ALGORITHM_REPORT.md", "sha256": "1fc39e73e83f5bd5a1257111ac46b3d40be221684c40a9560c9ba59fcd7ea2d7"},
+    {"path": "diagrams/architecture/diagrams/QAG_Pipeline_Flowchart.puml", "sha256": "1f77ac8f7fe76d2c6156554565793c31abfc72e621c2249f28b37fd134216d72"},
+    {"path": "diagrams/architecture/diagrams/QAG_Pipeline_Flowchart.svg", "sha256": "1d31500caa0f69cf6e7c69185f28745a27d1908a585564c0c1ecae545ac8a283"},
+    {"path": "diagrams/architecture/diagrams/qag_sequence_final_7step.dot", "sha256": "d141cdaa3c22e972253b46437626c012e1e7dae0c5ae5922b2e3f49ba59b4a2c"},
+    {"path": "diagrams/architecture/diagrams/qag_sequence_final_7step.svg", "sha256": "cac8f92d42edfeab7ae0a5b8da8a5c36b5309c05c93dac7480102df575b440c9"},
+    {"path": "diagrams/qag_grading_test_flow.dot", "sha256": "45ece9e4f9b64b1d43a9540dbd615ec821a64aaf41d02e11882d639b62eed7c3"},
+    {"path": "diagrams/qag_grading_test_flow.svg", "sha256": "482531cffe100bda121cca63c0225d60028f400fb0631b6456ce913936813f7a"},
+    {"path": "diagrams/qag_input_prep_explained_16x9.png", "sha256": "54bba1cac571d086b5f5fb5443bc4b831fe865d3160fd0aecdd287777fb2017d"},
+    {"path": "HANDOVER.md", "sha256": "40200f730e8fe1ae4f99624bc4a50ace74ffaeb8730dc67c94589eb07f8849e3"}
+  ]
+}

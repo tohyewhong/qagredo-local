@@ -12,8 +12,8 @@
 <g id="clust1" class="cluster">
 <title>cluster_net</title>
 <path fill="#ffffff" stroke="#cbd5e1" d="M667,-47.5C667,-47.5 1247,-47.5 1247,-47.5 1253,-47.5 1259,-53.5 1259,-59.5 1259,-59.5 1259,-182.5 1259,-182.5 1259,-188.5 1253,-194.5 1247,-194.5 1247,-194.5 667,-194.5 667,-194.5 661,-194.5 655,-188.5 655,-182.5 655,-182.5 655,-59.5 655,-59.5 655,-53.5 661,-47.5 667,-47.5"/>
-<text text-anchor="middle" x="957" y="-179.3" font-family="Arial" font-size="14.00">Docker network: compose project (qagredo_offline)</text>
-<text text-anchor="middle" x="957" y="-164.3" font-family="Arial" font-size="14.00">Single service: qagredo (qagredo&#45;runner)</text>
+<text text-anchor="middle" x="957" y="-179.3" font-family="Arial" font-size="14.00">Docker network: compose project (qag_offline)</text>
+<text text-anchor="middle" x="957" y="-164.3" font-family="Arial" font-size="14.00">Single service: qag (qag&#45;runner)</text>
 <text text-anchor="middle" x="957" y="-149.3" font-family="Arial" font-size="14.00">extra_hosts: host.docker.internal &#45;&gt; host&#45;gateway</text>
 </g>
 <!-- laptop -->
@@ -42,18 +42,18 @@
 <g id="node3" class="node">
 <title>runner</title>
 <path fill="#f8fafc" stroke="#94a3b8" d="M844,-133C844,-133 675,-133 675,-133 669,-133 663,-127 663,-121 663,-121 663,-68 663,-68 663,-62 669,-56 675,-56 675,-56 844,-56 844,-56 850,-56 856,-62 856,-68 856,-68 856,-121 856,-121 856,-127 850,-133 844,-133"/>
-<text text-anchor="middle" x="759.5" y="-117.4" font-family="Arial" font-size="12.00" fill="#1e293b">Container: qagredo&#45;runner</text>
-<text text-anchor="middle" x="759.5" y="-104.4" font-family="Arial" font-size="12.00" fill="#1e293b">QAGRedo pipeline</text>
+<text text-anchor="middle" x="759.5" y="-117.4" font-family="Arial" font-size="12.00" fill="#1e293b">Container: qag&#45;runner</text>
+<text text-anchor="middle" x="759.5" y="-104.4" font-family="Arial" font-size="12.00" fill="#1e293b">QAG pipeline</text>
 <text text-anchor="middle" x="759.5" y="-91.4" font-family="Arial" font-size="12.00" fill="#1e293b">run_qa_pipeline.py</text>
-<text text-anchor="middle" x="759.5" y="-78.4" font-family="Arial" font-size="12.00" fill="#1e293b">(CLI; no service port on qagredo)</text>
-<text text-anchor="middle" x="759.5" y="-65.4" font-family="Arial" font-size="12.00" fill="#1e293b">QAGREDO_PROFILE=ollama</text>
+<text text-anchor="middle" x="759.5" y="-78.4" font-family="Arial" font-size="12.00" fill="#1e293b">(CLI; no service port on qag)</text>
+<text text-anchor="middle" x="759.5" y="-65.4" font-family="Arial" font-size="12.00" fill="#1e293b">QAG_PROFILE=ollama</text>
 </g>
 <!-- host&#45;&gt;runner -->
 <g id="edge2" class="edge">
 <title>host&#45;&gt;runner</title>
 <path fill="none" stroke="#334155" stroke-width="1.1" d="M478.39,-42.82C532.45,-52.8 600.44,-65.34 655.9,-75.57"/>
 <polygon fill="#334155" stroke="#334155" stroke-width="1.1" points="655.61,-78.01 662.94,-76.87 656.5,-73.19 655.61,-78.01"/>
-<text text-anchor="middle" x="570.5" y="-83.5" font-family="Arial" font-size="10.00" fill="#334155">docker compose run qagredo</text>
+<text text-anchor="middle" x="570.5" y="-83.5" font-family="Arial" font-size="10.00" fill="#334155">docker compose run qag</text>
 <text text-anchor="middle" x="570.5" y="-72.5" font-family="Arial" font-size="10.00" fill="#334155">(no published LLM port)</text>
 </g>
 <!-- ollama -->

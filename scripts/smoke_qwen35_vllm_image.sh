@@ -4,11 +4,11 @@
 #
 # Usage:
 #   MODEL_HOST_DIR=/data/models/Qwen3.5-9B bash scripts/smoke_qwen35_vllm_image.sh
-#   IMAGE=qagredo-vllm:qwen35-localcuda MODEL_HOST_DIR=... bash scripts/smoke_qwen35_vllm_image.sh
+#   IMAGE=qag-vllm:qwen35-localcuda MODEL_HOST_DIR=... bash scripts/smoke_qwen35_vllm_image.sh
 
 set -euo pipefail
 
-IMAGE="${IMAGE:-qagredo-vllm:qwen35-localcuda}"
+IMAGE="${IMAGE:-qag-vllm:qwen35-localcuda}"
 MODEL_HOST_DIR="${MODEL_HOST_DIR:-/data/models/Qwen3.5-9B}"
 
 [[ -d "$MODEL_HOST_DIR" ]] || {

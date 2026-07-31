@@ -17,7 +17,7 @@ see the structure at a glance. Prefer **Mermaid** blocks (opening fence
 - For simple one-step answers, a diagram is optional; for multi-step or
   branching logic, default to including one.
 
-**QAGRedo slot loop (grounding gate + replacement question)** — use or adapt
+**QAG slot loop (grounding gate + replacement question)** — use or adapt
 when explaining this behavior:
 
 ```mermaid

@@ -1,0 +1,92 @@
+// Source of truth: grading test paths + E2E per-slot loop (run_qa_pipeline.py).
+// Regenerate:
+//   dot -Tpng -o qag_grading_test_flow_16x9.png qag_grading_test_flow.dot
+//   dot -Tsvg -o qag_grading_test_flow.svg qag_grading_test_flow.dot
+digraph GradingTestFlow {
+  graph [
+    rankdir=TB,
+    fontname="Helvetica",
+    fontsize=11,
+    labelloc=t,
+    label="QAG — grading validation paths & E2E per-slot loop",
+    dpi=120,
+    size="15,8.5",
+    ratio=fill
+  ];
+  node [fontname="Helvetica", fontsize=10, shape=box, style="rounded,filled", fillcolor="#f8fafc"];
+  edge [fontname="Helvetica", fontsize=9];
+
+  start [label="Goal: validate grading\nor run full pipeline", shape=ellipse, fillcolor="#e0e7ff"];
+
+  subgraph cluster_fast {
+    label="Fast / isolated (no full pipeline)";
+    style=dashed;
+    color="#64748b";
+
+    smoke [label="smoke_semantic_five_docs.py\n• check_hallucination (semantic)\n• no grade_qa_results"];
+    manual [label="Manual / REPL\n• check_hallucination(...)\n• set_llm_config() for llm"];
+  }
+
+  subgraph cluster_batch {
+    label="Batch on saved QA payloads";
+    style=dashed;
+    color="#64748b";
+
+    gscript [label="scripts/utils/grade_qa_results.py\n• *qa_results*.json\n• strict llm judge grading path"];
+    payload [label="Body text fields:\ncontent → text → body →\ndocument → article → passage", shape=note, fillcolor="#fef9c3"];
+  }
+
+  subgraph cluster_e2e {
+    label="End-to-end: run_qa_pipeline.py (run.sh)";
+    style=dashed;
+    color="#0f766e";
+
+    pipeline [label="Start document:\ngenerate_questions\nnum_questions = N"];
+    setcfg [label="set_llm_config(config)\nhallucination.method (llm strict default)\nmin_confidence_threshold"];
+
+    subgraph cluster_slot {
+      label="Per-slot loop (slot 1..N)";
+      style=filled;
+      fillcolor="#fff7ed";
+      color="#c2410c";
+
+      slot [label="Current slot i:\ncurrent_question"];
+      gena [label="generate_answers\n(max_answer_attempts retries\n+ retain answer_attempts\n+ coverage rewrite inside)"];
+      gr [label="grade_qa_results +\nbuild_qa_pairs +\n_merge_pair_grading"];
+      gate [label="Grounding gate?\nis_grounded AND\nconf >= threshold AND\nnot insufficient-info", shape=diamond, fillcolor="#ffedd5"];
+      pref [label="If answer retry recovered:\nsave same-question\nchosen + rejected"];
+      repl [label="generate_questions\nnum_questions = 1\n(replacement for same slot)"];
+      next [label="Append final pair\n(pass or fail)", shape=diamond, fillcolor="#ffedd5"];
+    }
+
+    save [label="Save *_analysis.json\nqa_pairs + conditional dpo_pairs\ngrading_summary = mean\nof all saved pairs"];
+    summarize [label="summarize_run.sh --json"];
+  }
+
+  subgraph cluster_meta {
+    label="Quality band (not the checker)";
+    style=dashed;
+    color="#94a3b8";
+
+    quick [label="quick_test.py\nsynthetic grading → evaluate_document_quality"];
+  }
+
+  start -> smoke;
+  start -> manual;
+  start -> gscript;
+  start -> pipeline;
+  start -> quick;
+
+  gscript -> payload [style=dotted, arrowhead=none];
+
+  pipeline -> setcfg -> slot;
+  slot -> gena -> gr -> gate;
+  gate -> pref [label="pass", color="#0f766e"];
+  pref -> next [color="#0f766e"];
+  gate -> repl [label="fail AND\nreplacements left\n(max_question_regeneration_rounds)", color="#c2410c", fontcolor="#9a3412"];
+  repl -> gena [label="same slot", color="#c2410c"];
+  gate -> next [label="fail AND\nno replacements left", color="#9a3412"];
+  next -> slot [label="more slots", color="#0f766e"];
+  next -> save [label="all slots done", color="#0f766e"];
+  save -> summarize;
+}

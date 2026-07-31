@@ -1,7 +1,7 @@
-# QAGRedo — Kubeflow deployment (single-image, swap-friendly models)
+# QAG — Kubeflow deployment (single-image, swap-friendly models)
 
 This guide explains the **`kubeflow`** profile: one Docker image that bundles the
-QAGRedo runner and Ollama, with **no model weights baked in**. Models live on
+QAG runner and Ollama, with **no model weights baked in**. Models live on
 disk and can be swapped at runtime — including upgrading to 70B — without
 rebuilding the image.
 
@@ -13,16 +13,16 @@ The other two profiles:
 | `kubeflow` | Kubeflow (or any single-image constraint). This guide.| `docker-compose.kubeflow.yml` + `Dockerfile.kubeflow`             |
 | `vllm`     | Dual vLLM GPU services (generator + judge).            | `docker-compose.vllm-stack.yml` (+ optional `docker-compose.vllm-siteserver.yml`) |
 
-See **`docs/HANDOVER.md`** for how profiles are selected (`QAGREDO_PROFILE` in `.env`).
+See **`docs/HANDOVER.md`** for how profiles are selected (`QAG_PROFILE` in `.env`).
 
 ---
 
 ## 1. Design at a glance
 
 ```
-┌───────────────────── container: qagredo-kubeflow ─────────────────────┐
+┌───────────────────── container: qag-kubeflow ─────────────────────┐
 │                                                                       │
-│   QAGRedo pipeline (Python)                                           │
+│   QAG pipeline (Python)                                           │
 │        │                                                              │
 │        └──► http://127.0.0.1:11434  (in-container Ollama)             │
 │                                     │                                 │
@@ -32,9 +32,9 @@ See **`docs/HANDOVER.md`** for how profiles are selected (`QAGREDO_PROFILE` in `
 └─────────────────────────────────────┼─────────────────────────────────┘
                                       │ bind-mount
                                       ▼
-               host path set via QAGREDO_MODELS_DIR
+               host path set via QAG_MODELS_DIR
                e.g. /home/jovyan/models        (Kubeflow)
-                    /home/tyewhong/qagredo/models (ollama / kubeflow)
+                    /home/tyewhong/qag/models (ollama / kubeflow)
 ```
 
 Why this layout:
@@ -50,7 +50,7 @@ Why this layout:
 On your dev server:
 
 ```
-/home/tyewhong/qagredo/models
+/home/tyewhong/qag/models
 ├── manifests/
 └── blobs/
 ```
@@ -98,15 +98,15 @@ From the repo root on your dev server:
 
 ```bash
 # One-off: put sample models under ./models (or point to an existing dir)
-export QAGREDO_MODELS_DIR=/home/tyewhong/qagredo/models
+export QAG_MODELS_DIR=/home/tyewhong/qag/models
 
-QAGREDO_PROFILE=kubeflow bash run.sh
+QAG_PROFILE=kubeflow bash run.sh
 ```
 
 What happens:
 
-1. `run.sh` picks `docker-compose.kubeflow.yml` and reuses `qagredo-kubeflow:latest` (no default rebuild).
-2. Compose keeps one warm container up with 2 GPUs (override `QAGREDO_GPU_COUNT`).
+1. `run.sh` picks `docker-compose.kubeflow.yml` and reuses `qag-kubeflow:latest` (no default rebuild).
+2. Compose keeps one warm container up with 2 GPUs (override `QAG_GPU_COUNT`).
 3. The entrypoint runs `ollama serve` in the background against `/opt/ollama/models`.
 4. Each `bash run.sh` executes the pipeline inside the same warm container; generator + judge both hit `http://127.0.0.1:11434/v1`.
 5. `bash run.sh --down` stops the container and releases GPU memory.
@@ -126,11 +126,21 @@ Split outputs are written per document:
 - `*_analysis_minimal_good_pairs.json`
 - `*_analysis_minimal_bad_pairs.json`
 
+`--minimise` also writes LoRA SFT data. It writes `lora_dpo.jsonl` only when
+the run captured a gate-passing answer with a rejected retry for the same
+question.
+
+Optional host finetune (adapter only; stop Kubeflow/vLLM first):
+
+```bash
+bash run.sh --finetune-lora [RUN_DIR]
+```
+
 Override model tags:
 
 ```bash
-QAGREDO_PROFILE=kubeflow \
-QAGREDO_MODELS_DIR=/home/tyewhong/qagredo/models \
+QAG_PROFILE=kubeflow \
+QAG_MODELS_DIR=/home/tyewhong/qag/models \
 OLLAMA_MODEL=qwen3:8b \
 OLLAMA_JUDGE_MODEL=llama3.1:8b \
 bash run.sh
@@ -143,8 +153,8 @@ bash run.sh
 ### 4.1 Build & push the image (once)
 
 ```bash
-docker build -f Dockerfile.kubeflow -t <your-registry>/qagredo-kubeflow:latest .
-docker push <your-registry>/qagredo-kubeflow:latest
+docker build -f Dockerfile.kubeflow -t <your-registry>/qag-kubeflow:latest .
+docker push <your-registry>/qag-kubeflow:latest
 ```
 
 Image size: **~5 GB** (no weights baked in).
@@ -155,13 +165,13 @@ Image size: **~5 GB** (no weights baked in).
 apiVersion: v1
 kind: Pod
 metadata:
-  name: qagredo
+  name: qag
 spec:
   containers:
-    - name: qagredo
-      image: <your-registry>/qagredo-kubeflow:latest
+    - name: qag
+      image: <your-registry>/qag-kubeflow:latest
       env:
-        - name: QAGREDO_SERVE_OLLAMA
+        - name: QAG_SERVE_OLLAMA
           value: "1"
         - name: OLLAMA_MODELS
           value: /opt/ollama/models
@@ -186,10 +196,10 @@ spec:
         type: Directory
     - name: data
       hostPath:
-        path: /home/jovyan/qagredo-data
+        path: /home/jovyan/qag-data
     - name: output
       hostPath:
-        path: /home/jovyan/qagredo-output
+        path: /home/jovyan/qag-output
   restartPolicy: Never
 ```
 
@@ -226,6 +236,10 @@ No image push, no CI round-trip.
 
 - **Use `ollama`** locally, when you already run `ollama serve` on your machine.
 - **Use `kubeflow`** in any environment that accepts a single image (Kubeflow, Argo, SLURM container, etc.) and/or requires air-gapped execution.
-- **Use `vllm`** when you need maximum throughput on dedicated GPUs with HuggingFace weights. Default stack: **Qwen3.5-9B** generator + **Llama 3.1** judge on `qagredo-vllm:qwen35-localcuda` (see `docs/Siteserver_vLLM_Change_Guide.md`). Legacy Qwen2.5 + `v0.5.3.post1` remains supported for older CUDA hosts.
+- **Use `vllm`** when you need maximum throughput on dedicated GPUs with HuggingFace weights. Default stack: **Qwen3.5-9B** generator + **Llama 3.1** judge on `qag-vllm:qwen35-localcuda` (see `docs/Siteserver_vLLM_Change_Guide.md`). Legacy Qwen2.5 + `v0.5.3.post1` remains supported for older CUDA hosts.
 
 Each profile uses its own config file (`config/config.ollama.yaml`, `config/config.kubeflow.yaml`, `config/config.vllm.yaml`). Strict LLM-as-judge remains the default hallucination checker regardless of profile.
+
+Redserver is the external-vLLM variant: it keeps `QAG_PROFILE=vllm` but
+selects `config/config.vllm.redserver.yaml` through the four overrides in
+`.env`; see `docs/REDSERVER_ONSITE_SETUP.md`.

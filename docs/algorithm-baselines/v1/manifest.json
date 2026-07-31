@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "label": "v1",
+  "created": "2026-06-26T05:41:31Z",
+  "summary": "vLLM strict 42-doc validation; profile-specific replacement rounds; grading scale A-F",
+  "git_commit": "fa7016ffd2143fa4575d01bda5af7edcccdf7ffb",
+  "files": [
+    {"path": "ALGORITHM_REPORT.md", "sha256": "aa5fcb3f03a2c61a6c0ffee18940850e62107ba445f0941e600a0bf560ada08f"},
+    {"path": "diagrams/architecture/diagrams/QAG_Pipeline_Flowchart.puml", "sha256": "19197692a2b90a459a1a7c0807fd0f1d87d8b55746387f0b52aa52dda517d247"},
+    {"path": "diagrams/architecture/diagrams/QAG_Pipeline_Flowchart.svg", "sha256": "bd6f0f2de0c40b30d312248c2b4aede00de1eeb265526e7b3df9f28aa1baf1fe"},
+    {"path": "diagrams/architecture/diagrams/qag_sequence_final_7step.dot", "sha256": "75c6739337cabbe4b471f4bc677f4043bc44015314e7419617684b0fc7512ef9"},
+    {"path": "diagrams/architecture/diagrams/qag_sequence_final_7step.svg", "sha256": "ae3a72d143a4e00155fa780a058999f891c4d16bcdae39ea3ad6bf57cd0e28fb"},
+    {"path": "diagrams/qag_grading_test_flow.dot", "sha256": "b03907ca7cf235615616f7048f0e76290e705f73b54eee1165de6c296f92879c"},
+    {"path": "diagrams/qag_grading_test_flow.svg", "sha256": "f6e425da4109f8be00e1c4d7af425b50c1580e5debc437b9df442ae071d14b17"},
+    {"path": "diagrams/qag_input_prep_explained_16x9.png", "sha256": "54bba1cac571d086b5f5fb5443bc4b831fe865d3160fd0aecdd287777fb2017d"},
+    {"path": "HANDOVER.md", "sha256": "34c3e07076f409a128da7deff88b4f2502885f5670e5c56ebe0113d618356496"}
+  ]
+}

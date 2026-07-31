@@ -65,14 +65,14 @@ def _png_via_venv_cairosvg(
         "import cairosvg, os, sys\n"
         "cairosvg.svg2png(\n"
         "    bytestring=sys.stdin.buffer.read(),\n"
-        "    write_to=os.environ['QAGREDO_PNG_OUT'],\n"
-        "    output_width=int(os.environ['QAGREDO_PNG_W']),\n"
+        "    write_to=os.environ['QAG_PNG_OUT'],\n"
+        "    output_width=int(os.environ['QAG_PNG_W']),\n"
         ")\n"
     )
     env = {
         **os.environ,
-        "QAGREDO_PNG_OUT": str(png_path),
-        "QAGREDO_PNG_W": str(width),
+        "QAG_PNG_OUT": str(png_path),
+        "QAG_PNG_W": str(width),
     }
     r = subprocess.run(
         [str(venv_py), "-c", snippet],
@@ -86,11 +86,11 @@ def _png_via_venv_cairosvg(
 def main() -> int:
     root = _repo_root()
     ap = argparse.ArgumentParser(
-        description="Export QAGRedo pipeline flowchart to PNG.",
+        description="Export QAG pipeline flowchart to PNG.",
     )
     d_out = (
         root / "docs" / "architecture" / "diagrams" /
-        "QAGRedo_Pipeline_Flowchart.png"
+        "QAG_Pipeline_Flowchart.png"
     )
     ap.add_argument(
         "-o",

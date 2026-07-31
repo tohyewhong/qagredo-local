@@ -206,6 +206,8 @@ Example document excerpt: "In 2024, Company A acquired Company B for $2M. In 202
   Bad: How much did Company B cost? (too simple — answer is a single number from one sentence)  # noqa: E501
   Bad: What will Company A acquire next? (speculative, not in the document)
   Bad: What is an acquisition? (asks for general knowledge, not document-specific)  # noqa: E501
+  Bad: How much more did X earn in 2019 compared to 2018? (when only 2019 salary is in the document)  # noqa: E501
+  Bad: What is the difference between A and B? (when only one of A or B appears in the document)  # noqa: E501
 """
 
     return f"""You are an expert analyst creating COMPLEX questions strictly based on the document provided below.  # noqa: E501
@@ -229,6 +231,13 @@ COMPLEXITY REQUIREMENTS (STRICTLY FOLLOW):
 8. For evaluation questions: ask whether the evidence in the document supports or contradicts a claim.  # noqa: E501
 9. For counterfactual questions: ask what would change if a specific stated condition were different.  # noqa: E501
 
+ANSWERABILITY REQUIREMENTS (STRICT — violations cause judge rejection):
+10. Every question MUST be fully answerable using ONLY facts explicitly stated in the document.  # noqa: E501
+11. Do NOT compare time periods, seasons, years, ranks, or entities unless ALL values being compared appear in the document.  # noqa: E501
+12. Do NOT ask for differences, increases, decreases, or changes between A and B unless both A and B are stated in the document.  # noqa: E501
+13. Do NOT require the reader to look up or infer missing data; if a value is not in the document, do not ask about it.  # noqa: E501
+14. Prefer questions answerable from facts present in the document over clever but unanswerable comparisons.  # noqa: E501
+
 Document:
 {text_content}
 
@@ -248,6 +257,34 @@ Document:
 {text_content}
 
 Generate exactly {num_questions} questions, one per line, without numbering or bullet points."""  # noqa: E501
+
+
+def _create_replacement_question_prompt(
+    text_content: str,
+    *,
+    failed_question: str,
+    failure_reason: str,
+) -> str:
+    """Replacement slot question after grounding/judge failure."""
+    return f"""You are replacing a FAILED question for the document below.
+
+The previous question FAILED because:
+{failure_reason}
+
+FAILED question (do NOT repeat or lightly rephrase this):
+{failed_question}
+
+Write ONE new question that:
+1. Is fully answerable using ONLY facts explicitly stated in the document.
+2. Does NOT compare time periods, entities, or values unless ALL appear in the document.  # noqa: E501
+3. Does NOT ask for missing data, differences, or changes when one side is absent.  # noqa: E501
+4. Still requires reasoning across at least 2 parts of the document.
+5. Is meaningfully different from the failed question.
+
+Document:
+{text_content}
+
+Output only the new question on a single line, with a type tag in parentheses."""  # noqa: E501
 
 
 def _call_llm(prompt: str, config: Dict[str, Any]) -> str:
@@ -958,6 +995,224 @@ Provide ONLY the new question, nothing else."""
     return current_question, comp_info
 
 
+def _parse_answerability_result(response: str) -> Dict[str, Any]:
+    """Parse the LLM answerability evaluation JSON response."""
+    defaults: Dict[str, Any] = {
+        "is_answerable": False,
+        "score": 0.5,
+        "reason": "",
+        "missing_facts": [],
+    }
+
+    try:
+        data = json.loads(response)
+    except (ValueError, json.JSONDecodeError):
+        import re as _re
+
+        json_match = _re.search(r"\{[^{}]*\}", response, _re.DOTALL)
+        if not json_match:
+            return dict(defaults)
+        try:
+            data = json.loads(json_match.group())
+        except (ValueError, json.JSONDecodeError):
+            return dict(defaults)
+
+    missing = data.get("missing_facts")
+    if not isinstance(missing, list):
+        missing = []
+    return {
+        "is_answerable": bool(data.get("is_answerable", False)),
+        "score": min(max(float(data.get("score", 0.5)), 0.0), 1.0),
+        "reason": str(data.get("reason", "")),
+        "missing_facts": [str(m) for m in missing if str(m).strip()],
+    }
+
+
+def answerability_passed(
+    info: Dict[str, Any], min_score: float
+) -> bool:
+    """True when the question passed the answerability threshold."""
+    return bool(info.get("is_answerable")) and float(
+        info.get("score", 0.0)
+    ) >= min_score
+
+
+def evaluate_question_answerability(
+    question: str,
+    document_content: str,
+    config: Dict[str, Any],
+    *,
+    min_score: Optional[float] = None,
+) -> tuple[bool, Dict[str, Any]]:
+    """
+    Single-shot check: can the question be fully answered from the document?
+
+    Used before generate_answers to avoid wasted answer + judge calls.
+    """
+    validation_config = (
+        (config.get("question_generation") or {}).get("validation") or {}
+    )
+    if min_score is None:
+        min_score = float(
+            validation_config.get("answerability_min_score", 0.8)
+        )
+
+    info: Dict[str, Any] = {
+        "score": 0.0,
+        "is_answerable": False,
+        "accepted": False,
+        "reason": "",
+        "missing_facts": [],
+    }
+
+    max_doc_chars = int(
+        validation_config.get("answerability_max_doc_chars", 6000)
+    )
+    doc_text = document_content[:max_doc_chars]
+    if len(document_content) > max_doc_chars:
+        doc_text += "\n... [document truncated] ..."
+
+    eval_prompt = f"""You are checking whether a question can be FULLY ANSWERED using ONLY the document below.  # noqa: E501
+
+A question is NOT answerable if:
+- It compares time periods, years, seasons, ranks, or entities but a compared value is missing  # noqa: E501
+- It asks for a difference, increase, decrease, or change between A and B when both are not stated  # noqa: E501
+- It requires facts, numbers, names, or events not present in the document
+- It requires speculation, outside knowledge, or assumptions not supported by the document
+
+A question IS answerable if:
+- The reader can combine two or more explicit facts from the document to reach the answer
+- The answer requires counting, aggregation, chronology, comparison, or direct inference across stated facts, as long as every needed fact is present
+- The conclusion stays within what the document supports and does not invent missing values or events
+
+DOCUMENT:
+{doc_text}
+
+QUESTION:
+{question}
+
+Respond with EXACTLY this JSON (no other text):
+{{"is_answerable": true or false, "score": 0.0 to 1.0, "reason": "brief explanation", "missing_facts": ["optional list"]}}"""  # noqa: E501
+
+    try:
+        response = _call_llm(eval_prompt, config).strip()
+        parsed = _parse_answerability_result(response)
+    except Exception as exc:
+        info["reason"] = (
+            f"answerability check failed — treating as pass: {exc}"
+        )
+        info["score"] = 0.5
+        info["is_answerable"] = True
+        info["accepted"] = True
+        return True, info
+
+    info["score"] = parsed["score"]
+    info["is_answerable"] = parsed["is_answerable"]
+    info["reason"] = parsed["reason"]
+    info["missing_facts"] = parsed.get("missing_facts") or []
+    passed = answerability_passed(info, min_score)
+    info["accepted"] = passed
+    return passed, info
+
+
+def _check_question_answerability(
+    question: str,
+    document_content: str,
+    config: Dict[str, Any],
+    min_score: float = 0.8,
+    max_attempts: int = 2,
+) -> tuple[str, Dict[str, Any]]:
+    """Check answerability and regenerate the question when not answerable."""
+    info: Dict[str, Any] = {
+        "score": 0.0,
+        "is_answerable": False,
+        "accepted": False,
+        "attempts": 0,
+        "was_regenerated": False,
+        "reason": "",
+        "missing_facts": [],
+    }
+
+    max_doc_chars = int(
+        ((config.get("question_generation") or {}).get("validation") or {})
+        .get("answerability_max_doc_chars", 6000)
+    )
+    doc_text = document_content[:max_doc_chars]
+    if len(document_content) > max_doc_chars:
+        doc_text += "\n... [document truncated] ..."
+
+    current_question = question
+
+    for attempt in range(max_attempts + 1):
+        info["attempts"] = attempt + 1
+        passed, eval_info = evaluate_question_answerability(
+            current_question,
+            document_content,
+            config,
+            min_score=min_score,
+        )
+        info.update(
+            {
+                "score": eval_info.get("score", 0.0),
+                "is_answerable": eval_info.get("is_answerable", False),
+                "reason": eval_info.get("reason", ""),
+                "missing_facts": eval_info.get("missing_facts") or [],
+            }
+        )
+        if passed:
+            info["accepted"] = True
+            return current_question, info
+
+        if attempt >= max_attempts:
+            break
+
+        info["was_regenerated"] = True
+        missing = info.get("missing_facts") or []
+        missing_block = ""
+        if missing:
+            missing_block = (
+                "Missing from document: "
+                + "; ".join(str(m) for m in missing[:5])
+                + "\n"
+            )
+        reason = info.get("reason") or "not answerable from document"
+        regen_prompt = f"""Document:
+{doc_text}
+
+Previous Question (NOT ANSWERABLE from this document):
+{current_question}
+
+Why it failed: {reason}
+{missing_block}
+Generate ONE NEW question that:
+- Is fully answerable using ONLY explicit facts in the document
+- Does NOT compare values unless ALL compared values appear in the document
+- Still requires reasoning across at least 2 parts of the document
+- Is meaningfully different from the failed question
+
+Provide ONLY the new question."""
+
+        try:
+            regenerated = _call_llm(regen_prompt, config).strip()
+            if regenerated:
+                from utils.minimal_text import sanitize_llm_question_response
+
+                cleaned = sanitize_llm_question_response(
+                    regenerated,
+                    max_items=1,
+                )
+                current_question = (
+                    cleaned[0] if cleaned else regenerated
+                )
+                if not current_question.endswith("?"):
+                    current_question += "?"
+        except Exception:
+            pass
+
+    info["accepted"] = answerability_passed(info, min_score)
+    return current_question, info
+
+
 def generate_questions(
     documents: Union[List[Dict[str, Any]], Dict[str, Any], List[Any]],
     config: Optional[Dict[str, Any]] = None,
@@ -999,12 +1254,28 @@ def generate_questions(
             ):
                 generation_attempts += 1
                 questions_needed = num_questions - len(all_questions)
-                prompt = _create_question_prompt(
-                    text_content,
-                    questions_needed + 2,
-                    complexity=complexity,
-                    question_types=question_types,
-                )
+                repl_ctx = qgen_config.get("replacement_context")
+                if (
+                    isinstance(repl_ctx, dict)
+                    and questions_needed == 1
+                    and num_questions == 1
+                ):
+                    prompt = _create_replacement_question_prompt(
+                        text_content,
+                        failed_question=str(
+                            repl_ctx.get("failed_question") or ""
+                        ),
+                        failure_reason=str(
+                            repl_ctx.get("failure_reason") or ""
+                        ),
+                    )
+                else:
+                    prompt = _create_question_prompt(
+                        text_content,
+                        questions_needed + 2,
+                        complexity=complexity,
+                        question_types=question_types,
+                    )
                 response = _call_llm(prompt, config)
                 new_questions = _parse_questions_with_framework(
                     response,
@@ -1049,9 +1320,12 @@ def generate_questions(
             enable_comp_check = validation_config.get(
                 "enable_comprehensiveness_check", True
             )
+            enable_answerability = validation_config.get(
+                "enable_answerability_check", False
+            )
             question_validation_details = []
 
-            if enable_validation or enable_comp_check:
+            if enable_validation or enable_comp_check or enable_answerability:
                 min_confidence = validation_config.get(
                     "min_confidence_threshold", 0.7
                 )
@@ -1066,6 +1340,15 @@ def generate_questions(
                 )
                 comp_strict = validation_config.get(
                     "comprehensiveness_strict", False
+                )
+                ans_min_score = validation_config.get(
+                    "answerability_min_score", 0.8
+                )
+                ans_max_attempts = validation_config.get(
+                    "answerability_max_attempts", 2
+                )
+                ans_strict = validation_config.get(
+                    "answerability_strict", False
                 )
 
                 validated_questions = []
@@ -1102,6 +1385,19 @@ def generate_questions(
                         )
                         detail["comprehensiveness_check"] = comp_info
 
+                    if enable_answerability:
+                        (
+                            final_question,
+                            ans_info,
+                        ) = _check_question_answerability(
+                            question=final_question,
+                            document_content=text_content,
+                            config=config,
+                            min_score=ans_min_score,
+                            max_attempts=ans_max_attempts,
+                        )
+                        detail["answerability_check"] = ans_info
+
                     from utils.minimal_text import _clean_question_candidate
 
                     cleaned_final = _clean_question_candidate(final_question)
@@ -1113,7 +1409,9 @@ def generate_questions(
                     if (
                         comp_strict
                         and enable_comp_check
-                        and isinstance(detail.get("comprehensiveness_check"), dict)
+                        and isinstance(
+                            detail.get("comprehensiveness_check"), dict
+                        )
                         and not comprehensiveness_passed(
                             detail["comprehensiveness_check"],
                             comp_min_score,
@@ -1123,6 +1421,22 @@ def generate_questions(
                         detail["accepted"] = False
                         detail["rejection_reason"] = (
                             "comprehensiveness_check_failed"
+                        )
+                    elif (
+                        ans_strict
+                        and enable_answerability
+                        and isinstance(
+                            detail.get("answerability_check"), dict
+                        )
+                        and not answerability_passed(
+                            detail["answerability_check"],
+                            ans_min_score,
+                        )
+                    ):
+                        rejected = True
+                        detail["accepted"] = False
+                        detail["rejection_reason"] = (
+                            "answerability_check_failed"
                         )
                     else:
                         detail["accepted"] = True
@@ -1149,7 +1463,11 @@ def generate_questions(
                             "types", []
                         ),
                         "question_validation": question_validation_details
-                        if (enable_validation or enable_comp_check)
+                        if (
+                            enable_validation
+                            or enable_comp_check
+                            or enable_answerability
+                        )
                         else None,
                     },
                 }

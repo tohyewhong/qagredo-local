@@ -23,7 +23,7 @@ SUPPORTED_PROFILES = tuple(PROFILE_CONFIG_FILENAMES.keys())
 
 
 def normalize_profile(profile: Optional[str]) -> Optional[str]:
-    """Map QAGREDO_PROFILE values to a supported profile key."""
+    """Map QAG_PROFILE values to a supported profile key."""
     if profile is None:
         return None
     key = str(profile).strip().lower()
@@ -37,8 +37,8 @@ def normalize_profile(profile: Optional[str]) -> Optional[str]:
 
 
 def resolve_profile(profile: Optional[str] = None) -> str:
-    """Resolve profile from argument or QAGREDO_PROFILE; default ollama."""
-    resolved = normalize_profile(profile or os.getenv("QAGREDO_PROFILE"))
+    """Resolve profile from argument or QAG_PROFILE; default ollama."""
+    resolved = normalize_profile(profile or os.getenv("QAG_PROFILE"))
     return resolved if resolved else "ollama"
 
 
@@ -49,7 +49,7 @@ def profile_config_path(profile: Optional[str] = None) -> Path:
 
 
 def default_config_path() -> Path:
-    """Config file used when --config is omitted (uses QAGREDO_PROFILE)."""
+    """Config file used when --config is omitted (uses QAG_PROFILE)."""
     return profile_config_path()
 
 
@@ -208,24 +208,24 @@ def _apply_offline_input_preset(config: Dict[str, Any]) -> None:
     """
     When both env vars are set, override ``run.*`` for folder batch mode.
 
-    QAGREDO_OFFLINE_HOST (Linux paths only):
+    QAG_OFFLINE_HOST (Linux paths only):
 
     - ``repo`` — inputs under this install’s ``data/`` tree (alias: ``linux``).
     - ``data`` — inputs under a shared root, e.g. ``.../Data/txt`` or ``json``.
     - ``wsl`` — optional; same as ``windows``; only if you mount the
       “Downloads/txt|json” layout (default ``/mnt/c/Users/.../Downloads``).
 
-    QAGREDO_OFFLINE_INPUT: txt | json
+    QAG_OFFLINE_INPUT: txt | json
 
     ``data`` + txt|json → ``DATA_DIR`` = shared root / txt|json (see run.sh).
     """
-    host = (os.environ.get("QAGREDO_OFFLINE_HOST") or "").strip()
-    kind = (os.environ.get("QAGREDO_OFFLINE_INPUT") or "").strip().lower()
+    host = (os.environ.get("QAG_OFFLINE_HOST") or "").strip()
+    kind = (os.environ.get("QAG_OFFLINE_INPUT") or "").strip().lower()
     if not host or not kind:
         return
     if kind not in ("txt", "json"):
         raise ValueError(
-            "QAGREDO_OFFLINE_INPUT must be 'txt' or 'json' "
+            "QAG_OFFLINE_INPUT must be 'txt' or 'json' "
             f"(got {kind!r})."
         )
     host_l = host.strip().lower()
@@ -243,7 +243,7 @@ def _apply_offline_input_preset(config: Dict[str, Any]) -> None:
         run["input_folder"] = "."
     else:
         raise ValueError(
-            "QAGREDO_OFFLINE_HOST must be 'repo', 'data', or 'wsl' "
+            "QAG_OFFLINE_HOST must be 'repo', 'data', or 'wsl' "
             f"(got {host!r}; aliases: linux=repo, windows=wsl)."
         )
 
@@ -282,7 +282,7 @@ def _apply_environment_overrides(config: Dict[str, Any]) -> None:
     # Profile YAML is the source of truth for provider, base_url, model, and
     # api_key. Environment variables are only used as a narrow power-user
     # escape hatch for the provider that the YAML already selected.
-    # To switch providers, edit the profile YAML or set QAGREDO_PROFILE.
+    # To switch providers, edit the profile YAML or set QAG_PROFILE.
     llm_cfg = config.setdefault("llm", {})
     provider = (llm_cfg.get("provider") or "").lower()
 
@@ -318,12 +318,12 @@ def load_config(
         if not path.is_absolute():
             path = (REPO_ROOT / path).resolve()
     if not path.exists():
-        profile = normalize_profile(os.getenv("QAGREDO_PROFILE"))
+        profile = normalize_profile(os.getenv("QAG_PROFILE"))
         hint = (
-            f"config/config.{profile}.yaml (QAGREDO_PROFILE={profile})"
+            f"config/config.{profile}.yaml (QAG_PROFILE={profile})"
             if profile
             else (
-                "set QAGREDO_PROFILE in .env (ollama | kubeflow | vllm) "
+                "set QAG_PROFILE in .env (ollama | kubeflow | vllm) "
                 "or pass --config"
             )
         )

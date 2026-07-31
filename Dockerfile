@@ -16,7 +16,7 @@ USER root
 # docker-compose.yml passes these build args.
 ARG UID=1013
 ARG GID=1015
-ARG USERNAME=qagredo
+ARG USERNAME=qag
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -68,7 +68,7 @@ COPY docs/OFFLINE_SETUP_GUIDE.md ./OFFLINE_SETUP_GUIDE.md
 RUN if [ -f /workspace/certbundle/certbundle.crt ]; then \
       echo "[INFO] Installing custom CA from /workspace/certbundle/certbundle.crt"; \
       mkdir -p /usr/local/share/ca-certificates; \
-      cp /workspace/certbundle/certbundle.crt /usr/local/share/ca-certificates/qagredo-custom.crt; \
+      cp /workspace/certbundle/certbundle.crt /usr/local/share/ca-certificates/qag-custom.crt; \
       update-ca-certificates; \
       pip config set global.cert /etc/ssl/certs/ca-certificates.crt; \
     else \
@@ -93,7 +93,7 @@ RUN set -eux; \
 #
 # If your network blocks TLS inspection fixes, but you cannot install a corporate CA,
 # you can build with trusted-host overrides (less secure):
-#   docker build --build-arg PIP_TRUSTED_HOSTS="pypi.org files.pythonhosted.org" -t qagredo-v1:latest .
+#   docker build --build-arg PIP_TRUSTED_HOSTS="pypi.org files.pythonhosted.org" -t qag-v1:latest .
 ARG PIP_TRUSTED_HOSTS=
 RUN set -eux; \
     trusted_args=""; \

@@ -1,6 +1,6 @@
-# Sample QAGRedo config for Ollama. For normal runs, prefer
+# Sample QAG config for Ollama. For normal runs, prefer
 # config/config.ollama.yaml or config/config.kubeflow.yaml and select the profile
-# with QAGREDO_PROFILE in .env.
+# with QAG_PROFILE in .env.
 
 offline_mode: true
 

@@ -1,0 +1,126 @@
+{
+  "audited_at": "2026-07-31T02:45:00Z",
+  "git_commit": "fa7016ffd2143fa4575d01bda5af7edcccdf7ffb",
+  "baseline_label": "v3",
+  "checklist_rows_completed": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+  "code_files_read": [
+    "run_qa_pipeline.py",
+    "run.sh",
+    "utils/question_generator.py",
+    "utils/answer_generator.py",
+    "utils/hallucination_checker.py",
+    "utils/output_manager.py",
+    "utils/config_manager.py",
+    "utils/langgraph_pipeline.py",
+    "scripts/conversion/convert_to_qag_jsonl.py",
+    "scripts/lora/train_qwen_lora.py",
+    "scripts/lora/train_qwen_dpo.py",
+    "scripts/lora/run_fair_adapter_eval.sh",
+    "config/config.vllm.yaml",
+    "config/config.vllm.redserver.yaml",
+    "config/config.ollama.yaml",
+    "config/config.kubeflow.yaml",
+    "docker-compose.yml",
+    "docker-compose.vllm-stack.yml",
+    "docker-compose.vllm-redserver.yml"
+  ],
+  "doc_edits": [
+    {
+      "file": "docs/ARCHITECTURE.md",
+      "sections": ["all"],
+      "summary": "New technical-lead system architecture overview (profiles, data plane, ML lifecycle, module map)"
+    },
+    {
+      "file": "docs/architecture/README.md",
+      "sections": ["all"],
+      "summary": "Architecture doc index and diagram source registry"
+    },
+    {
+      "file": "docs/ALGORITHM_REPORT.md",
+      "sections": ["§1", "header"],
+      "summary": "Slot loop is runtime orchestrator; LangGraph module present but unwired to main pipeline"
+    },
+    {
+      "file": "docs/architecture/NETWORK_DIAGRAM.md",
+      "sections": ["Diagram B", "Ollama troubleshooting"],
+      "summary": "Ollama profile uses network_mode host (not host.docker.internal)"
+    },
+    {
+      "file": "docs/HANDOVER.md",
+      "sections": ["First read order", "30-minute walkthrough", "Update rules"],
+      "summary": "Link ARCHITECTURE.md; TL presentation script pointer"
+    },
+    {
+      "file": "docs/README.md",
+      "sections": ["Handover path", "Start here by role", "Markdown runbooks"],
+      "summary": "Technical lead path via ARCHITECTURE.md"
+    },
+    {
+      "file": "docs/OFFLINE_SETUP_GUIDE.md",
+      "sections": ["intro"],
+      "summary": "Cross-link ARCHITECTURE.md"
+    },
+    {
+      "file": "docs/ONLINE_SETUP_GUIDE.md",
+      "sections": ["intro"],
+      "summary": "Cross-link ARCHITECTURE.md"
+    },
+    {
+      "file": "docs/SERVER_MODEL_PROFILES.md",
+      "sections": ["intro"],
+      "summary": "Cross-link ARCHITECTURE.md"
+    },
+    {
+      "file": "config/README.md",
+      "sections": ["intro"],
+      "summary": "Cross-link ARCHITECTURE.md"
+    },
+    {
+      "file": "docs/QAG_Management_Overview.html",
+      "sections": ["Where to go next"],
+      "summary": "Link ARCHITECTURE.md for technical leads"
+    },
+    {
+      "file": "docs/algorithm-baselines/CODE_AUDIT_CHECKLIST.md",
+      "sections": ["row 6"],
+      "summary": "LangGraph unwired; slot loop is runtime orchestrator"
+    },
+    {
+      "file": "tests/test_lora_utils.py",
+      "sections": ["imports"],
+      "summary": "Skip LoRA tests when torch not in system Python"
+    },
+    {
+      "file": "tests/test_lora_train.py",
+      "sections": ["imports"],
+      "summary": "Skip LoRA tests when torch not in system Python"
+    },
+    {
+      "file": "tests/test_lora_dpo_train.py",
+      "sections": ["imports"],
+      "summary": "Skip LoRA tests when torch not in system Python"
+    }
+  ],
+  "verify_docs_links": "pass",
+  "tests_run": [
+    "verify_docs_links",
+    "unittest discover -s tests -p test_*.py"
+  ],
+  "tests_passed": true,
+  "tests_skipped": 3,
+  "tests_skipped_reason": "LoRA tests skip when torch absent from system Python (use QAG_LORA_VENV on finetune hosts)",
+  "production_validation": {
+    "date": "2026-07-31",
+    "profile": "vllm",
+    "notes": "Fair adapter eval completed on run_2500_train (532 holdout docs); SFT/DPO Jul 29-30",
+    "eval_report": "output/vllm/qwen-qwen3.5-9b/run_2500_train/eval_fair_full/EVAL_REPORT.md"
+  },
+  "major_features_since_v2": [
+    "QAGREDO → QAG rename across docs, scripts, examples",
+    "LoRA SFT/DPO host finetune stack (scripts/lora/)",
+    "Fair adapter eval (run_fair_adapter_eval.sh)",
+    "Redserver external vLLM docs and compose",
+    "docs/ARCHITECTURE.md for technical lead reviews",
+    "cu124 LoRA venv for CUDA 12.9/13.0 drivers"
+  ]
+}

@@ -1,7 +1,7 @@
 ---
 description: Enforce pictorial-first style for docs files
 globs: docs/**/*.{md,html}
-alwaysApply: false
+alwaysApply: true
 ---
 
 # Docs Pictorial Priority

@@ -1,46 +1,46 @@
 # =============================================================================
-# QAGRedo — Kubeflow / single-image profile (K2-B)
+# QAG — Kubeflow / single-image profile (K2-B)
 # =============================================================================
 #
 # One container image that includes:
-#   * QAGRedo runner (Python)
+#   * QAG runner (Python)
 #   * Ollama serving generator + judge from a mounted models directory
 #
 # Models live OUTSIDE the image so you can swap them (including 70B GGUF) by
 # replacing files on disk — no image rebuild.
 #
 # Host models directory (set in .env or shell):
-#   * Dev server (yours)    : QAGREDO_MODELS_DIR=/home/tyewhong/qagredo/models
-#   * Kubeflow offline node : QAGREDO_MODELS_DIR=/home/jovyan/models
+#   * Dev server (yours)    : QAG_MODELS_DIR=/home/tyewhong/qag/models
+#   * Kubeflow offline node : QAG_MODELS_DIR=/home/jovyan/models
 #
 # Inside the container models always appear at /opt/ollama/models.
 #
 # Run:
-#   QAGREDO_PROFILE=kubeflow bash run.sh
+#   QAG_PROFILE=kubeflow bash run.sh
 #
 # Or raw compose:
 #   docker compose -f docker-compose.kubeflow.yml up --build
 # =============================================================================
 
-name: qagredo_kubeflow
+name: qag_kubeflow
 
 services:
-  qagredo:
+  qag:
     build:
       context: .
       dockerfile: Dockerfile.kubeflow
       args:
         UID: ${HOST_UID:-1013}
         GID: ${HOST_GID:-1015}
-    image: qagredo-kubeflow:latest
-    container_name: qagredo-kubeflow
+    image: qag-kubeflow:latest
+    container_name: qag-kubeflow
     # Kubeflow / on-prem GPU passthrough. Adjust count to match the pod spec.
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: ${QAGREDO_GPU_COUNT:-2}
+              count: ${QAG_GPU_COUNT:-2}
               capabilities: [gpu]
     # Provider/model URLs for the pipeline live in
     # config/config.kubeflow.yaml — NOT here. The variables below only control
@@ -56,7 +56,7 @@ services:
       PYDANTIC_DISABLE_PLUGIN_LOADING: "1"
 
       # ---- In-container Ollama SERVER settings ----
-      QAGREDO_SERVE_OLLAMA: "1"
+      QAG_SERVE_OLLAMA: "1"
       OLLAMA_HOST: "127.0.0.1:11434"
       OLLAMA_MODELS: "/opt/ollama/models"
       # Keep models resident until container stop (vLLM-like warm behavior).
@@ -70,12 +70,12 @@ services:
       CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES:-}
 
       # ---- Data plumbing (same names as ollama profile) ----
-      QAGREDO_OFFLINE_HOST: ${QAGREDO_OFFLINE_HOST:-}
-      QAGREDO_OFFLINE_INPUT: ${QAGREDO_OFFLINE_INPUT:-}
+      QAG_OFFLINE_HOST: ${QAG_OFFLINE_HOST:-}
+      QAG_OFFLINE_INPUT: ${QAG_OFFLINE_INPUT:-}
     volumes:
       # Models come from the host: /home/jovyan/models on Kubeflow,
-      # /home/tyewhong/qagredo/models on the dev server, etc.
-      - ${QAGREDO_MODELS_DIR:-./models}:/opt/ollama/models:rw
+      # /home/tyewhong/qag/models on the dev server, etc.
+      - ${QAG_MODELS_DIR:-./models}:/opt/ollama/models:rw
 
       # Pipeline inputs / outputs / config mirror the ollama profile.
       - ./run_qa_pipeline.py:/workspace/run_qa_pipeline.py:rw
@@ -95,5 +95,5 @@ services:
         echo "[INFO] OLLAMA_MODELS=$${OLLAMA_MODELS}"
         echo "[INFO] Generator model: $${OLLAMA_MODEL}"
         echo "[INFO] Judge model    : $${OLLAMA_JUDGE_MODEL}"
-        echo "[INFO] Ollama warm container is up; run pipeline via: docker compose exec qagredo python /workspace/run_qa_pipeline.py"
+        echo "[INFO] Ollama warm container is up; run pipeline via: docker compose exec qag python /workspace/run_qa_pipeline.py"
         exec tail -f /dev/null

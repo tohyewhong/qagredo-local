@@ -9,12 +9,12 @@ from pptx.util import Inches, Pt
 
 DOCS_DIR = Path(__file__).resolve().parents[2] / "docs"
 ASSET_DIR = DOCS_DIR / "assets"
-OUTFILE = DOCS_DIR / "QAGRedo_Technical_Workflow_10slides.pptx"
+OUTFILE = DOCS_DIR / "QAG_Technical_Workflow_10slides.pptx"
 
 IMG = {
     "hero": ASSET_DIR / "slide_visual_01_title_hero.png",
     "problem": ASSET_DIR / "slide_visual_02_problem_context.png",
-    "pipeline": DOCS_DIR / "qagredo_full_pipeline_flow_16x9.png",
+    "pipeline": DOCS_DIR / "qag_full_pipeline_flow_16x9.png",
     "arch": ASSET_DIR / "slide_visual_04_architecture_containers.png",
     "qgen": ASSET_DIR / "slide_visual_05_question_generation.png",
     "aval": ASSET_DIR / "slide_visual_06_answer_validation.png",
@@ -190,7 +190,7 @@ def build():
     ).text_frame
     tf.clear()
     p = tf.paragraphs[0]
-    p.text = "QAGRedo Technical Workflow + Framework Upgrade"
+    p.text = "QAG Technical Workflow + Framework Upgrade"
     p.font.size = Pt(40)
     p.font.bold = True
     p.font.color.rgb = RGBColor(18, 47, 95)
@@ -334,7 +334,7 @@ def build():
         1.8,
         4.5,
         1.3,
-        "Generator (qagredo-vllm)",
+        "Generator (qag-vllm)",
         [
             "Llama | GPU 0 | Port ${VLLM_HOST_PORT}",
             "Question + answer generation",
@@ -347,7 +347,7 @@ def build():
         3.3,
         4.5,
         1.3,
-        "Judge (qagredo-vllm-judge)",
+        "Judge (qag-vllm-judge)",
         [
             "Qwen | GPU 1 | Port ${VLLM_JUDGE_HOST_PORT}",
             "Independent grounding verification",
@@ -360,7 +360,7 @@ def build():
         4.8,
         4.5,
         1.3,
-        "Runner (qagredo-runner)",
+        "Runner (qag-runner)",
         ["CPU | internal", "LangGraph orchestration + grading checks"],
         (233, 252, 244),
     )

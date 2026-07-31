@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 def generate_report():
     print("=" * 80)
-    print("QAGRedo - Question Generation Report with Context")
+    print("QAG - Question Generation Report with Context")
     print("=" * 80)
     print()
 

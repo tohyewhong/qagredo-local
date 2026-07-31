@@ -1,10 +1,10 @@
 # ============================================================================
-#  QAGRedo — KUBEFLOW profile  (Ollama running inside one container)
+#  QAG — KUBEFLOW profile  (Ollama running inside one container)
 # ============================================================================
 #
 #  WHEN IS THIS FILE USED?
-#    Whenever .env has  QAGREDO_PROFILE=kubeflow.
-#    One single container runs Ollama + QAGRedo together. The URLs below
+#    Whenever .env has  QAG_PROFILE=kubeflow.
+#    One single container runs Ollama + QAG together. The URLs below
 #    point at 127.0.0.1 INSIDE that container (not your host).
 #
 #  LAYMAN CHEAT SHEET — the only 4 things you will ever want to change:
@@ -16,10 +16,10 @@
 #
 #  IMPORTANT: the tags in (3) and (4) must live inside a proper Ollama GGUF
 #  store (a folder containing `blobs/` and `manifests/`) — NOT a folder of
-#  HuggingFace weight directories. Point QAGREDO_MODELS_DIR in .env at
+#  HuggingFace weight directories. Point QAG_MODELS_DIR in .env at
 #  such a store — for example:
 #      /home/jovyan/models/             (on Kubeflow)
-#      /home/tyewhong/qagredo/models/   (on the dev server)
+#      /home/tyewhong/qag/models/   (on the dev server)
 #  That folder gets mounted into the container at /opt/ollama/models.
 #  If the store is empty, the container will try `ollama pull <tag>` on the
 #  first run; on an offline server that pull will fail and you must seed
@@ -27,8 +27,8 @@
 #
 #  SWITCH NOTE:
 #    If you are coming from vLLM and want in-container Ollama, set in .env:
-#      QAGREDO_PROFILE=kubeflow
-#      QAGREDO_MODELS_DIR=<path-to-ollama-store-with-blobs-and-manifests>
+#      QAG_PROFILE=kubeflow
+#      QAG_MODELS_DIR=<path-to-ollama-store-with-blobs-and-manifests>
 #    then change ONLY llm.model and judge.model below.
 #
 #  Everything else in this file: LEAVE ALONE unless something tells you
@@ -56,6 +56,7 @@ run:
   input_type: auto
   max_files: 0
   num_documents: 2             # CHANGE ME — how many documents to process
+  parallel_documents: 1        # concurrent docs (orchestrator unchanged each)
   skip_existing_outputs: false
   resume: false
   resume_run_dir: ""
@@ -117,6 +118,10 @@ question_generation:
     comprehensiveness_max_attempts: 2
     comprehensiveness_strict: true
 
+    enable_answerability_check: true
+    answerability_min_score: 0.8
+    answerability_max_attempts: 2
+    answerability_strict: false
 # -------------------------------------------------------------------------
 # JUDGE — second model (must be a different Ollama tag to avoid self-grade).
 # -------------------------------------------------------------------------

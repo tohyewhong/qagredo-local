@@ -10,12 +10,12 @@ from pptx.util import Inches, Pt
 
 MARKER = "Offline deployment — keep artifacts in sync"
 
-BODY = """• requirements.txt in the bundle must match packages inside qagredo-v1.tar
-• After requirements change: rebuild image, docker save; offline: docker rmi qagredo-v1:latest then docker load -i qagredo-v1.tar
-• In qagredo_host/: bash verify_offline_deployment.sh after docker load
-• make_qagredo_bundle.sh checks bundle vs local qagredo-v1:latest when the image exists
+BODY = """• requirements.txt in the bundle must match packages inside qag-v1.tar
+• After requirements change: rebuild image, docker save; offline: docker rmi qag-v1:latest then docker load -i qag-v1.tar
+• In qag_host/: bash verify_offline_deployment.sh after docker load
+• make_qag_bundle.sh checks bundle vs local qag-v1:latest when the image exists
 • Pipeline uses /usr/local/bin/python inside the container (see run.sh)
-• Profiles: QAGREDO_PROFILE=ollama | kubeflow | vllm (config/config.<profile>.yaml)
+• Profiles: QAG_PROFILE=ollama | kubeflow | vllm (config/config.<profile>.yaml)
 • Partial runs: bash run.sh -- --resume (skip existing *_analysis.json)
 
 Authoritative guide: docs/OFFLINE_SETUP_GUIDE.md"""

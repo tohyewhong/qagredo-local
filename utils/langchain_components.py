@@ -1,6 +1,6 @@
-"""LangChain prompt/parsing helpers used by QAGRedo.
+"""LangChain prompt/parsing helpers used by QAG.
 
-QAGRedo currently enforces LangChain at runtime via framework checks in
+QAG currently enforces LangChain at runtime via framework checks in
 `run_qa_pipeline.py`. The helper functions still keep internal parsing
 fallbacks for robustness against malformed model outputs.
 """

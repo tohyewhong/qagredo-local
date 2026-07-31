@@ -1,9 +1,9 @@
 # ============================================================================
-#  QAGRedo — VLLM profile  (two vLLM GPU containers + runner)
+#  QAG — VLLM profile  (two vLLM GPU containers + runner)
 # ============================================================================
 #
 #  WHEN IS THIS FILE USED?
-#    Whenever .env has  QAGREDO_PROFILE=vllm.
+#    Whenever .env has  QAG_PROFILE=vllm.
 #    Two separate vLLM containers serve the generator (port 7100) and the
 #    judge (port 7101). This profile is heavier and only needed if you
 #    want the vLLM engine instead of Ollama.
@@ -22,7 +22,7 @@
 #  ALSO IMPORTANT (offline Docker): keep base_url as service DNS names:
 #      llm.base_url   = http://vllm:7100/v1
 #      judge.base_url = http://vllm-judge:7101/v1
-#  Do NOT use localhost here. The pipeline runs inside the qagredo container.
+#  Do NOT use localhost here. The pipeline runs inside the qag container.
 #
 #  Everything else in this file: LEAVE ALONE.
 # ============================================================================
@@ -39,7 +39,7 @@ framework:
     semantic_fallback_threshold: 0.7
 
 run:
-  input_folder: "."   # DATA_DIR is the txt folder (see .env QAGREDO_DATA_DIR)
+  input_folder: "."   # DATA_DIR is the txt folder (see .env QAG_DATA_DIR)
   input_file: ""
   input_glob: "*.txt"
   auto_convert: false
@@ -47,15 +47,20 @@ run:
   output_analysis_stem: document_id
   input_type: auto
   max_files: 0
-  num_documents: 10            # CHANGE ME — how many documents to process
+  num_documents: 1000              # 0 = all loaded (resume skips done + short docs)
+  parallel_documents: 2         # concurrent docs (orchestrator unchanged each)
+  prefilter_skips: true         # drop done/short docs before worker pool
+  quiet_skips: true             # one prefilter summary (not per-doc lines)
+  skip_preflight: true          # skip READY probes when vLLM already up
+  start_at_document: 0          # 1-based; 0 or 1 = from start
   # Resume: skip docs that already have *_analysis.json (see run.resume_run_dir)
   skip_existing_outputs: false
   resume: false
-  resume_run_dir: ""           # empty or "latest" = newest folder under output/
-  save_grounded_qa_pairs_only: false
+  resume_run_dir: ""
+  save_grounded_qa_pairs_only: false  # keep final failures for --minimise-bad
   reject_insufficient_answers: true
   minimal_qa_output: false
-  min_content_words: 250   # skip documents with fewer words (0 = no minimum)
+  min_content_words: 0   # skip documents with fewer words (0 = no minimum)
   min_content_chars: 0     # optional extra floor by character count
   semantic_normalization:
     enable: false
@@ -82,7 +87,7 @@ answer_generation:
     min_confidence_threshold: 0.7
     max_answer_attempts: 5
     max_regeneration_attempts: 2
-    max_question_regeneration_rounds: 3
+    max_question_regeneration_rounds: 5
     reject_ungrounded_after_retries: true
   coverage_validation:
     enable: true
@@ -106,17 +111,22 @@ question_generation:
     comprehensiveness_min_score: 0.6
     comprehensiveness_max_attempts: 2
     comprehensiveness_strict: false
+    enable_answerability_check: true
+    answerability_min_score: 0.8
+    answerability_max_attempts: 2
+    answerability_strict: false   # keep final failed slots for --minimise-bad
+    answerability_max_doc_chars: 6000
 
 # -------------------------------------------------------------------------
 # JUDGE — vLLM OpenAI server on port 7101 (must be a DIFFERENT model).
 # -------------------------------------------------------------------------
 judge:
   provider: "vllm"
-  model: "meta-llama/Meta-Llama-3.1-8B-Instruct"  # CHANGE ME — must match VLLM_JUDGE_SERVED_NAME in .env
+  model: "AtlaAI/Selene-1-Mini-Llama-3.1-8B"  # CHANGE ME — must match VLLM_JUDGE_SERVED_NAME in .env
   base_url: "http://vllm-judge:7101/v1"  # LEAVE ALONE (container-to-container URL)
   api_key: "qwen-local"
   temperature: 0.0
-  max_tokens: 200
+  max_tokens: 320
   timeout: 240
   max_retries: 5
   retry_delay: 1.0

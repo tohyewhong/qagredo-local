@@ -50,6 +50,29 @@ def _pair_row(pair: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _dpo_rows(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    raw_pairs = data.get("dpo_pairs")
+    if not isinstance(raw_pairs, list):
+        return []
+    rows: List[Dict[str, Any]] = []
+    for pair in raw_pairs:
+        if not isinstance(pair, dict):
+            continue
+        question = _as_text(pair.get("question"))
+        chosen = _as_text(pair.get("chosen"))
+        rejected = _as_text(pair.get("rejected"))
+        if not question or not chosen or not rejected or chosen == rejected:
+            continue
+        rows.append(
+            {
+                "question": question,
+                "chosen": chosen,
+                "rejected": rejected,
+            }
+        )
+    return rows
+
+
 def _target_output_path(src: Path, mode: str) -> Path:
     suffix = "good" if mode == "good" else "bad"
     out_name = f"{src.stem}_minimal_{suffix}_pairs.json"
@@ -146,6 +169,8 @@ def main() -> None:
             )
             continue
         payload = {"document": minimal_doc, "qa_pairs": rows}
+        if args.mode == "good":
+            payload["dpo_pairs"] = _dpo_rows(data)
         out.write_text(
             json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",

@@ -1,4 +1,4 @@
-"""Configurable Q&A pipeline runner (sequential generation)."""
+"""Configurable Q&A pipeline runner (optional parallel documents)."""
 
 # CRITICAL: These must run BEFORE any imports
 import os
@@ -8,15 +8,18 @@ os.environ.setdefault("PYDANTIC_DISABLE_PLUGIN_LOADING", "1")
 os.environ.pop("TRANSFORMERS_CACHE", None)
 
 import argparse  # noqa: E402
+from concurrent.futures import ThreadPoolExecutor, as_completed  # noqa: E402
 from copy import deepcopy  # noqa: E402
 import importlib.util  # noqa: E402
 import json  # noqa: E402
 import re  # noqa: E402
 import sys  # noqa: E402
 import tempfile  # noqa: E402
+import threading  # noqa: E402
 import time  # noqa: E402
+from dataclasses import dataclass  # noqa: E402
 from pathlib import Path  # noqa: E402
-from typing import Any, Dict, List, Optional, Tuple  # noqa: E402
+from typing import Any, Dict, List, Optional, Set, Tuple  # noqa: E402
 
 from utils import (  # noqa: E402
     grade_qa_results,
@@ -26,7 +29,11 @@ from utils import (  # noqa: E402
     generate_questions,
     save_results,
 )
-from utils.question_generator import _call_llm, _extract_text_content  # noqa: E402
+from utils.question_generator import (  # noqa: E402
+    _call_llm,
+    _extract_text_content,
+    evaluate_question_answerability,
+)
 from utils.output_manager import (  # noqa: E402
     _safe_output_filename_stem,
     analysis_json_path,
@@ -60,10 +67,10 @@ def _get_convert_to_jsonl_module() -> Any:
             Path(__file__).resolve().parent
             / "scripts"
             / "conversion"
-            / "convert_to_qagredo_jsonl.py"
+            / "convert_to_qag_jsonl.py"
         )
         spec = importlib.util.spec_from_file_location(
-            "qagredo_convert_to_jsonl",
+            "qag_convert_to_jsonl",
             cpath,
         )
         if spec is None or spec.loader is None:
@@ -125,7 +132,7 @@ def _prepare_jsonl_input_if_needed(
     if not _config_bool(run_cfg.get("auto_convert")):
         raise ValueError(
             f"run.input_file is {sfx!r}; pipeline loads .json / .jsonl only. "
-            "Convert first (scripts/conversion/convert_to_qagredo_jsonl.py), "
+            "Convert first (scripts/conversion/convert_to_qag_jsonl.py), "
             "point run.input_file at the .jsonl, or set run.auto_convert: "
             "true to write <stem>.jsonl beside the source and run on that."
         )
@@ -143,7 +150,7 @@ def _prepare_jsonl_input_if_needed(
     sem_en, sem_chars = _converter_semantic_options(config)
 
     out_path = resolved.with_suffix(".jsonl")
-    rc = mod.convert_to_qagredo_jsonl(
+    rc = mod.convert_to_qag_jsonl(
         str(resolved),
         str(out_path),
         input_type=override,
@@ -152,7 +159,7 @@ def _prepare_jsonl_input_if_needed(
     )
     if rc != 0:
         raise RuntimeError(
-            f"convert_to_qagredo_jsonl exited with {rc} for {resolved}"
+            f"convert_to_qag_jsonl exited with {rc} for {resolved}"
         )
     print(
         "[INFO] run.auto_convert: wrote JSONL "
@@ -243,9 +250,9 @@ def _merge_input_folder_to_jsonl(
         if ek not in supported:
             print(f"[WARN] Skipping unsupported type in folder: {p.name}")
             continue
-        with tempfile.TemporaryDirectory(prefix="qagredo_fconv_") as td:
+        with tempfile.TemporaryDirectory(prefix="qag_fconv_") as td:
             out_p = Path(td) / f"{_safe_output_filename_stem(p.stem)}.jsonl"
-            rc = mod.convert_to_qagredo_jsonl(
+            rc = mod.convert_to_qag_jsonl(
                 str(p.resolve()),
                 str(out_p),
                 input_type=override,
@@ -254,7 +261,7 @@ def _merge_input_folder_to_jsonl(
             )
             if rc != 0:
                 raise RuntimeError(
-                    f"convert_to_qagredo_jsonl exited with {rc} for {p}"
+                    f"convert_to_qag_jsonl exited with {rc} for {p}"
                 )
             raw_lines = out_p.read_text(encoding="utf-8").splitlines()
         for line in raw_lines:
@@ -270,7 +277,7 @@ def _merge_input_folder_to_jsonl(
         )
 
     root = Path(__file__).resolve().parent
-    cache_root = root / "data" / ".qagredo_batch"
+    cache_root = root / "data" / ".qag_batch"
     cache_root.mkdir(parents=True, exist_ok=True)
     safe_dir = _safe_output_filename_stem(resolved_dir.name)
     out_jsonl = cache_root / f"{safe_dir}.jsonl"
@@ -881,6 +888,56 @@ def _comprehensiveness_strict_enabled(config: Dict[str, Any]) -> bool:
     return bool(val.get("comprehensiveness_strict", False))
 
 
+def _answerability_check_enabled(config: Dict[str, Any]) -> bool:
+    """When true, reject questions not answerable from document text."""
+    qcfg = config.get("question_generation")
+    if not isinstance(qcfg, dict):
+        return False
+    val = qcfg.get("validation")
+    if not isinstance(val, dict):
+        return False
+    return bool(val.get("enable_answerability_check", False))
+
+
+def _answerability_strict_enabled(config: Dict[str, Any]) -> bool:
+    """When true, omit slots that fail answerability or grounding gate."""
+    qcfg = config.get("question_generation")
+    if not isinstance(qcfg, dict):
+        return False
+    val = qcfg.get("validation")
+    if not isinstance(val, dict):
+        return False
+    return bool(val.get("answerability_strict", False))
+
+
+def _synthetic_unanswerable_slot_pair(
+    question: str,
+    document: Dict[str, Any],
+    doc_id: str,
+    reason: str,
+) -> Dict[str, Any]:
+    """Placeholder pair when answerability pre-check fails before answering."""
+    detail = (
+        f"Answerability pre-check: {reason}"
+        if reason
+        else "Answerability pre-check: question not answerable from document."
+    )
+    return {
+        "question": question,
+        "answer": "",
+        "hallucination_check": {
+            "is_grounded": False,
+            "confidence": 0.0,
+            "method": "answerability_precheck",
+            "issues": [detail],
+        },
+        "citation_spans": [],
+        "citation_notes": [],
+        "source_doc_id": str(doc_id),
+        "source_title": str(document.get("title") or doc_id),
+    }
+
+
 def _slot_questions_for_pipeline(
     seed_questions: List[str],
     base_q_count: int,
@@ -912,6 +969,8 @@ def _pair_passes_grounding_gate(
     # accepting an unanswerable one.
     if _answer_is_insufficient(pair.get("answer")):
         return False
+    if not str(pair.get("answer") or "").strip():
+        return False
 
     grading = _qa_pair_hallucination_check(pair)
     if not isinstance(grading, dict):
@@ -924,6 +983,69 @@ def _pair_passes_grounding_gate(
     except (TypeError, ValueError):
         conf = 0.0
     return conf >= min_confidence
+
+
+def _pair_failure_reason(pair: Dict[str, Any]) -> str:
+    """Short judge/validation reason for replacement-question prompts."""
+    if _answer_is_insufficient(pair.get("answer")):
+        return (
+            "The answer refused with insufficient information in the "
+            "document."
+        )
+    if not str(pair.get("answer") or "").strip():
+        return (
+            "The answer was empty (judge rejected or validation failed)."
+        )
+    grading = _qa_pair_hallucination_check(pair)
+    if not isinstance(grading, dict):
+        return "No grading result was produced for this slot."
+    issues = grading.get("issues")
+    if isinstance(issues, list) and issues:
+        return "; ".join(str(i) for i in issues[:3])
+    if grading.get("is_grounded") is not True:
+        return "Judge marked the answer as not grounded in the document."
+    conf_val = grading.get("confidence")
+    try:
+        conf = float(conf_val) if conf_val is not None else 0.0
+    except (TypeError, ValueError):
+        conf = 0.0
+    return f"Judge confidence {conf:.2f} was below the required threshold."
+
+
+def _document_filter_id(document: Dict[str, Any]) -> str:
+    """Stable id for only_document_ids filtering."""
+    return str(document.get("id") or document.get("title") or "").strip()
+
+
+def _resolve_only_document_ids(
+    settings: Dict[str, Any],
+    run_cfg: Dict[str, Any],
+) -> Optional[Set[str]]:
+    """Optional set of document ids to process (re-run failed docs)."""
+    ids_file = settings.get("only_document_ids_file")
+    if ids_file is None:
+        ids_file = run_cfg.get("only_document_ids_file")
+    if ids_file:
+        path = Path(str(ids_file))
+        if not path.is_file():
+            print(
+                f"[WARN] only_document_ids_file not found: {path}"
+            )
+            return None
+        found: Set[str] = set()
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            found.add(line.split(",")[0].strip())
+        return found if found else None
+    raw = settings.get("only_document_ids")
+    if raw is None:
+        raw = run_cfg.get("only_document_ids")
+    if isinstance(raw, list):
+        ids = {str(x).strip() for x in raw if str(x).strip()}
+        return ids if ids else None
+    return None
 
 
 def _slot_answer_validation_rejected(qa_result: Dict[str, Any]) -> bool:
@@ -939,6 +1061,66 @@ def _slot_answer_validation_rejected(qa_result: Dict[str, Any]) -> bool:
         return False
     val = first.get("validation")
     return isinstance(val, dict) and val.get("accepted") is False
+
+
+def _dpo_pair_from_answer_attempts(
+    qa_result: Dict[str, Any],
+    accepted_pair: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Build one same-question preference pair from answer retry history."""
+    meta = qa_result.get("generation_metadata")
+    if not isinstance(meta, dict):
+        return None
+    checks = meta.get("answer_quality_checks")
+    if not isinstance(checks, list) or not checks:
+        return None
+    first = checks[0]
+    if not isinstance(first, dict):
+        return None
+    validation = first.get("validation")
+    if not isinstance(validation, dict):
+        return None
+    attempts = validation.get("answer_attempts")
+    if not isinstance(attempts, list):
+        return None
+
+    chosen = str(accepted_pair.get("answer") or "").strip()
+    question = str(accepted_pair.get("question") or "").strip()
+    if not question or not chosen:
+        return None
+
+    candidates: List[Tuple[float, int, str]] = []
+    for index, attempt in enumerate(attempts):
+        if not isinstance(attempt, dict):
+            continue
+        if attempt.get("accepted") is not False:
+            continue
+        rejected = str(attempt.get("answer") or "").strip()
+        if not rejected or rejected == chosen:
+            continue
+        try:
+            confidence = float(attempt.get("confidence") or 0.0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        candidates.append((confidence, index, rejected))
+    if not candidates:
+        return None
+
+    rejected_confidence, _, rejected = max(candidates)
+    chosen_check = _qa_pair_hallucination_check(accepted_pair) or {}
+    try:
+        chosen_confidence = float(
+            chosen_check.get("confidence") or 0.0
+        )
+    except (TypeError, ValueError):
+        chosen_confidence = 0.0
+    return {
+        "question": question,
+        "chosen": chosen,
+        "rejected": rejected,
+        "chosen_confidence": chosen_confidence,
+        "rejected_confidence": rejected_confidence,
+    }
 
 
 def _grading_from_answer_validation(
@@ -1252,6 +1434,848 @@ def _preflight_llm_generator(config: Dict[str, Any]) -> None:
         )
 
 
+@dataclass(frozen=True)
+class DocumentProcessOutcome:
+    """Result of processing one document (or skipping it)."""
+
+    kind: str
+
+
+def _resolve_parallel_documents(
+    settings: Dict[str, Any],
+    run_cfg: Dict[str, Any],
+) -> int:
+    """Workers for concurrent documents; 1 preserves legacy serial runs."""
+    raw = settings.get("parallel_documents")
+    if raw is None:
+        raw = run_cfg.get("parallel_documents", 1)
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        print(
+            "[WARN] run.parallel_documents is invalid "
+            f"({raw!r}); defaulting to 1."
+        )
+        n = 1
+    return max(1, n)
+
+
+def _pipeline_print(
+    message: str = "",
+    *,
+    print_lock: Optional[threading.Lock] = None,
+) -> None:
+    if print_lock is not None:
+        with print_lock:
+            print(message)
+    else:
+        print(message)
+
+
+def _document_log_prefix(
+    idx: int,
+    total_docs: int,
+    doc_id: Any,
+    *,
+    max_id_len: int = 36,
+) -> str:
+    """Disambiguate parallel workers in interleaved logs."""
+    label = str(doc_id or f"doc_{idx}")
+    if len(label) > max_id_len:
+        label = label[: max_id_len - 3] + "..."
+    return f"[Doc {idx}/{total_docs} {label}]"
+
+
+def _document_precheck_skip_kind(
+    *,
+    idx: int,
+    document: Dict[str, Any],
+    total_docs: int,
+    run_cfg: Dict[str, Any],
+    input_path: str,
+    resume_opts: Dict[str, Any],
+    skip_check_dir: Optional[Path],
+    reprocess_document_ids: Optional[Set[str]] = None,
+) -> Optional[str]:
+    """Return skip kind before LLM work, or None if document should run."""
+    doc_key = _document_filter_id(document)
+    force = (
+        reprocess_document_ids is not None
+        and doc_key in reprocess_document_ids
+    )
+    if (
+        resume_opts["skip_existing"]
+        and skip_check_dir is not None
+        and not force
+    ):
+        out_stem = _expected_analysis_output_stem(
+            document,
+            idx,
+            total_docs,
+            run_cfg,
+            input_path,
+        )
+        if analysis_output_exists(skip_check_dir, out_stem):
+            return "skipped_existing"
+    if _document_skip_reason_for_min_length(document, run_cfg):
+        return "skipped_short"
+    return None
+
+
+def _log_document_skip(
+    *,
+    kind: str,
+    idx: int,
+    document: Dict[str, Any],
+    total_docs: int,
+    run_cfg: Dict[str, Any],
+    input_path: str,
+    skip_check_dir: Optional[Path],
+    print_lock: Optional[threading.Lock] = None,
+) -> None:
+    doc_id = document.get("id", document.get("title", f"doc_{idx}"))
+    _pipeline_print("=" * 80, print_lock=print_lock)
+    if kind == "skipped_existing":
+        out_stem = _expected_analysis_output_stem(
+            document,
+            idx,
+            total_docs,
+            run_cfg,
+            input_path,
+        )
+        existing = analysis_json_path(skip_check_dir, out_stem)
+        _pipeline_print(
+            f"Skipping Document {idx}/{total_docs}: {doc_id} "
+            "(analysis already exists)",
+            print_lock=print_lock,
+        )
+        _pipeline_print("=" * 80, print_lock=print_lock)
+        _pipeline_print(
+            f"[INFO] Existing output: {existing}\n",
+            print_lock=print_lock,
+        )
+        return
+    skip_reason = _document_skip_reason_for_min_length(document, run_cfg)
+    _pipeline_print(
+        f"Skipping Document {idx}/{total_docs}: {doc_id}",
+        print_lock=print_lock,
+    )
+    _pipeline_print("=" * 80, print_lock=print_lock)
+    _pipeline_print(
+        f"[WARN] {skip_reason or 'skipped'}\n",
+        print_lock=print_lock,
+    )
+
+
+def _resolve_bool_setting(
+    settings: Dict[str, Any],
+    run_cfg: Dict[str, Any],
+    key: str,
+    default: bool = False,
+) -> bool:
+    if key in settings and settings[key] is not None:
+        return _config_bool(settings[key])
+    return _config_bool(run_cfg.get(key, default))
+
+
+def _resolve_start_at_document(
+    settings: Dict[str, Any],
+    run_cfg: Dict[str, Any],
+) -> int:
+    raw = settings.get("start_at_document")
+    if raw is None:
+        raw = run_cfg.get("start_at_document", 0)
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        print(
+            "[WARN] run.start_at_document is invalid "
+            f"({raw!r}); defaulting to 1."
+        )
+        n = 1
+    return max(1, n)
+
+
+def _build_document_work_queue(
+    documents: List[Dict[str, Any]],
+    *,
+    total_docs: int,
+    run_cfg: Dict[str, Any],
+    input_path: str,
+    resume_opts: Dict[str, Any],
+    skip_check_dir: Optional[Path],
+    prefilter_skips: bool,
+    quiet_skips: bool,
+    start_at_document: int,
+    reprocess_document_ids: Optional[Set[str]] = None,
+) -> Tuple[List[Tuple[int, Dict[str, Any]]], int, int, int]:
+    """
+    Build worker queue; optionally drop skips before thread pool.
+
+    Returns (work_items, skipped_short, skipped_existing,
+    skipped_before_start).
+    """
+    work_items: List[Tuple[int, Dict[str, Any]]] = []
+    skipped_short = 0
+    skipped_existing = 0
+    skipped_before_start = 0
+
+    for idx, document in enumerate(documents, 1):
+        if idx < start_at_document:
+            skipped_before_start += 1
+            continue
+        if prefilter_skips:
+            kind = _document_precheck_skip_kind(
+                idx=idx,
+                document=document,
+                total_docs=total_docs,
+                run_cfg=run_cfg,
+                input_path=input_path,
+                resume_opts=resume_opts,
+                skip_check_dir=skip_check_dir,
+                reprocess_document_ids=reprocess_document_ids,
+            )
+            if kind is not None:
+                if kind == "skipped_short":
+                    skipped_short += 1
+                else:
+                    skipped_existing += 1
+                if not quiet_skips:
+                    _log_document_skip(
+                        kind=kind,
+                        idx=idx,
+                        document=document,
+                        total_docs=total_docs,
+                        run_cfg=run_cfg,
+                        input_path=input_path,
+                        skip_check_dir=skip_check_dir,
+                    )
+                continue
+        work_items.append((idx, document))
+
+    return (
+        work_items,
+        skipped_short,
+        skipped_existing,
+        skipped_before_start,
+    )
+
+
+def _process_one_document(
+    *,
+    idx: int,
+    document: Dict[str, Any],
+    total_docs: int,
+    documents_count: int,
+    config: Dict[str, Any],
+    settings: Dict[str, Any],
+    run_cfg: Dict[str, Any],
+    input_path: str,
+    halluc_method: str,
+    halluc_cfg: Dict[str, Any],
+    allow_semantic_fallback: bool,
+    output_provider: str,
+    output_model: str,
+    resume_opts: Dict[str, Any],
+    skip_check_dir: Optional[Path],
+    save_grounded_only: bool,
+    reject_insufficient: bool,
+    minimal_qa_output: bool,
+    reprocess_document_ids: Optional[Set[str]] = None,
+    print_lock: Optional[threading.Lock] = None,
+) -> DocumentProcessOutcome:
+    """Run per-document orchestrator: slots, judge, grounding gate."""
+    doc_id = document.get("id", document.get("title", f"doc_{idx}"))
+
+    skip_kind = _document_precheck_skip_kind(
+        idx=idx,
+        document=document,
+        total_docs=total_docs,
+        run_cfg=run_cfg,
+        input_path=input_path,
+        resume_opts=resume_opts,
+        skip_check_dir=skip_check_dir,
+        reprocess_document_ids=reprocess_document_ids,
+    )
+    if skip_kind is not None:
+        _log_document_skip(
+            kind=skip_kind,
+            idx=idx,
+            document=document,
+            total_docs=total_docs,
+            run_cfg=run_cfg,
+            input_path=input_path,
+            skip_check_dir=skip_check_dir,
+            print_lock=print_lock,
+        )
+        return DocumentProcessOutcome(kind=skip_kind)
+
+    _pipeline_print("=" * 80, print_lock=print_lock)
+    _pipeline_print(
+        f"Processing Document {idx}/{total_docs}: {doc_id}",
+        print_lock=print_lock,
+    )
+    _pipeline_print("=" * 80, print_lock=print_lock)
+    _pipeline_print("", print_lock=print_lock)
+
+    _pipeline_print("DOCUMENT CONTENT:", print_lock=print_lock)
+    _pipeline_print("-" * 80, print_lock=print_lock)
+    _pipeline_print(
+        _document_plain_text(document) or "(no extractable text)",
+        print_lock=print_lock,
+    )
+    _pipeline_print("", print_lock=print_lock)
+
+    doc_pfx = _document_log_prefix(idx, total_docs, doc_id)
+
+    qcfg = (config.get("question_generation") or {})
+    base_q_count = int(qcfg.get("num_questions", 3) or 3)
+    mt_cfg = (config.get("answer_generation") or {}).get("multi_turn", {})
+    max_q_rounds = int(mt_cfg.get("max_question_regeneration_rounds", 3))
+    min_conf = float(mt_cfg.get("min_confidence_threshold", 0.7) or 0.7)
+
+    total_qtime = 0.0
+    total_atime = 0.0
+    total_gtime = 0.0
+    q_grounding_retries = 0
+    answerability_precheck_failures = 0
+    final_pairs: List[Dict[str, Any]] = []
+    dpo_pairs: List[Dict[str, Any]] = []
+    base_question_metadata: Dict[str, Any] = {}
+    last_answer_metadata: Dict[str, Any] = {}
+    slot_question_validation: List[Dict[str, Any]] = []
+
+    _pipeline_print(
+        f"{doc_pfx} Generating initial question set "
+        f"(target={base_q_count})...",
+        print_lock=print_lock,
+    )
+    base_config = deepcopy(config)
+    base_qcfg = (
+        base_config.get("question_generation")
+        if isinstance(base_config.get("question_generation"), dict)
+        else {}
+    )
+    base_qcfg["num_questions"] = base_q_count
+    base_config["question_generation"] = base_qcfg
+
+    start_time = time.time()
+    base_question_results = generate_questions(
+        [document], config=base_config
+    )
+    qtime = time.time() - start_time
+    total_qtime += qtime
+    if not base_question_results:
+        _pipeline_print(
+            f"[WARN] No questions generated for {doc_id}; "
+            "skipping document.\n",
+            print_lock=print_lock,
+        )
+        return DocumentProcessOutcome(kind="skipped_no_output")
+
+    base_question_result = base_question_results[0]
+    seed_questions = list(base_question_result.get("questions", []))
+    if not seed_questions:
+        _pipeline_print(
+            f"[WARN] Empty initial questions for {doc_id}; "
+            "skipping document.\n",
+            print_lock=print_lock,
+        )
+        return DocumentProcessOutcome(kind="skipped_no_output")
+
+    base_question_metadata = dict(
+        base_question_result.get("generation_metadata", {})
+    )
+    comp_strict = _comprehensiveness_strict_enabled(config)
+    ans_strict = _answerability_strict_enabled(config)
+    slot_strict = comp_strict or ans_strict
+    slot_questions = _slot_questions_for_pipeline(
+        seed_questions,
+        base_q_count,
+        comprehensiveness_strict=slot_strict,
+    )
+    if comp_strict and len(slot_questions) < base_q_count:
+        dropped = base_q_count - len(slot_questions)
+        _pipeline_print(
+            f"{doc_pfx} [INFO] Comprehensiveness strict: {dropped} "
+            "question(s) rejected; "
+            f"{len(slot_questions)} slot(s) will receive answers.",
+            print_lock=print_lock,
+        )
+    if ans_strict and len(slot_questions) < base_q_count:
+        _pipeline_print(
+            f"{doc_pfx} [INFO] Answerability strict: using "
+            f"{len(slot_questions)} answerable slot(s) "
+            f"(target was {base_q_count}).",
+            print_lock=print_lock,
+        )
+    _pipeline_print(
+        f"{doc_pfx} [OK] Questions ready in {qtime:.1f} seconds\n",
+        print_lock=print_lock,
+    )
+
+    slot_total = len(slot_questions)
+    for slot_idx, current_question in enumerate(slot_questions):
+        slot_pair: Optional[Dict[str, Any]] = None
+        current_question_metadata = dict(base_question_metadata)
+
+        _pipeline_print(
+            f"{doc_pfx} [INFO] Slot {slot_idx + 1}/{slot_total}: "
+            "answer trials for current question.",
+            print_lock=print_lock,
+        )
+        for replace_idx in range(max_q_rounds + 1):
+            question_result = {
+                **document,
+                "questions": [current_question],
+                "generation_metadata": current_question_metadata,
+            }
+
+            ans_precheck_failed = False
+            ans_precheck_reason = ""
+            if _answerability_check_enabled(config):
+                doc_text = _document_plain_text(document)
+                passed, ans_info = evaluate_question_answerability(
+                    str(current_question or ""),
+                    doc_text,
+                    config,
+                )
+                if not passed:
+                    ans_precheck_failed = True
+                    ans_precheck_reason = str(
+                        ans_info.get("reason") or ""
+                    )
+                    missing = ans_info.get("missing_facts") or []
+                    if missing:
+                        ans_precheck_reason += (
+                            " Missing: "
+                            + "; ".join(str(m) for m in missing[:3])
+                        )
+                    _pipeline_print(
+                        f"{doc_pfx} [INFO] Slot {slot_idx + 1}/"
+                        f"{slot_total}: answerability pre-check failed "
+                        f"({ans_precheck_reason[:120]}).",
+                        print_lock=print_lock,
+                    )
+                    answerability_precheck_failures += 1
+
+            start_time = time.time()
+            if ans_precheck_failed:
+                atime = 0.0
+                slot_pair = _synthetic_unanswerable_slot_pair(
+                    str(current_question or ""),
+                    document,
+                    str(doc_id),
+                    ans_precheck_reason,
+                )
+                qa_result: Dict[str, Any] = {
+                    "questions": [current_question],
+                    "answers": [""],
+                    "generation_metadata": {},
+                }
+                analysis_info = None
+                gtime = 0.0
+            else:
+                qa_result = generate_answers(
+                    questions=[current_question],
+                    document=document,
+                    config=config,
+                )
+                atime = time.time() - start_time
+                last_answer_metadata = dict(
+                    qa_result.get("generation_metadata", {})
+                )
+
+                _pipeline_print(
+                    f"{doc_pfx} [OK] Slot {slot_idx + 1}/{slot_total} "
+                    f"answer ready in {atime:.1f} seconds",
+                    print_lock=print_lock,
+                )
+
+                analysis_info = None
+                gtime = 0.0
+                if _slot_answer_validation_rejected(qa_result):
+                    analysis_info = _grading_from_answer_validation(
+                        qa_result,
+                        str(current_question or ""),
+                        halluc_method,
+                    )
+                try:
+                    if analysis_info is None:
+                        t_grade = time.time()
+                        grading_payload = {**document, **qa_result}
+                        graded_results = grade_qa_results(
+                            [grading_payload], method=halluc_method
+                        )
+                        if not graded_results:
+                            raise RuntimeError(
+                                "grade_qa_results returned no results"
+                            )
+                        analysis_info = graded_results[0]
+                        gtime = time.time() - t_grade
+                except Exception as exc:
+                    _pipeline_print(
+                        f"{doc_pfx} [WARN] Could not grade "
+                        f"({halluc_method}): {exc}",
+                        print_lock=print_lock,
+                    )
+                    if not allow_semantic_fallback:
+                        raise RuntimeError(
+                            "Grading failed and semantic fallback is "
+                            "disabled "
+                            f"(method={halluc_method}): {exc}"
+                        ) from exc
+                    if halluc_method in ("hybrid", "llm"):
+                        try:
+                            t_grade = time.time()
+                            grading_payload = {**document, **qa_result}
+                            graded_results = grade_qa_results(
+                                [grading_payload], method="keyword"
+                            )
+                            if graded_results:
+                                analysis_info = graded_results[0]
+                                gtime = time.time() - t_grade
+                        except Exception as exc2:
+                            _pipeline_print(
+                                "[WARN] Keyword fallback grading failed: "
+                                f"{exc2}",
+                                print_lock=print_lock,
+                            )
+                total_gtime += gtime
+
+                pair_list = build_qa_pairs(
+                    question_result,
+                    qa_result,
+                    analysis_info or {},
+                    document,
+                    idx,
+                )
+                _merge_pair_grading_from_checks(pair_list, analysis_info)
+                ev_for_alignment = ""
+                raw_ev_list = qa_result.get("supporting_evidence")
+                if isinstance(raw_ev_list, list) and raw_ev_list:
+                    ev_for_alignment = raw_ev_list[0]
+                if pair_list:
+                    slot_pair = pair_list[0]
+                    _apply_citation_alignment_to_pair(
+                        slot_pair,
+                        ev_for_alignment,
+                        halluc_cfg,
+                    )
+                    gw_mode = str(
+                        halluc_cfg.get(
+                            "grounding_explanation_when_no_citations",
+                            "off",
+                        )
+                        or "off"
+                    )
+                    apply_grounding_why_when_no_citations(
+                        slot_pair,
+                        _document_plain_text(document),
+                        str(current_question or ""),
+                        gw_mode,
+                    )
+                else:
+                    slot_pair = {
+                        "question": current_question,
+                        "answer": "(Answer generation failed)",
+                        "hallucination_check": None,
+                        "citation_spans": [],
+                        "citation_notes": [],
+                        "source_doc_id": str(doc_id),
+                        "source_title": str(
+                            document.get("title") or doc_id
+                        ),
+                    }
+
+            total_atime += atime
+
+            if _pair_passes_grounding_gate(slot_pair, min_conf):
+                dpo_pair = _dpo_pair_from_answer_attempts(
+                    qa_result,
+                    slot_pair,
+                )
+                if dpo_pair is not None:
+                    dpo_pairs.append(dpo_pair)
+                _pipeline_print(
+                    f"{doc_pfx} [OK] Slot {slot_idx + 1}/{slot_total}: "
+                    "passed grounding gate.",
+                    print_lock=print_lock,
+                )
+                break
+
+            if replace_idx >= max_q_rounds:
+                _pipeline_print(
+                    f"{doc_pfx} [WARN] Slot {slot_idx + 1}/{slot_total}: "
+                    "max question replacements reached; slot omitted from "
+                    "qa_pairs if still ungrounded.",
+                    print_lock=print_lock,
+                )
+                break
+
+            _pipeline_print(
+                f"{doc_pfx} [INFO] Slot {slot_idx + 1}/{slot_total}: "
+                "failed gate; generating replacement question.",
+                print_lock=print_lock,
+            )
+            q_grounding_retries += 1
+            replace_config = deepcopy(config)
+            replace_qcfg = (
+                replace_config.get("question_generation")
+                if isinstance(
+                    replace_config.get("question_generation"), dict
+                )
+                else {}
+            )
+            replace_qcfg["num_questions"] = 1
+            if slot_pair is not None:
+                replace_qcfg["replacement_context"] = {
+                    "failed_question": str(current_question or ""),
+                    "failure_reason": _pair_failure_reason(slot_pair),
+                }
+            replace_config["question_generation"] = replace_qcfg
+            t_q = time.time()
+            repl_results = generate_questions(
+                [document], config=replace_config
+            )
+            qtime = time.time() - t_q
+            total_qtime += qtime
+            if not repl_results:
+                _pipeline_print(
+                    f"{doc_pfx} [WARN] Slot {slot_idx + 1}/{slot_total}: "
+                    "replacement question generation failed.",
+                    print_lock=print_lock,
+                )
+                break
+            repl_questions = repl_results[0].get("questions", [])
+            if not repl_questions:
+                _pipeline_print(
+                    f"{doc_pfx} [WARN] Slot {slot_idx + 1}/{slot_total}: "
+                    "replacement question empty.",
+                    print_lock=print_lock,
+                )
+                break
+            current_question = repl_questions[0]
+            current_question_metadata = dict(
+                repl_results[0].get("generation_metadata", {})
+            )
+
+        if slot_pair is not None:
+            picked = _pick_question_validation_detail(
+                current_question_metadata,
+                slot_idx,
+                current_question,
+            )
+            if isinstance(picked, dict):
+                detail = dict(picked)
+                detail["question_index"] = slot_idx + 1
+                detail["final_question"] = current_question
+                if (
+                    reject_insufficient
+                    and _answer_is_insufficient(slot_pair.get("answer"))
+                ):
+                    detail["accepted"] = False
+                    detail["rejection_reason"] = (
+                        "insufficient_information_answer"
+                    )
+                slot_question_validation.append(detail)
+
+            if (
+                reject_insufficient
+                and _answer_is_insufficient(slot_pair.get("answer"))
+            ):
+                if ans_strict:
+                    _pipeline_print(
+                        f"{doc_pfx} [INFO] Slot {slot_idx + 1}/"
+                        f"{slot_total}: insufficient-information "
+                        "answer omitted (answerability_strict).",
+                        print_lock=print_lock,
+                    )
+                else:
+                    _pipeline_print(
+                        f"{doc_pfx} [INFO] Slot {slot_idx + 1}/"
+                        f"{slot_total}: insufficient-information "
+                        "answer rejected; kept in qa_pairs "
+                        "(for minimise-bad).",
+                        print_lock=print_lock,
+                    )
+                    final_pairs.append(slot_pair)
+            elif _pair_passes_grounding_gate(slot_pair, min_conf):
+                final_pairs.append(slot_pair)
+            elif ans_strict:
+                _pipeline_print(
+                    f"{doc_pfx} [INFO] Slot {slot_idx + 1}/{slot_total}: "
+                    "failed grounding gate; omitted from qa_pairs "
+                    "(answerability_strict).",
+                    print_lock=print_lock,
+                )
+            else:
+                _pipeline_print(
+                    f"{doc_pfx} [INFO] Slot {slot_idx + 1}/{slot_total}: "
+                    "failed grounding gate; kept in qa_pairs "
+                    "(for minimise-bad).",
+                    print_lock=print_lock,
+                )
+                final_pairs.append(slot_pair)
+
+    if not final_pairs:
+        _pipeline_print(
+            f"[WARN] No QA pairs produced for {doc_id}; "
+            "skipping document.\n",
+            print_lock=print_lock,
+        )
+        return DocumentProcessOutcome(kind="skipped_no_output")
+
+    trim_limit = len(slot_questions) if slot_strict else base_q_count
+    trimmed_pairs = list(final_pairs[:trim_limit])
+    if save_grounded_only:
+        qa_pairs_out, val_f = (
+            _filter_pairs_and_validation_by_grounding_gate(
+                trimmed_pairs,
+                slot_question_validation,
+                min_conf,
+            )
+        )
+        slot_question_validation = val_f
+        if not qa_pairs_out:
+            _pipeline_print(
+                f"[WARN] save_grounded_qa_pairs_only: no grounded "
+                f"pairs for {doc_id}; skipping save.\n",
+                print_lock=print_lock,
+            )
+            return DocumentProcessOutcome(kind="skipped_no_output")
+    else:
+        qa_pairs_out = trimmed_pairs
+        if not slot_strict:
+            while len(qa_pairs_out) < base_q_count:
+                qa_pairs_out.append(
+                    {
+                        "question": "(No question)",
+                        "answer": "(No answer)",
+                        "hallucination_check": None,
+                        "citation_spans": [],
+                        "citation_notes": [],
+                        "source_doc_id": str(doc_id),
+                        "source_title": str(
+                            document.get("title") or doc_id
+                        ),
+                    }
+                )
+
+    stem_mode = str(
+        run_cfg.get("output_analysis_stem") or "document_id"
+    ).strip().lower()
+    multi = documents_count > 1
+    if stem_mode in ("input_file", "input", "file", "filename"):
+        base = _safe_output_filename_stem(Path(input_path).stem)
+        if multi:
+            out_stem = f"{base}_{idx:04d}_analysis"
+        else:
+            out_stem = f"{base}_analysis"
+    else:
+        base = _safe_output_filename_stem(str(doc_id))
+        if multi:
+            out_stem = f"{base}_{idx:04d}_analysis"
+        else:
+            out_stem = f"{base}_analysis"
+
+    mm = last_answer_metadata
+    answer_gen_metadata = {
+        "model": mm.get("answer_model", mm.get("model")),
+        "provider": mm.get("answer_provider", mm.get("provider")),
+        "timestamp": mm.get("answer_timestamp", mm.get("timestamp")),
+        "timezone": mm.get(
+            "answer_timezone",
+            mm.get("timezone", "Asia/Singapore"),
+        ),
+        "num_answers": len(qa_pairs_out),
+    }
+
+    grading_summary = build_grading_summary_block(
+        {
+            "grading_method": halluc_method,
+            "judge_model": None,
+            "overall_grade": None,
+            "overall_confidence": None,
+        },
+        qa_pairs_out,
+        halluc_method,
+        aggregate_grounded_only=False,
+    )
+
+    question_metadata = dict(base_question_metadata)
+    question_metadata["num_questions"] = len(qa_pairs_out)
+    if slot_question_validation:
+        question_metadata["question_validation"] = (
+            slot_question_validation
+        )
+
+    if minimal_qa_output:
+        combined_result = {
+            "document": _minimal_document_for_output(
+                document, doc_id
+            ),
+            "qa_pairs": _minimal_qa_pairs_for_output(qa_pairs_out),
+            "dpo_pairs": dpo_pairs,
+        }
+    else:
+        combined_result = {
+            "document": _snapshot_document_for_output(
+                document, doc_id
+            ),
+            "qa_pairs": qa_pairs_out,
+            "dpo_pairs": dpo_pairs,
+            "question_generation": question_metadata,
+            "answer_generation": answer_gen_metadata,
+            "grading_summary": grading_summary,
+            "run_metrics": {
+                "timings_seconds": {
+                    "question_generation": round(total_qtime, 3),
+                    "answer_generation": round(total_atime, 3),
+                    "grading": round(total_gtime, 3),
+                },
+                "quality_counters": {
+                    "question_grounding_retries": q_grounding_retries,
+                    "answerability_precheck_failures": (
+                        answerability_precheck_failures
+                    ),
+                    "answer_grounding_retries": 0,
+                    "coverage_rewrites": 0,
+                },
+            },
+        }
+
+    provider = (
+        settings.get("provider")
+        or question_metadata.get("provider")
+        or config.get("llm", {}).get("provider", "openai")
+    )
+    model = (
+        settings.get("model")
+        or question_metadata.get("model")
+        or config.get("llm", {}).get("model", "gpt-4")
+    )
+
+    _pipeline_print(
+        f"{doc_pfx} [INFO] Saving results with provider: {provider}, "
+        f"model: {model}",
+        print_lock=print_lock,
+    )
+
+    combined_path = save_results(
+        combined_result,
+        provider=output_provider,
+        model=model,
+        output_type=out_stem,
+        use_timestamp=True,
+    )
+    _pipeline_print(
+        f"{doc_pfx} [OK] Saved combined analysis to: {combined_path}\n",
+        print_lock=print_lock,
+    )
+    return DocumentProcessOutcome(kind="processed")
+
+
 def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
     input_path = settings["input_file"]
     run_cfg = config.get("run") if isinstance(config.get("run"), dict) else {}
@@ -1322,6 +2346,32 @@ def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
     nd = settings["num_documents"]
     nd_disp = str(nd) if isinstance(nd, int) and nd > 0 else "all"
     print(f"Documents to run: {nd_disp}")
+    parallel_disp = _resolve_parallel_documents(settings, run_cfg)
+    print(f"Parallel docs   : {parallel_disp}")
+    prefilter_skips = _resolve_bool_setting(
+        settings, run_cfg, "prefilter_skips", default=True
+    )
+    quiet_skips = _resolve_bool_setting(
+        settings, run_cfg, "quiet_skips", default=False
+    )
+    start_at_document = _resolve_start_at_document(settings, run_cfg)
+    only_ids = _resolve_only_document_ids(settings, run_cfg)
+    skip_preflight = _resolve_bool_setting(
+        settings, run_cfg, "skip_preflight", default=False
+    )
+    if prefilter_skips:
+        print("Prefilter skips : yes (drop done/short docs before workers)")
+    if quiet_skips:
+        print("Quiet skips     : yes (summary only for prefiltered docs)")
+    if start_at_document > 1:
+        print(f"Start at doc    : {start_at_document}")
+    if only_ids:
+        print(
+            f"Only doc ids    : {len(only_ids)} "
+            "(reprocess; overwrite existing outputs)"
+        )
+    if skip_preflight:
+        print("Skip preflight  : yes")
     print(f"Run folder      : {run_ts}")
     if resume_opts["skip_existing"]:
         if skip_check_dir is not None:
@@ -1350,13 +2400,17 @@ def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
         allow_semantic_fallback = False
     if halluc_method in ("llm", "hybrid"):
         set_llm_config(config)
-    print("Generator preflight: checking LLM generator availability...")
-    _preflight_llm_generator(config)
-    print("[OK] Generator preflight passed.\n")
-    if halluc_method == "llm" and judge_required:
-        print("Judge preflight: checking LLM judge availability...")
-        _preflight_llm_judge(config)
-        print("[OK] Judge preflight passed.\n")
+    if skip_preflight:
+        print("[INFO] Skipping LLM preflight (run.skip_preflight / "
+              "--skip-preflight).\n")
+    else:
+        print("Generator preflight: checking LLM generator availability...")
+        _preflight_llm_generator(config)
+        print("[OK] Generator preflight passed.\n")
+        if halluc_method == "llm" and judge_required:
+            print("Judge preflight: checking LLM judge availability...")
+            _preflight_llm_judge(config)
+            print("[OK] Judge preflight passed.\n")
     print(f"Halluc. method : {halluc_method}")
     print()
 
@@ -1368,6 +2422,24 @@ def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
 
     if isinstance(nd, int) and nd > 0:
         documents = documents[:nd]
+
+    only_ids = _resolve_only_document_ids(settings, run_cfg)
+    reprocess_document_ids: Optional[Set[str]] = None
+    if only_ids:
+        before = len(documents)
+        documents = [
+            d for d in documents
+            if _document_filter_id(d) in only_ids
+        ]
+        reprocess_document_ids = only_ids
+        print(
+            f"[INFO] only_document_ids filter: {len(documents)}/{before} "
+            "documents matched (existing outputs will be overwritten).\n"
+        )
+        if not documents:
+            print("[WARN] No documents matched only_document_ids.\n")
+            return
+
     print(f"[OK] Loaded {len(documents)} documents\n")
 
     save_grounded_only = bool(
@@ -1386,6 +2458,18 @@ def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
             "[INFO] run.reject_insufficient_answers is true - "
             "slots whose final answer is 'Insufficient information in the "
             "document.' are omitted from qa_pairs.\n"
+        )
+    qval = (config.get("question_generation") or {}).get("validation") or {}
+    if qval.get("enable_answerability_check"):
+        print(
+            "[INFO] question_generation.validation.enable_answerability_check "
+            "is true - answerability pre-check runs before each answer.\n"
+        )
+    if qval.get("answerability_strict"):
+        print(
+            "[INFO] question_generation.validation.answerability_strict is "
+            "true - unanswerable or ungrounded slots are omitted from "
+            "qa_pairs (not kept as bad pairs).\n"
         )
 
     try:
@@ -1415,476 +2499,91 @@ def run_pipeline(config: Dict[str, Any], settings: Dict[str, Any]) -> None:
             "qa_pairs (question + answer per row only).\n"
         )
 
-    skipped_short = 0
-    skipped_existing = 0
+    parallel_n = _resolve_parallel_documents(settings, run_cfg)
     total_docs = len(documents)
-    for idx, document in enumerate(documents, 1):
-        doc_id = document.get("id", document.get("title", f"doc_{idx}"))
-
-        if resume_opts["skip_existing"] and skip_check_dir is not None:
-            out_stem = _expected_analysis_output_stem(
-                document,
-                idx,
-                total_docs,
-                run_cfg,
-                input_path,
-            )
-            if analysis_output_exists(skip_check_dir, out_stem):
-                skipped_existing += 1
-                existing = analysis_json_path(skip_check_dir, out_stem)
-                print("=" * 80)
-                print(
-                    f"Skipping Document {idx}/{total_docs}: {doc_id} "
-                    "(analysis already exists)"
-                )
-                print("=" * 80)
-                print(f"[INFO] Existing output: {existing}\n")
-                continue
-
-        skip_reason = _document_skip_reason_for_min_length(document, run_cfg)
-        if skip_reason:
-            skipped_short += 1
-            print("=" * 80)
-            print(f"Skipping Document {idx}/{len(documents)}: {doc_id}")
-            print("=" * 80)
-            print(f"[WARN] {skip_reason}\n")
-            continue
-
-        print("=" * 80)
-        print(f"Processing Document {idx}/{len(documents)}: {doc_id}")
-        print("=" * 80)
-        print()
-
-        print("DOCUMENT CONTENT:")
-        print("-" * 80)
-        print(_document_plain_text(document) or "(no extractable text)")
-        print()
-
-        qcfg = (config.get("question_generation") or {})
-        base_q_count = int(qcfg.get("num_questions", 3) or 3)
-        mt_cfg = (config.get("answer_generation") or {}).get("multi_turn", {})
-        max_q_rounds = int(mt_cfg.get("max_question_regeneration_rounds", 3))
-        min_conf = float(mt_cfg.get("min_confidence_threshold", 0.7) or 0.7)
-
-        total_qtime = 0.0
-        total_atime = 0.0
-        total_gtime = 0.0
-        final_pairs: List[Dict[str, Any]] = []
-        base_question_metadata: Dict[str, Any] = {}
-        last_answer_metadata: Dict[str, Any] = {}
-        slot_question_validation: List[Dict[str, Any]] = []
-
+    if parallel_n > 1:
         print(
-            f"Generating initial question set (target={base_q_count})..."
+            f"[INFO] parallel_documents={parallel_n} "
+            "(per-document orchestrator unchanged).\n"
         )
-        base_config = deepcopy(config)
-        base_qcfg = (
-            base_config.get("question_generation")
-            if isinstance(base_config.get("question_generation"), dict)
-            else {}
+    print_lock = threading.Lock() if parallel_n > 1 else None
+
+    work_items, pre_skipped_short, pre_skipped_existing, pre_before_start = (
+        _build_document_work_queue(
+            documents,
+            total_docs=total_docs,
+            run_cfg=run_cfg,
+            input_path=input_path,
+            resume_opts=resume_opts,
+            skip_check_dir=skip_check_dir,
+            prefilter_skips=prefilter_skips,
+            quiet_skips=quiet_skips,
+            start_at_document=start_at_document,
+            reprocess_document_ids=reprocess_document_ids,
         )
-        base_qcfg["num_questions"] = base_q_count
-        base_config["question_generation"] = base_qcfg
-
-        start_time = time.time()
-        base_question_results = generate_questions(
-            [document], config=base_config
-        )
-        qtime = time.time() - start_time
-        total_qtime += qtime
-        if not base_question_results:
-            print(
-                f"[WARN] No questions generated for {doc_id}; "
-                "skipping document.\n"
-            )
-            continue
-
-        base_question_result = base_question_results[0]
-        seed_questions = list(base_question_result.get("questions", []))
-        if not seed_questions:
-            print(
-                f"[WARN] Empty initial questions for {doc_id}; "
-                "skipping document.\n"
-            )
-            continue
-        base_question_metadata = dict(
-            base_question_result.get("generation_metadata", {})
-        )
-        comp_strict = _comprehensiveness_strict_enabled(config)
-        slot_questions = _slot_questions_for_pipeline(
-            seed_questions,
-            base_q_count,
-            comprehensiveness_strict=comp_strict,
-        )
-        if comp_strict and len(slot_questions) < base_q_count:
-            dropped = base_q_count - len(slot_questions)
-            print(
-                f"[INFO] Comprehensiveness strict: {dropped} question(s) "
-                "rejected; "
-                f"{len(slot_questions)} slot(s) will receive answers."
-            )
-        print(f"[OK] Questions ready in {qtime:.1f} seconds\n")
-
-        slot_total = len(slot_questions)
-        for slot_idx, current_question in enumerate(slot_questions):
-            slot_pair: Optional[Dict[str, Any]] = None
-            current_question_metadata = dict(base_question_metadata)
-
-            print(
-                f"[INFO] Slot {slot_idx + 1}/{slot_total}: "
-                "answer trials for current question."
-            )
-            for replace_idx in range(max_q_rounds + 1):
-                question_result = {
-                    **document,
-                    "questions": [current_question],
-                    "generation_metadata": current_question_metadata,
-                }
-
-                start_time = time.time()
-                qa_result = generate_answers(
-                    questions=[current_question],
-                    document=document,
-                    config=config,
-                )
-                atime = time.time() - start_time
-                total_atime += atime
-                last_answer_metadata = dict(
-                    qa_result.get("generation_metadata", {})
-                )
-
-                print(
-                    f"[OK] Slot {slot_idx + 1} answer ready in "
-                    f"{atime:.1f} seconds"
-                )
-
-                analysis_info = None
-                gtime = 0.0
-                if _slot_answer_validation_rejected(qa_result):
-                    analysis_info = _grading_from_answer_validation(
-                        qa_result,
-                        str(current_question or ""),
-                        halluc_method,
-                    )
-                try:
-                    if analysis_info is None:
-                        t_grade = time.time()
-                        # generate_answers() omits document body; grading
-                        # needs content/text for semantic + hybrid judges.
-                        grading_payload = {**document, **qa_result}
-                        graded_results = grade_qa_results(
-                            [grading_payload], method=halluc_method
-                        )
-                        if not graded_results:
-                            raise RuntimeError(
-                                "grade_qa_results returned no results"
-                            )
-                        analysis_info = graded_results[0]
-                        gtime = time.time() - t_grade
-                except Exception as exc:
-                    print(
-                        f"[WARN] Could not grade {doc_id} "
-                        f"({halluc_method}): {exc}"
-                    )
-                    if not allow_semantic_fallback:
-                        raise RuntimeError(
-                            "Grading failed and semantic fallback is disabled "
-                            f"(method={halluc_method}): {exc}"
-                        ) from exc
-                    if halluc_method in ("hybrid", "llm"):
-                        try:
-                            t_grade = time.time()
-                            grading_payload = {**document, **qa_result}
-                            graded_results = grade_qa_results(
-                                [grading_payload], method="keyword"
-                            )
-                            if graded_results:
-                                analysis_info = graded_results[0]
-                                gtime = time.time() - t_grade
-                        except Exception as exc2:
-                            print(
-                                "[WARN] Keyword fallback grading failed: "
-                                f"{exc2}"
-                            )
-                total_gtime += gtime
-
-                pair_list = build_qa_pairs(
-                    question_result,
-                    qa_result,
-                    analysis_info or {},
-                    document,
-                    idx,
-                )
-                _merge_pair_grading_from_checks(pair_list, analysis_info)
-                ev_for_alignment = ""
-                raw_ev_list = qa_result.get("supporting_evidence")
-                if isinstance(raw_ev_list, list) and raw_ev_list:
-                    ev_for_alignment = raw_ev_list[0]
-                if pair_list:
-                    slot_pair = pair_list[0]
-                    _apply_citation_alignment_to_pair(
-                        slot_pair,
-                        ev_for_alignment,
-                        halluc_cfg,
-                    )
-                    gw_mode = str(
-                        halluc_cfg.get(
-                            "grounding_explanation_when_no_citations",
-                            "off",
-                        )
-                        or "off"
-                    )
-                    apply_grounding_why_when_no_citations(
-                        slot_pair,
-                        _document_plain_text(document),
-                        str(current_question or ""),
-                        gw_mode,
-                    )
-                else:
-                    slot_pair = {
-                        "question": current_question,
-                        "answer": "(Answer generation failed)",
-                        "hallucination_check": None,
-                        "citation_spans": [],
-                        "citation_notes": [],
-                        "source_doc_id": str(doc_id),
-                        "source_title": str(document.get("title") or doc_id),
-                    }
-
-                if _pair_passes_grounding_gate(slot_pair, min_conf):
-                    print(
-                        f"[OK] Slot {slot_idx + 1}: passed grounding gate."
-                    )
-                    break
-
-                if replace_idx >= max_q_rounds:
-                    print(
-                        f"[WARN] Slot {slot_idx + 1}: max question "
-                        "replacements reached; slot omitted from qa_pairs "
-                        "if still ungrounded."
-                    )
-                    break
-
-                print(
-                    f"[INFO] Slot {slot_idx + 1}: failed gate; generating "
-                    "replacement question."
-                )
-                replace_config = deepcopy(config)
-                replace_qcfg = (
-                    replace_config.get("question_generation")
-                    if isinstance(
-                        replace_config.get("question_generation"), dict
-                    )
-                    else {}
-                )
-                replace_qcfg["num_questions"] = 1
-                replace_config["question_generation"] = replace_qcfg
-                t_q = time.time()
-                repl_results = generate_questions(
-                    [document], config=replace_config
-                )
-                qtime = time.time() - t_q
-                total_qtime += qtime
-                if not repl_results:
-                    print(
-                        f"[WARN] Slot {slot_idx + 1}: replacement question "
-                        "generation failed."
-                    )
-                    break
-                repl_questions = repl_results[0].get("questions", [])
-                if not repl_questions:
-                    print(
-                        f"[WARN] Slot {slot_idx + 1}: replacement question "
-                        "empty."
-                    )
-                    break
-                current_question = repl_questions[0]
-                current_question_metadata = dict(
-                    repl_results[0].get("generation_metadata", {})
-                )
-
-            if slot_pair is not None:
-                picked = _pick_question_validation_detail(
-                    current_question_metadata,
-                    slot_idx,
-                    current_question,
-                )
-                if isinstance(picked, dict):
-                    detail = dict(picked)
-                    detail["question_index"] = slot_idx + 1
-                    detail["final_question"] = current_question
-                    if (
-                        reject_insufficient
-                        and _answer_is_insufficient(slot_pair.get("answer"))
-                    ):
-                        detail["accepted"] = False
-                        detail["rejection_reason"] = (
-                            "insufficient_information_answer"
-                        )
-                    slot_question_validation.append(detail)
-
-                if (
-                    reject_insufficient
-                    and _answer_is_insufficient(slot_pair.get("answer"))
-                ):
-                    print(
-                        f"[INFO] Slot {slot_idx + 1}: "
-                        "insufficient-information answer rejected; "
-                        "kept in qa_pairs (will be tagged bad in "
-                        "minimise-bad)."
-                    )
-                    final_pairs.append(slot_pair)
-                elif _pair_passes_grounding_gate(slot_pair, min_conf):
-                    final_pairs.append(slot_pair)
-                else:
-                    print(
-                        f"[INFO] Slot {slot_idx + 1}: failed grounding "
-                        "gate; kept in qa_pairs (for minimise-bad)."
-                    )
-                    final_pairs.append(slot_pair)
-
-        if not final_pairs:
-            print(
-                f"[WARN] No QA pairs produced for {doc_id}; "
-                "skipping document.\n"
-            )
-            continue
-
-        trim_limit = len(slot_questions) if comp_strict else base_q_count
-        trimmed_pairs = list(final_pairs[:trim_limit])
-        if save_grounded_only:
-            qa_pairs_out, val_f = (
-                _filter_pairs_and_validation_by_grounding_gate(
-                    trimmed_pairs,
-                    slot_question_validation,
-                    min_conf,
-                )
-            )
-            slot_question_validation = val_f
-            if not qa_pairs_out:
-                print(
-                    f"[WARN] save_grounded_qa_pairs_only: no grounded "
-                    f"pairs for {doc_id}; skipping save.\n"
-                )
-                continue
-        else:
-            qa_pairs_out = trimmed_pairs
-            if not comp_strict:
-                while len(qa_pairs_out) < base_q_count:
-                    qa_pairs_out.append(
-                        {
-                            "question": "(No question)",
-                            "answer": "(No answer)",
-                            "hallucination_check": None,
-                            "citation_spans": [],
-                            "citation_notes": [],
-                            "source_doc_id": str(doc_id),
-                            "source_title": str(
-                                document.get("title") or doc_id
-                            ),
-                        }
-                    )
-
-        # Saved JSON name (no redundant doc_*doc* doubling from old scheme).
-        stem_mode = str(
-            run_cfg.get("output_analysis_stem") or "document_id"
-        ).strip().lower()
-        multi = len(documents) > 1
-        if stem_mode in ("input_file", "input", "file", "filename"):
-            base = _safe_output_filename_stem(Path(input_path).stem)
-            if multi:
-                out_stem = f"{base}_{idx:04d}_analysis"
-            else:
-                out_stem = f"{base}_analysis"
-        else:
-            base = _safe_output_filename_stem(str(doc_id))
-            if multi:
-                out_stem = f"{base}_{idx:04d}_analysis"
-            else:
-                out_stem = f"{base}_analysis"
-        # Metadata: answer_metadata or merged generation_metadata
-        mm = last_answer_metadata
-        answer_gen_metadata = {
-            "model": mm.get("answer_model", mm.get("model")),
-            "provider": mm.get("answer_provider", mm.get("provider")),
-            "timestamp": mm.get("answer_timestamp", mm.get("timestamp")),
-            "timezone": mm.get(
-                "answer_timezone",
-                mm.get("timezone", "Asia/Singapore"),
-            ),
-            "num_answers": len(qa_pairs_out),
-        }
-
-        grading_summary = build_grading_summary_block(
-            {
-                "grading_method": halluc_method,
-                "judge_model": None,
-                "overall_grade": None,
-                "overall_confidence": None,
-            },
-            qa_pairs_out,
-            halluc_method,
-            aggregate_grounded_only=False,
-        )
-
-        question_metadata = dict(base_question_metadata)
-        question_metadata["num_questions"] = len(qa_pairs_out)
-        if slot_question_validation:
-            question_metadata["question_validation"] = (
-                slot_question_validation
-            )
-
-        if minimal_qa_output:
-            combined_result = {
-                "document": _minimal_document_for_output(
-                    document, doc_id
-                ),
-                "qa_pairs": _minimal_qa_pairs_for_output(qa_pairs_out),
-            }
-        else:
-            combined_result = {
-                "document": _snapshot_document_for_output(
-                    document, doc_id
-                ),
-                "qa_pairs": qa_pairs_out,
-                "question_generation": question_metadata,
-                "answer_generation": answer_gen_metadata,
-                "grading_summary": grading_summary,
-                "run_metrics": {
-                    "timings_seconds": {
-                        "question_generation": round(total_qtime, 3),
-                        "answer_generation": round(total_atime, 3),
-                        "grading": round(total_gtime, 3),
-                    },
-                    "quality_counters": {},
-                },
-            }
-
-        # Provider/model: settings, then question metadata, then config
-        provider = (
-            settings.get("provider")
-            or question_metadata.get("provider")
-            or config.get("llm", {}).get("provider", "openai")
-        )
-        model = (
-            settings.get("model")
-            or question_metadata.get("model")
-            or config.get("llm", {}).get("model", "gpt-4")
-        )
-
+    )
+    if prefilter_skips and (
+        pre_skipped_short or pre_skipped_existing or pre_before_start
+    ):
         print(
-            f"[INFO] Saving results with provider: {provider}, "
-            f"model: {model}"
+            "[INFO] Prefilter: "
+            f"{len(work_items)} to process, "
+            f"{pre_skipped_existing} existing, "
+            f"{pre_skipped_short} too short, "
+            f"{pre_before_start} before start index.\n"
+        )
+    elif not work_items:
+        print("[WARN] No documents queued for processing.\n")
+
+    def _run_one(item: Tuple[int, Dict[str, Any]]) -> DocumentProcessOutcome:
+        idx, document = item
+        return _process_one_document(
+            idx=idx,
+            document=document,
+            total_docs=total_docs,
+            documents_count=total_docs,
+            config=config,
+            settings=settings,
+            run_cfg=run_cfg,
+            input_path=input_path,
+            halluc_method=halluc_method,
+            halluc_cfg=halluc_cfg,
+            allow_semantic_fallback=allow_semantic_fallback,
+            output_provider=output_provider,
+            output_model=output_model,
+            resume_opts=resume_opts,
+            skip_check_dir=skip_check_dir,
+            save_grounded_only=save_grounded_only,
+            reject_insufficient=reject_insufficient,
+            minimal_qa_output=minimal_qa_output,
+            reprocess_document_ids=reprocess_document_ids,
+            print_lock=print_lock,
         )
 
-        combined_path = save_results(
-            combined_result,
-            provider=output_provider,
-            model=model,
-            output_type=out_stem,
-            use_timestamp=True,
+    work_items_from_enum = work_items
+    outcomes: List[DocumentProcessOutcome] = []
+    if parallel_n <= 1:
+        for item in work_items_from_enum:
+            outcomes.append(_run_one(item))
+    else:
+        with ThreadPoolExecutor(max_workers=parallel_n) as pool:
+            futures = [
+                pool.submit(_run_one, item) for item in work_items_from_enum
+            ]
+            for fut in as_completed(futures):
+                outcomes.append(fut.result())
+
+    skipped_short = pre_skipped_short + sum(
+        1 for o in outcomes if o.kind == "skipped_short"
+    )
+    skipped_existing = pre_skipped_existing + sum(
+        1 for o in outcomes if o.kind == "skipped_existing"
+    )
+    if pre_before_start:
+        print(
+            f"[INFO] Skipped {pre_before_start} document(s) before "
+            f"start_at_document={start_at_document}."
         )
-        print(f"[OK] Saved combined analysis to: {combined_path}\n")
 
     print("=" * 80)
     if skipped_short:
@@ -1911,7 +2610,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Path to configuration YAML "
-            "(default: config/config.<profile>.yaml from QAGREDO_PROFILE; "
+            "(default: config/config.<profile>.yaml from QAG_PROFILE; "
             "defaults to ollama when unset)"
         ),
     )
@@ -1932,6 +2631,55 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Override run.num_documents (max records to process; "
             "0 = all loaded)."
+        ),
+    )
+    parser.add_argument(
+        "--parallel-documents",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Override run.parallel_documents (concurrent documents; "
+            "orchestrator unchanged per doc; default 1)."
+        ),
+    )
+    parser.add_argument(
+        "--skip-preflight",
+        action="store_true",
+        help=(
+            "Skip generator/judge preflight probes (faster restarts when "
+            "vLLM is already healthy)."
+        ),
+    )
+    parser.add_argument(
+        "--quiet-skips",
+        action="store_true",
+        help=(
+            "With prefilter_skips, log one summary instead of per-doc skip "
+            "lines."
+        ),
+    )
+    parser.add_argument(
+        "--no-prefilter-skips",
+        action="store_true",
+        help="Disable pre-filtering done/short docs before the worker pool.",
+    )
+    parser.add_argument(
+        "--start-at-document",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "1-based index: skip documents before N (after num_documents "
+            "slice)."
+        ),
+    )
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help=(
+            "Speed preset: --skip-preflight --quiet-skips and prefilter "
+            "skips (default on)."
         ),
     )
     parser.add_argument(
@@ -1966,6 +2714,15 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Run folder for --resume / skip checks: path, folder name under "
             "output/<provider>/<model>/, or 'latest' (default when omitted)."
+        ),
+    )
+    parser.add_argument(
+        "--only-document-ids-file",
+        default=None,
+        metavar="PATH",
+        help=(
+            "Process only document ids listed in PATH (one per line). "
+            "Existing *_analysis.json in the resume folder are overwritten."
         ),
     )
     return parser.parse_args()
@@ -2048,6 +2805,26 @@ def main() -> None:
         settings["skip_existing_outputs"] = True
     if args.resume_run_dir is not None and str(args.resume_run_dir).strip():
         settings["resume_run_dir"] = str(args.resume_run_dir).strip()
+    if args.parallel_documents is not None:
+        settings["parallel_documents"] = args.parallel_documents
+    if args.fast:
+        settings["skip_preflight"] = True
+        settings["quiet_skips"] = True
+        settings["prefilter_skips"] = True
+    if args.skip_preflight:
+        settings["skip_preflight"] = True
+    if args.quiet_skips:
+        settings["quiet_skips"] = True
+    if args.no_prefilter_skips:
+        settings["prefilter_skips"] = False
+    if args.start_at_document is not None:
+        settings["start_at_document"] = args.start_at_document
+    if args.only_document_ids_file is not None:
+        settings["only_document_ids_file"] = (
+            str(args.only_document_ids_file).strip()
+        )
+    if args.only_document_ids_file is not None:
+        settings["resume"] = True
     run_pipeline(effective_config, settings)
 
 
