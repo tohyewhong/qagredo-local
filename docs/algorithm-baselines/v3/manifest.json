@@ -3,7 +3,7 @@
   "label": "v3",
   "created": "2026-07-31T02:44:49Z",
   "summary": "ARCHITECTURE.md; LoRA SFT/DPO/fair eval; QAG rename; redserver docs; LangGraph unwired note",
-  "git_commit": "fa7016ffd2143fa4575d01bda5af7edcccdf7ffb",
+  "git_commit": "94043bb841752a83569071cc38db97596d87d976",
   "files": [
     {"path": "ALGORITHM_REPORT.md", "sha256": "1fc39e73e83f5bd5a1257111ac46b3d40be221684c40a9560c9ba59fcd7ea2d7"},
     {"path": "diagrams/architecture/diagrams/QAG_Pipeline_Flowchart.puml", "sha256": "1f77ac8f7fe76d2c6156554565793c31abfc72e621c2249f28b37fd134216d72"},
